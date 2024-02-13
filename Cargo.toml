@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
-members = [ "tokio-sample",
+members = [ "tokio-sample", "flatbuff"
 ]

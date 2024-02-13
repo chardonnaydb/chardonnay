@@ -1,0 +1,29 @@
+namespace RangeServer;
+
+table Key {
+  k:[ubyte];
+}
+table Record {
+    key:Key;
+    value:[ubyte];
+}
+
+table PrepareRecord {
+  transaction_id:string;
+  puts:[Record];
+  deletes:[Key];
+}
+
+table CommitRecord {
+    transaction_id:string;
+    epoch:int64;
+    vid:int64;
+}
+
+union LogEntry { Prepare:PrepareRecord, Commit:CommitRecord }
+
+table Log {
+  entry:LogEntry;
+}
+
+root_type Log;

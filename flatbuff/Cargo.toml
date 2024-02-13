@@ -1,0 +1,10 @@
+[package]
+name = "flatbuff"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+flatc-rust = "*"
+
+[dependencies]
+flatbuffers = "23.5.26"
