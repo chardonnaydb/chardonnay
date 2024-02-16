@@ -1,0 +1,54 @@
+use bytes::Bytes;
+
+struct KeyRange {
+    lower_bound_inclusive: Option<Bytes>,
+    upper_bound_exclusive: Option<Bytes>,
+}
+
+impl KeyRange {
+    fn includes(&self, key: Bytes) -> bool {
+        let within_lower = match &self.lower_bound_inclusive {
+            None => true,
+            Some(b) => key >= b,
+        };
+        let within_upper = match &self.upper_bound_exclusive {
+            None => true,
+            Some(b) => key < b,
+        };
+        within_lower && within_upper
+    }
+
+    fn all() -> KeyRange {
+        KeyRange {
+            lower_bound_inclusive: None,
+            upper_bound_exclusive: None,
+        }
+    }
+
+    fn empty() -> KeyRange {
+        KeyRange {
+            lower_bound_inclusive: Some(Bytes::new()),
+            upper_bound_exclusive: Some(Bytes::new()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn basic_test() {
+        let key = Bytes::from_static(b"A");
+        assert!(!KeyRange::empty().includes(key.clone()));
+        assert!(KeyRange::all().includes(key.clone()));
+        let real_range = KeyRange {
+            lower_bound_inclusive: Some(Bytes::from_static(b"C")),
+            upper_bound_exclusive: Some(Bytes::from_static(b"G")),
+        };
+        assert!(real_range.includes(Bytes::from_static(b"C")));
+        assert!(real_range.includes(Bytes::from_static(b"DD")));
+        assert!(!real_range.includes(Bytes::from_static(b"G")));
+        assert!(!real_range.includes(Bytes::from_static(b"Z")));
+    }
+}
