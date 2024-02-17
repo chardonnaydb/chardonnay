@@ -1,6 +1,6 @@
 use bytes::Bytes;
 
-struct KeyRange {
+pub struct KeyRange {
     lower_bound_inclusive: Option<Bytes>,
     upper_bound_exclusive: Option<Bytes>,
 }
