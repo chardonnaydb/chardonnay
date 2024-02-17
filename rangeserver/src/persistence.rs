@@ -16,6 +16,7 @@ pub struct RangeInfo {
 
 pub enum Error {
     Timeout,
+    RangeDoesNotExist,
     RangeOwnershipLost,
     Unknown,
 }

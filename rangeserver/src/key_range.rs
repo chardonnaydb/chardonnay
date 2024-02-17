@@ -1,8 +1,8 @@
 use bytes::Bytes;
 
 pub struct KeyRange {
-    lower_bound_inclusive: Option<Bytes>,
-    upper_bound_exclusive: Option<Bytes>,
+    pub lower_bound_inclusive: Option<Bytes>,
+    pub upper_bound_exclusive: Option<Bytes>,
 }
 
 impl KeyRange {

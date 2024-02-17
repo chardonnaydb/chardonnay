@@ -3,17 +3,13 @@ CREATE TYPE epoch_range (
   upper_bound_inclusive    bigint
 );
 
-CREATE TYPE key_range (
-    lower_bound_inclusive  blob,
-    upper_bound_exclusive  blob
-);
-
 CREATE TABLE range_leases (
-  range_id                  uuid,
-  key_range                 key_range,
-  leader_sequence_number    bigint,
-  epoch_lease               epoch_range,
-  safe_snapshot_epochs      epoch_range,
+  range_id                     uuid,
+  key_lower_bound_inclusive    blob,
+  key_upper_bound_exclusive    blob,
+  leader_sequence_number       bigint,
+  epoch_lease                  epoch_range,
+  safe_snapshot_epochs         epoch_range,
   PRIMARY KEY  (range_id)
 ) WITH COMPACTION = {
     'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
