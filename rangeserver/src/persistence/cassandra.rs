@@ -9,17 +9,6 @@ pub struct Cassandra {
     session: Session,
 }
 
-impl Cassandra {
-    async fn create_test() -> Cassandra {
-        let session = SessionBuilder::new()
-            .known_node("127.0.0.1:9042".to_string())
-            .build()
-            .await
-            .unwrap();
-        Cassandra { session }
-    }
-}
-
 #[derive(Debug, FromUserType)]
 struct CqlEpochRange {
     lower_bound_inclusive: i64,
@@ -65,8 +54,17 @@ static ACQUIRE_RANGE_LEASE_QUERY: &str = r#"
     IF leader_sequence_number = ? 
 "#;
 
-impl Persistence for Cassandra {
-    async fn take_ownership_and_load_range(&self, range_id: Uuid) -> Result<RangeInfo, Error> {
+impl Cassandra {
+    async fn create_test() -> Cassandra {
+        let session = SessionBuilder::new()
+            .known_node("127.0.0.1:9042".to_string())
+            .build()
+            .await
+            .unwrap();
+        Cassandra { session }
+    }
+
+    async fn get_range_lease(&self, range_id: Uuid) -> Result<CqlRangeLease, Error> {
         //TODO proper error handling instead of crashing.
         let rows = self
             .session
@@ -82,27 +80,46 @@ impl Persistence for Cassandra {
                     panic!("found multiple ranges with the same id!");
                 } else {
                     let row = rows.pop().unwrap().into_typed::<CqlRangeLease>().unwrap();
-                    let prev_leader_sequence_number = row.leader_sequence_number;
-                    let new_leader_sequence_number = prev_leader_sequence_number + 1;
-                    let done_or_err = self
-                        .session
-                        .query(
-                            ACQUIRE_RANGE_LEASE_QUERY,
-                            (prev_leader_sequence_number, new_leader_sequence_number),
-                        )
-                        .await;
-                    match done_or_err {
-                        Err(_) => Err(Error::RangeOwnershipLost),
-                        Ok(_) => Ok(RangeInfo {
-                            id: range_id,
-                            leader_sequence_number: new_leader_sequence_number as u64,
-                            epoch_lease: (
-                                row.epoch_lease.lower_bound_inclusive as u64,
-                                row.epoch_lease.upper_bound_inclusive as u64,
-                            ),
-                            key_range: row.key_range(),
-                        }),
-                    }
+                    Ok(row)
+                }
+            }
+        };
+        res
+    }
+}
+
+impl Persistence for Cassandra {
+    async fn take_ownership_and_load_range(&self, range_id: Uuid) -> Result<RangeInfo, Error> {
+        let cql_lease = self.get_range_lease(range_id).await?;
+
+        let prev_leader_sequence_number = cql_lease.leader_sequence_number;
+        let new_leader_sequence_number = prev_leader_sequence_number + 1;
+        let done_or_err = self
+            .session
+            .query(
+                ACQUIRE_RANGE_LEASE_QUERY,
+                (prev_leader_sequence_number, new_leader_sequence_number),
+            )
+            .await;
+        let res = match done_or_err {
+            // TODO: break down error handling here.
+            Err(_) => Err(Error::RangeOwnershipLost),
+            Ok(_) => {
+                // We must read the lease again after we've taken ownership to ensure we get its most up-to-date info.
+                // Otherwise, the previous owner could have updated the lease between looking it up and owning it.
+                let cql_lease = self.get_range_lease(range_id).await?;
+                if cql_lease.leader_sequence_number != new_leader_sequence_number {
+                    Err(Error::RangeOwnershipLost)
+                } else {
+                    Ok(RangeInfo {
+                        id: range_id,
+                        leader_sequence_number: new_leader_sequence_number as u64,
+                        epoch_lease: (
+                            cql_lease.epoch_lease.lower_bound_inclusive as u64,
+                            cql_lease.epoch_lease.upper_bound_inclusive as u64,
+                        ),
+                        key_range: cql_lease.key_range(),
+                    })
                 }
             }
         };
