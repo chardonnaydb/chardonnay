@@ -2,26 +2,27 @@ use super::*;
 use bytes::Bytes;
 use scylla::frame::response::cql_to_rust::FromCqlVal;
 use scylla::macros::FromUserType;
-use scylla::{FromRow, Session, SessionBuilder};
+use scylla::macros::IntoUserType;
+use scylla::{FromRow, Session, SessionBuilder, ValueList};
 use uuid::Uuid;
 
 pub struct Cassandra {
     session: Session,
 }
 
-#[derive(Debug, FromUserType)]
+#[derive(Debug, FromUserType, IntoUserType)]
 struct CqlEpochRange {
     lower_bound_inclusive: i64,
     upper_bound_inclusive: i64,
 }
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, FromRow, ValueList)]
 struct CqlRangeLease {
     range_id: Uuid,
-    leader_sequence_number: i64,
+    epoch_lease: CqlEpochRange,
     key_lower_bound_inclusive: Option<Vec<u8>>,
     key_upper_bound_exclusive: Option<Vec<u8>>,
-    epoch_lease: CqlEpochRange,
+    leader_sequence_number: i64,
     safe_snapshot_epochs: CqlEpochRange,
 }
 
@@ -79,7 +80,8 @@ impl Cassandra {
                 if rows.len() != 1 {
                     panic!("found multiple ranges with the same id!");
                 } else {
-                    let row = rows.pop().unwrap().into_typed::<CqlRangeLease>().unwrap();
+                    let row = rows.pop().unwrap();
+                    let row = row.into_typed::<CqlRangeLease>().unwrap();
                     Ok(row)
                 }
             }
@@ -98,7 +100,11 @@ impl Persistence for Cassandra {
             .session
             .query(
                 ACQUIRE_RANGE_LEASE_QUERY,
-                (prev_leader_sequence_number, new_leader_sequence_number),
+                (
+                    new_leader_sequence_number,
+                    cql_lease.range_id,
+                    prev_leader_sequence_number,
+                ),
             )
             .await;
         let res = match done_or_err {
@@ -166,5 +172,45 @@ impl Persistence for Cassandra {
 
     async fn get(&self, _range_id: Uuid, _key: Bytes) -> Result<Option<Bytes>, Error> {
         Err(Error::Unknown)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_RANGE_UUID: &str = "40fc4bf4-a79c-4740-ad29-a61bace5c251";
+
+    async fn init() -> Cassandra {
+        let cassandra = Cassandra::create_test().await;
+        let cql_range = CqlRangeLease {
+            range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),
+            leader_sequence_number: 0,
+            key_lower_bound_inclusive: None,
+            key_upper_bound_exclusive: None,
+            epoch_lease: CqlEpochRange {
+                lower_bound_inclusive: 0,
+                upper_bound_inclusive: 0,
+            },
+            safe_snapshot_epochs: CqlEpochRange {
+                lower_bound_inclusive: 1,
+                upper_bound_inclusive: 0,
+            },
+        };
+        cassandra
+            .session
+            .query("INSERT INTO chardonnay.range_leases (range_id, leader_sequence_number, epoch_lease, safe_snapshot_epochs) VALUES (?, ?, ?, ?) IF NOT EXISTS", (cql_range.range_id, cql_range.leader_sequence_number, cql_range.epoch_lease, cql_range.safe_snapshot_epochs))
+            .await
+            .unwrap();
+        cassandra
+    }
+
+    #[tokio::test]
+    async fn basic_take_range_ownership() {
+        let cassandra = init().await;
+        let _ = cassandra
+            .take_ownership_and_load_range(Uuid::parse_str(TEST_RANGE_UUID).unwrap())
+            .await
+            .unwrap();
     }
 }

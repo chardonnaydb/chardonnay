@@ -14,6 +14,7 @@ pub struct RangeInfo {
     epoch_lease: EpochLease,
 }
 
+#[derive(Debug)]
 pub enum Error {
     Timeout,
     RangeDoesNotExist,
