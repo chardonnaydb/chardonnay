@@ -11,7 +11,9 @@ CREATE TABLE range_leases (
   epoch_lease                  epoch_range,
   safe_snapshot_epochs         epoch_range,
   PRIMARY KEY  (range_id)
-);
+) WITH COMPACTION = {
+    'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
+  };
 
 CREATE TABLE versioned_records (
     range_id           uuid,
@@ -21,7 +23,10 @@ CREATE TABLE versioned_records (
     value              blob,
     is_tombstone       boolean,
     PRIMARY KEY  ((range_id), key, epoch, version_counter)
-) WITH CLUSTERING ORDER BY (key ASC, epoch DESC, version_counter DESC);
+) WITH CLUSTERING ORDER BY (key ASC, epoch DESC, version_counter DESC)
+  AND COMPACTION = {
+     'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
+};
 
 CREATE TABLE records (
     range_id           uuid,
@@ -30,4 +35,6 @@ CREATE TABLE records (
     epoch              bigint,
     version_counter    bigint,
     PRIMARY KEY  ((range_id), key)
-);
+) WITH COMPACTION = {
+    'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
+  };
