@@ -19,7 +19,7 @@ pub enum Error {
     Timeout,
     RangeDoesNotExist,
     RangeOwnershipLost,
-    Unknown,
+    InternalError(Box<dyn std::error::Error>),
 }
 
 pub trait Persistence {
