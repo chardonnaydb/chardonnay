@@ -19,11 +19,10 @@ CREATE TABLE versioned_records (
     range_id           uuid,
     key                blob,
     epoch              bigint,
-    version_counter    bigint,
     value              blob,
     is_tombstone       boolean,
-    PRIMARY KEY  ((range_id), key, epoch, version_counter)
-) WITH CLUSTERING ORDER BY (key ASC, epoch DESC, version_counter DESC)
+    PRIMARY KEY  ((range_id), key, epoch)
+) WITH CLUSTERING ORDER BY (key ASC, epoch DESC)
   AND COMPACTION = {
      'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
 };
@@ -33,7 +32,6 @@ CREATE TABLE records (
     key                blob,
     value              blob,
     epoch              bigint,
-    version_counter    bigint,
     PRIMARY KEY  ((range_id), key)
 ) WITH COMPACTION = {
     'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
