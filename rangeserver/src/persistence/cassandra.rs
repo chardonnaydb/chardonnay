@@ -28,6 +28,11 @@ struct CqlRangeLease {
     safe_snapshot_epochs: CqlEpochRange,
 }
 
+#[derive(Debug, FromRow)]
+struct CqlVal {
+    value: Option<Vec<u8>>,
+}
+
 impl CqlRangeLease {
     fn key_range(&self) -> KeyRange {
         let lower_bound_inclusive = match &self.key_lower_bound_inclusive {
@@ -61,6 +66,24 @@ static RENEW_EPOCH_LEASE_QUERY: &str = r#"
   UPDATE chardonnay.range_leases SET epoch_lease = ?
     WHERE range_id = ? 
     IF leader_sequence_number = ? 
+"#;
+
+static UPSERT_QUERY: &str = r#"
+  INSERT INTO chardonnay.records (range_id, key, value, epoch) 
+    VALUES (?, ?, ?, ?) 
+    USING TIMESTAMP ?
+"#;
+
+static DELETE_QUERY: &str = r#"
+  DELETE FROM chardonnay.records
+    USING TIMESTAMP ?
+    WHERE range_id = ?
+    AND key = ?
+"#;
+
+static GET_QUERY: &str = r#"
+  SELECT value from chardonnay.records
+  WHERE range_id = ? AND key = ?
 "#;
 
 fn scylla_query_error_to_persistence_error(qe: QueryError) -> Error {
@@ -180,25 +203,59 @@ impl Persistence for Cassandra {
 
     async fn upsert(
         &self,
-        _range_id: Uuid,
-        _key: Bytes,
-        _val: Bytes,
-        _version: KeyVersion,
+        range_id: Uuid,
+        key: Bytes,
+        val: Bytes,
+        version: KeyVersion,
     ) -> Result<(), Error> {
-        todo!();
+        let _ = self
+            .session
+            .query(
+                UPSERT_QUERY,
+                (
+                    range_id,
+                    key.to_vec(),
+                    val.to_vec(),
+                    version.epoch as i64,
+                    version.epoch as i64,
+                ),
+            )
+            .await
+            .map_err(scylla_query_error_to_persistence_error)?;
+        Ok(())
     }
 
-    async fn delete(
-        &self,
-        _range_id: Uuid,
-        _key: Bytes,
-        _version: KeyVersion,
-    ) -> Result<(), Error> {
-        todo!();
+    async fn delete(&self, range_id: Uuid, key: Bytes, version: KeyVersion) -> Result<(), Error> {
+        let _ = self
+            .session
+            .query(DELETE_QUERY, (version.epoch as i64, range_id, key.to_vec()))
+            .await
+            .map_err(scylla_query_error_to_persistence_error)?;
+        Ok(())
     }
 
-    async fn get(&self, _range_id: Uuid, _key: Bytes) -> Result<Option<Bytes>, Error> {
-        todo!();
+    async fn get(&self, range_id: Uuid, key: Bytes) -> Result<Option<Bytes>, Error> {
+        let rows = self
+            .session
+            .query(GET_QUERY, (range_id, key.to_vec()))
+            .await
+            .map_err(scylla_query_error_to_persistence_error)?
+            .rows;
+
+        match rows {
+            None => Ok(None),
+            Some(mut rows) => {
+                if rows.len() == 0 {
+                    Ok(None)
+                } else if rows.len() != 1 {
+                    panic!("found multiple rows with the same id!");
+                } else {
+                    let row = rows.pop().unwrap();
+                    let row = row.into_typed::<CqlVal>().unwrap();
+                    Ok(row.value.map(|v| Bytes::copy_from_slice(&v)))
+                }
+            }
+        }
     }
 }
 
@@ -254,5 +311,106 @@ mod tests {
             .renew_epoch_lease(range_info.id, (0, 1), range_info.leader_sequence_number)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn basic_crud() {
+        let cassandra = init().await;
+        let range_id = Uuid::parse_str(TEST_RANGE_UUID).unwrap();
+        let key = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+
+        assert!(cassandra
+            .get(range_id, key.clone())
+            .await
+            .unwrap()
+            .is_none());
+
+        let epoch2_val = Bytes::from_static(b"C");
+        cassandra
+            .upsert(
+                range_id,
+                key.clone(),
+                epoch2_val.clone(),
+                KeyVersion {
+                    epoch: 2,
+                    version_counter: 0,
+                },
+            )
+            .await
+            .unwrap();
+
+        let read_val = cassandra.get(range_id, key.clone()).await.unwrap().unwrap();
+        assert!(read_val == epoch2_val);
+
+        // a write with a lower epoch should be a no-op.
+        let epoch1_val = Bytes::from_static(b"A");
+        cassandra
+            .upsert(
+                range_id,
+                key.clone(),
+                epoch1_val.clone(),
+                KeyVersion {
+                    epoch: 1,
+                    version_counter: 0,
+                },
+            )
+            .await
+            .unwrap();
+
+        let read_val = cassandra.get(range_id, key.clone()).await.unwrap().unwrap();
+        assert!(read_val == epoch2_val);
+
+        // but a higher epoch should override existing value.
+        let epoch3_val = Bytes::from_static(b"D");
+        cassandra
+            .upsert(
+                range_id,
+                key.clone(),
+                epoch3_val.clone(),
+                KeyVersion {
+                    epoch: 3,
+                    version_counter: 0,
+                },
+            )
+            .await
+            .unwrap();
+
+        let read_val = cassandra.get(range_id, key.clone()).await.unwrap().unwrap();
+        assert!(read_val == epoch3_val);
+
+        // a delete with a lower epoch should be a no-op.
+        cassandra
+            .delete(
+                range_id,
+                key.clone(),
+                KeyVersion {
+                    epoch: 2,
+                    version_counter: 0,
+                },
+            )
+            .await
+            .unwrap();
+
+        let read_val = cassandra.get(range_id, key.clone()).await.unwrap().unwrap();
+        assert!(read_val == epoch3_val);
+
+        // but a higher epoch should work.
+        cassandra
+            .delete(
+                range_id,
+                key.clone(),
+                KeyVersion {
+                    epoch: 4,
+                    version_counter: 0,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(cassandra
+            .get(range_id, key.clone())
+            .await
+            .unwrap()
+            .is_none());
     }
 }

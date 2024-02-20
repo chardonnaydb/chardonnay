@@ -1,4 +1,4 @@
 pub struct KeyVersion {
-    epoch: u64,
-    version_counter: u64,
+    pub epoch: u64,
+    pub version_counter: u64,
 }
