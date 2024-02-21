@@ -3,6 +3,7 @@ namespace RangeServer;
 table Key {
   k:[ubyte];
 }
+
 table Record {
     key:Key;
     value:[ubyte];
