@@ -82,7 +82,7 @@ where
             // TODO: Create a recurrent task to renew.
             let highest_known_epoch = epoch + 1;
             let new_epoch_lease_lower_bound =
-                std::cmp::max(highest_known_epoch, range_info.epoch_lease.0 + 1);
+                std::cmp::max(highest_known_epoch, range_info.epoch_lease.1 + 1);
             let new_epoch_lease_upper_bound = new_epoch_lease_lower_bound + 10;
             self.persistence
                 .renew_epoch_lease(
