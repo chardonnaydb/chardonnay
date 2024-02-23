@@ -8,10 +8,10 @@ use uuid::Uuid;
 type EpochLease = (u64, u64);
 
 pub struct RangeInfo {
-    id: Uuid,
-    key_range: KeyRange,
-    leader_sequence_number: u64,
-    epoch_lease: EpochLease,
+    pub id: Uuid,
+    pub key_range: KeyRange,
+    pub leader_sequence_number: u64,
+    pub epoch_lease: EpochLease,
 }
 
 #[derive(Debug)]

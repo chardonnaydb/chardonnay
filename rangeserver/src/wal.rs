@@ -12,7 +12,7 @@ trait Iterator {
     async fn next_offset(&self) -> Result<u64, Error>;
 }
 
-trait Wal {
+pub trait Wal {
     type Entry;
 
     async fn first_offset(&self) -> Result<u64, Error>;
