@@ -690,6 +690,7 @@ name = "rangeserver"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "chrono",
  "flatbuff",
  "scylla",
  "tokio",

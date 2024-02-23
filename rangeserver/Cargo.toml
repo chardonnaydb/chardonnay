@@ -11,4 +11,5 @@ uuid = {version = "0.8", features = ["v4"]}
 scylla = "0.3.1"
 bytes = "1"
 flatbuff = {path = "../flatbuff"}
+chrono = "0.4.34"
 
