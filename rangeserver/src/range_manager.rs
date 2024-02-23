@@ -6,9 +6,11 @@ use chrono::DateTime;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+#[derive(Debug)]
 enum Error {
     Unknown,
     WaitDieAbort,
@@ -41,24 +43,31 @@ impl LockTable {
             waiting_to_acquire: VecDeque::new(),
         }
     }
-    pub async fn maybe_wait_for_current_holder(&mut self, tx: Arc<TransactionInfo>) {
+    pub fn maybe_wait_for_current_holder(
+        &mut self,
+        tx: Arc<TransactionInfo>,
+    ) -> oneshot::Receiver<()> {
+        let (s, r) = oneshot::channel();
         match &self.current_holder {
-            None => (),
+            None => s.send(()).unwrap(),
             Some(_) => {
-                let (s, r) = oneshot::channel();
                 let req = LockRequest {
                     transaction: tx.clone(),
                     sender: s,
                     when_requested: chrono::Local::now(),
                 };
                 self.waiting_for_release.push_back(req);
-                r.await.unwrap();
             }
-        }
+        };
+        r
     }
 
-    pub async fn acquire(&mut self, tx: Arc<TransactionInfo>) -> Result<(), Error> {
+    pub async fn acquire(
+        &mut self,
+        tx: Arc<TransactionInfo>,
+    ) -> Result<oneshot::Receiver<()>, Error> {
         let when_requested = chrono::Local::now();
+        let (s, r) = oneshot::channel();
         match &self.current_holder {
             None => {
                 let holder = CurrentLockHolder {
@@ -67,11 +76,13 @@ impl LockTable {
                     when_acquired: when_requested,
                 };
                 self.current_holder = Some(holder);
-                Ok(())
+                s.send(()).unwrap();
+                Ok(r)
             }
             Some(current_holder) => {
                 if current_holder.transaction.id == tx.id {
-                    Ok(())
+                    s.send(()).unwrap();
+                    Ok(r)
                 } else {
                     let highest_waiter = self
                         .waiting_to_acquire
@@ -81,15 +92,13 @@ impl LockTable {
                         // TODO: allow for skipping these checks if locks are ordered!
                         Err(Error::WaitDieAbort)
                     } else {
-                        let (s, r) = oneshot::channel();
                         let req = LockRequest {
                             transaction: tx.clone(),
                             sender: s,
                             when_requested: chrono::Local::now(),
                         };
                         self.waiting_to_acquire.push_back(req);
-                        r.await.unwrap();
-                        Ok(())
+                        Ok(r)
                     }
                 }
             }
@@ -121,7 +130,7 @@ impl LockTable {
 struct LoadedState {
     range_info: RangeInfo,
     highest_known_epoch: u64,
-    lock_table: LockTable,
+    lock_table: Mutex<LockTable>,
 }
 
 enum State {
@@ -206,7 +215,7 @@ where
             let loaded_state = LoadedState {
                 range_info,
                 highest_known_epoch,
-                lock_table: LockTable::new(),
+                lock_table: Mutex::new(LockTable::new()),
             };
             let mut state = self.state.write().await;
             *state = State::Loaded(loaded_state);
