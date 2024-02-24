@@ -4,7 +4,6 @@ use crate::{
 };
 use bytes::Bytes;
 use chrono::DateTime;
-use std::borrow::BorrowMut;
 use std::collections::VecDeque;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -20,17 +19,17 @@ enum Error {
     Unknown,
 }
 
-type LocalDateTime = DateTime<chrono::Local>;
+type UtcDateTime = DateTime<chrono::Utc>;
 struct CurrentLockHolder {
     transaction: Arc<TransactionInfo>,
-    when_acquired: LocalDateTime,
-    when_requested: LocalDateTime,
+    when_acquired: UtcDateTime,
+    when_requested: UtcDateTime,
 }
 
 struct LockRequest {
     transaction: Arc<TransactionInfo>,
     sender: oneshot::Sender<()>,
-    when_requested: LocalDateTime,
+    when_requested: UtcDateTime,
 }
 
 struct LockTable {
@@ -58,7 +57,7 @@ impl LockTable {
                 let req = LockRequest {
                     transaction: tx.clone(),
                     sender: s,
-                    when_requested: chrono::Local::now(),
+                    when_requested: chrono::Utc::now(),
                 };
                 self.waiting_for_release.push_back(req);
             }
@@ -67,7 +66,7 @@ impl LockTable {
     }
 
     pub fn acquire(&mut self, tx: Arc<TransactionInfo>) -> Result<oneshot::Receiver<()>, Error> {
-        let when_requested = chrono::Local::now();
+        let when_requested = chrono::Utc::now();
         let (s, r) = oneshot::channel();
         match &self.current_holder {
             None => {
@@ -96,7 +95,7 @@ impl LockTable {
                         let req = LockRequest {
                             transaction: tx.clone(),
                             sender: s,
-                            when_requested: chrono::Local::now(),
+                            when_requested: chrono::Utc::now(),
                         };
                         self.waiting_to_acquire.push_back(req);
                         Ok(r)
@@ -115,7 +114,7 @@ impl LockTable {
         match self.waiting_to_acquire.pop_front() {
             None => (),
             Some(req) => {
-                let when_acquired = chrono::Local::now();
+                let when_acquired = chrono::Utc::now();
                 let new_holder = CurrentLockHolder {
                     transaction: req.transaction.clone(),
                     when_requested: req.when_requested,
@@ -231,6 +230,7 @@ where
     ) -> Result<(), Error> {
         let mut lock_table = state.lock_table.lock().await;
         let receiver = lock_table.acquire(tx.clone())?;
+        // TODO: allow timing out locks when transaction timeouts are implemented.
         receiver.await.unwrap();
         Ok(())
     }
