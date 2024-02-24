@@ -169,6 +169,11 @@ where
         })
     }
 
+    async fn set_state(&mut self, state: State) {
+        let mut s = self.state.write().await;
+        *s = state;
+    }
+
     pub async fn load(&mut self) -> Result<(), Error> {
         let should_load = {
             let mut state = self.state.write().await;
@@ -184,12 +189,9 @@ where
         if !should_load {
             Ok(())
         } else {
-            // TODO: handle errors and restore state to Unloaded on failures, instead of panicing.
-            let range_info = self
                 .persistence
                 .take_ownership_and_load_range(self.range_id)
                 .await
-                .unwrap();
             let epoch = self.epoch_provider.read_epoch().await.unwrap();
             // Epoch read from the provider can be 1 less than the true epoch. The highest known epoch
             // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
@@ -218,8 +220,7 @@ where
                 highest_known_epoch,
                 lock_table: Mutex::new(LockTable::new()),
             };
-            let mut state = self.state.write().await;
-            *state = State::Loaded(loaded_state);
+            self.set_state(State::Loaded(loaded_state)).await;
             Ok(())
         }
     }
