@@ -32,6 +32,10 @@ struct LockRequest {
     when_requested: UtcDateTime,
 }
 
+// Implements transaction lock table for the range.
+// Currently there is just a single lock for the entire range despite having
+// "Table" in the name, but we might partition the lock to allow for more
+// concurrency down the line.
 struct LockTable {
     current_holder: Option<CurrentLockHolder>,
     waiting_for_release: VecDeque<LockRequest>,
