@@ -189,9 +189,18 @@ where
         if !should_load {
             Ok(())
         } else {
+            let range_info = match self
                 .persistence
                 .take_ownership_and_load_range(self.range_id)
                 .await
+            {
+                Ok(range_info) => range_info,
+                Err(e) => {
+                    println!("Failed to load range, error: {:?}", e);
+                    self.set_state(State::Unloaded).await;
+                    return Err(Error::RangeIsNotLoaded);
+                }
+            };
             let epoch = self.epoch_provider.read_epoch().await.unwrap();
             // Epoch read from the provider can be 1 less than the true epoch. The highest known epoch
             // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
