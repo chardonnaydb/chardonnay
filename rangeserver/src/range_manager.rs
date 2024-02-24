@@ -2,8 +2,11 @@ use crate::{
     epoch_provider::EpochProvider, persistence::Persistence, persistence::RangeInfo,
     transaction_info::TransactionInfo, wal::Wal,
 };
+use bytes::Bytes;
 use chrono::DateTime;
+use std::borrow::BorrowMut;
 use std::collections::VecDeque;
+use std::ops::Deref;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
@@ -12,8 +15,9 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 enum Error {
-    Unknown,
+    RangeIsNotLoaded,
     WaitDieAbort,
+    Unknown,
 }
 
 type LocalDateTime = DateTime<chrono::Local>;
@@ -62,10 +66,7 @@ impl LockTable {
         r
     }
 
-    pub async fn acquire(
-        &mut self,
-        tx: Arc<TransactionInfo>,
-    ) -> Result<oneshot::Receiver<()>, Error> {
+    pub fn acquire(&mut self, tx: Arc<TransactionInfo>) -> Result<oneshot::Receiver<()>, Error> {
         let when_requested = chrono::Local::now();
         let (s, r) = oneshot::channel();
         match &self.current_holder {
@@ -220,6 +221,33 @@ where
             let mut state = self.state.write().await;
             *state = State::Loaded(loaded_state);
             Ok(())
+        }
+    }
+
+    async fn acquire_range_lock(
+        &self,
+        state: &LoadedState,
+        tx: Arc<TransactionInfo>,
+    ) -> Result<(), Error> {
+        let mut lock_table = state.lock_table.lock().await;
+        let receiver = lock_table.acquire(tx.clone())?;
+        receiver.await.unwrap();
+        Ok(())
+    }
+
+    pub async fn get(&self, tx: Arc<TransactionInfo>, key: Bytes) -> Result<Option<Bytes>, Error> {
+        let s = self.state.write().await;
+        match s.deref() {
+            State::Unloaded | State::Loading => Err(Error::RangeIsNotLoaded),
+            State::Loaded(state) => {
+                self.acquire_range_lock(state, tx.clone()).await?;
+                let val = self
+                    .persistence
+                    .get(self.range_id, key.clone())
+                    .await
+                    .unwrap();
+                Ok(val.clone())
+            }
         }
     }
 }
