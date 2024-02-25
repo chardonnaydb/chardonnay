@@ -275,6 +275,8 @@ where
             State::Loaded(state) => {
                 let lock_table = state.lock_table.lock().await;
                 if !lock_table.is_currently_holding(tx.clone()) {
+                    // TODO: this is overly conservative and would lead to aborts in case of
+                    // blind writes (i.e. writes without first reading).
                     return Err(Error::TransactionLockLost);
                 }
                 self.wal.append_prepare(prepare).await.unwrap();
