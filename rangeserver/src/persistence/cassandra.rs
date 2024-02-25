@@ -260,11 +260,11 @@ impl Persistence for Cassandra {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use scylla::SessionBuilder;
 
-    const TEST_RANGE_UUID: &str = "40fc4bf4-a79c-4740-ad29-a61bace5c251";
+    pub const TEST_RANGE_UUID: &str = "40fc4bf4-a79c-4740-ad29-a61bace5c251";
     impl Cassandra {
         async fn create_test() -> Cassandra {
             let session = SessionBuilder::new()
@@ -276,7 +276,7 @@ mod tests {
         }
     }
 
-    async fn init() -> Cassandra {
+    pub async fn init() -> Cassandra {
         let cassandra = Cassandra::create_test().await;
         let cql_range = CqlRangeLease {
             range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),

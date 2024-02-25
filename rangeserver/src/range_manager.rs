@@ -181,7 +181,7 @@ where
         })
     }
 
-    pub async fn load(&mut self) -> Result<(), Error> {
+    pub async fn load(&self) -> Result<(), Error> {
         let should_load = {
             let mut state = self.state.write().await;
             match *state {
@@ -197,12 +197,12 @@ where
             Ok(())
         } else {
             // TODO: handle errors and restore state to Unloaded on failures, instead of panicing.
+            let epoch = self.epoch_provider.read_epoch().await.unwrap();
             let range_info = self
                 .persistence
                 .take_ownership_and_load_range(self.range_id)
                 .await
                 .unwrap();
-            let epoch = self.epoch_provider.read_epoch().await.unwrap();
             // Epoch read from the provider can be 1 less than the true epoch. The highest known epoch
             // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
             // we just wait for the epoch to advance once.
@@ -384,5 +384,42 @@ where
                 Ok(())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::for_testing::epoch_provider::EpochProvider;
+    use crate::for_testing::in_memory_wal::InMemoryWal;
+    use crate::persistence::cassandra::tests::TEST_RANGE_UUID;
+    use crate::persistence::cassandra::Cassandra;
+
+    type RM<'a> = RangeManager<Cassandra, EpochProvider, InMemoryWal<'a>>;
+
+    async fn init<'a>() -> Arc<RM<'a>> {
+        let epoch_provider = Arc::new(EpochProvider::new());
+        let wal = InMemoryWal::new();
+        let cassandra = Arc::new(crate::persistence::cassandra::tests::init().await);
+        let range_id = Uuid::parse_str(TEST_RANGE_UUID).unwrap();
+        Arc::new(RM {
+            range_id,
+            persistence: cassandra,
+            wal: wal,
+            epoch_provider,
+            state: RwLock::new(State::Unloaded),
+        })
+    }
+
+    #[tokio::test]
+    async fn basic_load() {
+        let rm = init().await;
+        let rm_copy = rm.clone();
+        let init_handle = tokio::spawn(async move { rm_copy.load().await.unwrap() });
+        let epoch_provider = rm.epoch_provider.clone();
+        // Give some delay so the RM can see the epoch advancing.
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        epoch_provider.set_epoch(1).await;
+        init_handle.await.unwrap();
     }
 }

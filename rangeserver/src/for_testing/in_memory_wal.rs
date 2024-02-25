@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use flatbuffers::FlatBufferBuilder;
 
-struct InMemoryWal<'a> {
+pub struct InMemoryWal<'a> {
     first_offset: u64,
     entries: VecDeque<Vec<u8>>,
     flatbuf_builder: FlatBufferBuilder<'a>,
@@ -37,6 +37,14 @@ impl<'a> Iterator<'a> for InMemIterator<'a> {
 }
 
 impl<'a> InMemoryWal<'a> {
+    pub fn new() -> Self {
+        InMemoryWal {
+            first_offset: 0,
+            entries: VecDeque::new(),
+            flatbuf_builder: FlatBufferBuilder::new(),
+        }
+    }
+
     fn append_data_currently_in_builder(&mut self) -> Result<(), Error> {
         let bytes = self.flatbuf_builder.finished_data();
         let buf = Vec::from(bytes);

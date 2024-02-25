@@ -1,6 +1,7 @@
 use crate::epoch_provider::EpochProvider as Trait;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::sync::RwLock;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 
@@ -29,20 +30,31 @@ impl PartialOrd for EpochWaiter {
     }
 }
 
-pub struct EpochProvider {
+struct State {
     epoch: u64,
-    waiters: Mutex<BinaryHeap<EpochWaiter>>,
+    waiters: BinaryHeap<EpochWaiter>,
+}
+pub struct EpochProvider {
+    state: RwLock<State>,
 }
 
 impl EpochProvider {
-    pub async fn set_epoch(&mut self, epoch: u64) {
-        self.epoch = epoch;
-        let mut waiters = self.waiters.lock().await;
-        while let Some(w) = waiters.peek() {
+    pub fn new() -> EpochProvider {
+        EpochProvider {
+            state: RwLock::new(State {
+                epoch: 0,
+                waiters: BinaryHeap::new(),
+            }),
+        }
+    }
+    pub async fn set_epoch(&self, epoch: u64) {
+        let mut state = self.state.write().unwrap();
+        state.epoch = epoch;
+        while let Some(w) = state.waiters.peek() {
             if w.epoch > epoch {
                 break;
             }
-            let w = waiters.pop().unwrap();
+            let w = state.waiters.pop().unwrap();
             w.sender.send(()).unwrap();
         }
     }
@@ -50,16 +62,20 @@ impl EpochProvider {
 
 impl Trait for EpochProvider {
     async fn read_epoch(&self) -> Result<u64, crate::epoch_provider::Error> {
-        Ok(self.epoch)
+        let state = self.state.read().unwrap();
+        Ok(state.epoch)
     }
 
     async fn wait_until_epoch(&self, epoch: u64) -> Result<(), crate::epoch_provider::Error> {
-        if self.epoch >= epoch {
-            return Ok(());
-        };
         let (s, r) = oneshot::channel();
-        let mut waiters = self.waiters.lock().await;
-        waiters.push(EpochWaiter { epoch, sender: s });
+        {
+            let mut state = self.state.write().unwrap();
+            if state.epoch >= epoch {
+                return Ok(());
+            };
+
+            state.waiters.push(EpochWaiter { epoch, sender: s });
+        }
         r.await.unwrap();
         Ok(())
     }
