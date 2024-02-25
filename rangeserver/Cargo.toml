@@ -10,7 +10,7 @@ tokio = { version = "1", features = ["full"] }
 uuid = {version = "0.8", features = ["v4"]}
 scylla = "0.3.1"
 bytes = "1"
-flatbuff = {path = "../flatbuff"}
+flatbuf = {path = "../flatbuf"}
 chrono = "0.4.34"
 flatbuffers = "*"
 

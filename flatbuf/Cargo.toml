@@ -1,5 +1,5 @@
 [package]
-name = "flatbuff"
+name = "flatbuf"
 version = "0.1.0"
 edition = "2021"
 

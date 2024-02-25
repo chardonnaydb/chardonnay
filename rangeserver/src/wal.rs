@@ -1,44 +1,47 @@
 use std::collections::VecDeque;
 
-use flatbuff::rangeserver_flatbuffers::range_server::*;
+use flatbuf::rangeserver_flatbuffers::range_server::*;
+use flatbuffers::FlatBufferBuilder;
 
-enum Error {
+#[derive(Debug)]
+pub enum Error {
     Unknown,
 }
 
-trait Iterator {
-    type Entry;
-    async fn next(&mut self) -> Option<&Self::Entry>;
+pub trait Iterator<'a> {
+    async fn next<'b>(&'b mut self) -> Option<&LogEntry<'b>>;
     async fn next_offset(&self) -> Result<u64, Error>;
 }
 
 pub trait Wal {
     async fn first_offset(&self) -> Result<u64, Error>;
     async fn next_offset(&self) -> Result<u64, Error>;
-    async fn append(&mut self, entry: LogEntry<'_>) -> Result<(), Error>;
+    async fn append_prepare(&mut self, entry: PrepareRecord<'_>) -> Result<(), Error>;
+    async fn append_commit(&mut self, entry: CommitRecord<'_>) -> Result<(), Error>;
+    async fn append_abort(&mut self, entry: AbortRecord<'_>) -> Result<(), Error>;
     async fn trim_before_offset(&mut self, offset: u64) -> Result<(), Error>;
-    fn iterator(&self) -> impl Iterator;
+    fn iterator<'a>(&'a self) -> impl Iterator;
 }
 
-struct InMemoryWal {
+struct InMemoryWal<'a> {
     first_offset: u64,
     entries: VecDeque<Vec<u8>>,
+    flatbuf_builder: FlatBufferBuilder<'a>,
 }
 
 struct InMemIterator<'a> {
     index: u64,
-    wal: &'a InMemoryWal,
+    wal: &'a InMemoryWal<'a>,
     current_entry: Option<LogEntry<'a>>,
 }
 
-impl<'a> Iterator for InMemIterator<'a> {
-    type Entry = LogEntry<'a>;
+impl<'a> Iterator<'a> for InMemIterator<'a> {
     async fn next_offset(&self) -> Result<u64, Error> {
         let offset = self.wal.first_offset + self.index;
         Ok(offset)
     }
 
-    async fn next(&mut self) -> Option<&Self::Entry> {
+    async fn next<'b>(&'b mut self) -> Option<&LogEntry<'b>> {
         let ind = (self.wal.first_offset + self.index) as usize;
         if ind >= self.wal.entries.len() {
             return None;
@@ -51,7 +54,16 @@ impl<'a> Iterator for InMemIterator<'a> {
     }
 }
 
-impl Wal for InMemoryWal {
+impl<'a> InMemoryWal<'a> {
+    fn append_data_currently_in_builder(&mut self) -> Result<(), Error> {
+        let bytes = self.flatbuf_builder.finished_data();
+        let buf = Vec::from(bytes);
+        self.entries.push_back(buf);
+        Ok(())
+    }
+}
+
+impl<'a> Wal for InMemoryWal<'a> {
     async fn first_offset(&self) -> Result<u64, Error> {
         Ok(self.first_offset)
     }
@@ -59,12 +71,6 @@ impl Wal for InMemoryWal {
     async fn next_offset(&self) -> Result<u64, Error> {
         let len_u64 = self.entries.len() as u64;
         Ok(self.first_offset + len_u64)
-    }
-
-    async fn append(&mut self, entry: LogEntry<'_>) -> Result<(), Error> {
-        let buf = Vec::from(entry._tab.buf());
-        self.entries.push_back(buf);
-        Ok(())
     }
 
     async fn trim_before_offset(&mut self, offset: u64) -> Result<(), Error> {
@@ -75,7 +81,43 @@ impl Wal for InMemoryWal {
         Ok(())
     }
 
-    fn iterator<'a>(&'a self) -> InMemIterator<'a> {
+    async fn append_prepare(&mut self, entry: PrepareRecord<'_>) -> Result<(), Error> {
+        let prepare_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
+        LogEntry::create(
+            &mut self.flatbuf_builder,
+            &LogEntryArgs {
+                entry: Entry::Prepare,
+                bytes: Some(prepare_bytes),
+            },
+        );
+        self.append_data_currently_in_builder()
+    }
+
+    async fn append_commit(&mut self, entry: CommitRecord<'_>) -> Result<(), Error> {
+        let commit_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
+        LogEntry::create(
+            &mut self.flatbuf_builder,
+            &LogEntryArgs {
+                entry: Entry::Commit,
+                bytes: Some(commit_bytes),
+            },
+        );
+        self.append_data_currently_in_builder()
+    }
+
+    async fn append_abort(&mut self, entry: AbortRecord<'_>) -> Result<(), Error> {
+        let abort_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
+        LogEntry::create(
+            &mut self.flatbuf_builder,
+            &LogEntryArgs {
+                entry: Entry::Commit,
+                bytes: Some(abort_bytes),
+            },
+        );
+        self.append_data_currently_in_builder()
+    }
+
+    fn iterator<'b>(&'b self) -> InMemIterator<'b> {
         InMemIterator {
             index: 0,
             wal: self,

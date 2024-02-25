@@ -19,43 +19,39 @@ pub mod range_server {
   use self::flatbuffers::{EndianScalar, Follow};
 
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MIN_ENTRY: u8 = 0;
+pub const ENUM_MIN_ENTRY: i8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_ENTRY: u8 = 3;
+pub const ENUM_MAX_ENTRY: i8 = 2;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_ENTRY: [Entry; 4] = [
-  Entry::NONE,
-  Entry::PrepareRecord,
-  Entry::CommitRecord,
-  Entry::AbortRecord,
+pub const ENUM_VALUES_ENTRY: [Entry; 3] = [
+  Entry::Prepare,
+  Entry::Commit,
+  Entry::Abort,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[repr(transparent)]
-pub struct Entry(pub u8);
+pub struct Entry(pub i8);
 #[allow(non_upper_case_globals)]
 impl Entry {
-  pub const NONE: Self = Self(0);
-  pub const PrepareRecord: Self = Self(1);
-  pub const CommitRecord: Self = Self(2);
-  pub const AbortRecord: Self = Self(3);
+  pub const Prepare: Self = Self(0);
+  pub const Commit: Self = Self(1);
+  pub const Abort: Self = Self(2);
 
-  pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 3;
+  pub const ENUM_MIN: i8 = 0;
+  pub const ENUM_MAX: i8 = 2;
   pub const ENUM_VALUES: &'static [Self] = &[
-    Self::NONE,
-    Self::PrepareRecord,
-    Self::CommitRecord,
-    Self::AbortRecord,
+    Self::Prepare,
+    Self::Commit,
+    Self::Abort,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
     match self {
-      Self::NONE => Some("NONE"),
-      Self::PrepareRecord => Some("PrepareRecord"),
-      Self::CommitRecord => Some("CommitRecord"),
-      Self::AbortRecord => Some("AbortRecord"),
+      Self::Prepare => Some("Prepare"),
+      Self::Commit => Some("Commit"),
+      Self::Abort => Some("Abort"),
       _ => None,
     }
   }
@@ -73,7 +69,7 @@ impl<'a> flatbuffers::Follow<'a> for Entry {
   type Inner = Self;
   #[inline]
   unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    let b = flatbuffers::read_scalar_at::<u8>(buf, loc);
+    let b = flatbuffers::read_scalar_at::<i8>(buf, loc);
     Self(b)
   }
 }
@@ -82,20 +78,20 @@ impl flatbuffers::Push for Entry {
     type Output = Entry;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        flatbuffers::emplace_scalar::<u8>(dst, self.0);
+        flatbuffers::emplace_scalar::<i8>(dst, self.0);
     }
 }
 
 impl flatbuffers::EndianScalar for Entry {
-  type Scalar = u8;
+  type Scalar = i8;
   #[inline]
-  fn to_little_endian(self) -> u8 {
+  fn to_little_endian(self) -> i8 {
     self.0.to_le()
   }
   #[inline]
   #[allow(clippy::wrong_self_convention)]
-  fn from_little_endian(v: u8) -> Self {
-    let b = u8::from_le(v);
+  fn from_little_endian(v: i8) -> Self {
+    let b = i8::from_le(v);
     Self(b)
   }
 }
@@ -106,13 +102,11 @@ impl<'a> flatbuffers::Verifiable for Entry {
     v: &mut flatbuffers::Verifier, pos: usize
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
-    u8::run_verifier(v, pos)
+    i8::run_verifier(v, pos)
   }
 }
 
 impl flatbuffers::SimpleToVerifyInSlice for Entry {}
-pub struct EntryUnionTableOffset {}
-
 pub enum KeyOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -699,8 +693,8 @@ impl<'a> flatbuffers::Follow<'a> for LogEntry<'a> {
 }
 
 impl<'a> LogEntry<'a> {
-  pub const VT_ENTRY_TYPE: flatbuffers::VOffsetT = 4;
-  pub const VT_ENTRY: flatbuffers::VOffsetT = 6;
+  pub const VT_ENTRY: flatbuffers::VOffsetT = 4;
+  pub const VT_BYTES: flatbuffers::VOffsetT = 6;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -709,74 +703,29 @@ impl<'a> LogEntry<'a> {
   #[allow(unused_mut)]
   pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
     _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
-    args: &'args LogEntryArgs
+    args: &'args LogEntryArgs<'args>
   ) -> flatbuffers::WIPOffset<LogEntry<'bldr>> {
     let mut builder = LogEntryBuilder::new(_fbb);
-    if let Some(x) = args.entry { builder.add_entry(x); }
-    builder.add_entry_type(args.entry_type);
+    if let Some(x) = args.bytes { builder.add_bytes(x); }
+    builder.add_entry(args.entry);
     builder.finish()
   }
 
 
   #[inline]
-  pub fn entry_type(&self) -> Entry {
+  pub fn entry(&self) -> Entry {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<Entry>(LogEntry::VT_ENTRY_TYPE, Some(Entry::NONE)).unwrap()}
+    unsafe { self._tab.get::<Entry>(LogEntry::VT_ENTRY, Some(Entry::Prepare)).unwrap()}
   }
   #[inline]
-  pub fn entry(&self) -> Option<flatbuffers::Table<'a>> {
+  pub fn bytes(&self) -> Option<flatbuffers::Vector<'a, u8>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Table<'a>>>(LogEntry::VT_ENTRY, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u8>>>(LogEntry::VT_BYTES, None)}
   }
-  #[inline]
-  #[allow(non_snake_case)]
-  pub fn entry_as_prepare_record(&self) -> Option<PrepareRecord<'a>> {
-    if self.entry_type() == Entry::PrepareRecord {
-      self.entry().map(|t| {
-       // Safety:
-       // Created from a valid Table for this object
-       // Which contains a valid union in this slot
-       unsafe { PrepareRecord::init_from_table(t) }
-     })
-    } else {
-      None
-    }
-  }
-
-  #[inline]
-  #[allow(non_snake_case)]
-  pub fn entry_as_commit_record(&self) -> Option<CommitRecord<'a>> {
-    if self.entry_type() == Entry::CommitRecord {
-      self.entry().map(|t| {
-       // Safety:
-       // Created from a valid Table for this object
-       // Which contains a valid union in this slot
-       unsafe { CommitRecord::init_from_table(t) }
-     })
-    } else {
-      None
-    }
-  }
-
-  #[inline]
-  #[allow(non_snake_case)]
-  pub fn entry_as_abort_record(&self) -> Option<AbortRecord<'a>> {
-    if self.entry_type() == Entry::AbortRecord {
-      self.entry().map(|t| {
-       // Safety:
-       // Created from a valid Table for this object
-       // Which contains a valid union in this slot
-       unsafe { AbortRecord::init_from_table(t) }
-     })
-    } else {
-      None
-    }
-  }
-
 }
 
 impl flatbuffers::Verifiable for LogEntry<'_> {
@@ -786,28 +735,22 @@ impl flatbuffers::Verifiable for LogEntry<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_union::<Entry, _>("entry_type", Self::VT_ENTRY_TYPE, "entry", Self::VT_ENTRY, false, |key, v, pos| {
-        match key {
-          Entry::PrepareRecord => v.verify_union_variant::<flatbuffers::ForwardsUOffset<PrepareRecord>>("Entry::PrepareRecord", pos),
-          Entry::CommitRecord => v.verify_union_variant::<flatbuffers::ForwardsUOffset<CommitRecord>>("Entry::CommitRecord", pos),
-          Entry::AbortRecord => v.verify_union_variant::<flatbuffers::ForwardsUOffset<AbortRecord>>("Entry::AbortRecord", pos),
-          _ => Ok(()),
-        }
-     })?
+     .visit_field::<Entry>("entry", Self::VT_ENTRY, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>("bytes", Self::VT_BYTES, false)?
      .finish();
     Ok(())
   }
 }
-pub struct LogEntryArgs {
-    pub entry_type: Entry,
-    pub entry: Option<flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>>,
+pub struct LogEntryArgs<'a> {
+    pub entry: Entry,
+    pub bytes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
 }
-impl<'a> Default for LogEntryArgs {
+impl<'a> Default for LogEntryArgs<'a> {
   #[inline]
   fn default() -> Self {
     LogEntryArgs {
-      entry_type: Entry::NONE,
-      entry: None,
+      entry: Entry::Prepare,
+      bytes: None,
     }
   }
 }
@@ -818,12 +761,12 @@ pub struct LogEntryBuilder<'a: 'b, 'b> {
 }
 impl<'a: 'b, 'b> LogEntryBuilder<'a, 'b> {
   #[inline]
-  pub fn add_entry_type(&mut self, entry_type: Entry) {
-    self.fbb_.push_slot::<Entry>(LogEntry::VT_ENTRY_TYPE, entry_type, Entry::NONE);
+  pub fn add_entry(&mut self, entry: Entry) {
+    self.fbb_.push_slot::<Entry>(LogEntry::VT_ENTRY, entry, Entry::Prepare);
   }
   #[inline]
-  pub fn add_entry(&mut self, entry: flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(LogEntry::VT_ENTRY, entry);
+  pub fn add_bytes(&mut self, bytes: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u8>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(LogEntry::VT_BYTES, bytes);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> LogEntryBuilder<'a, 'b> {
@@ -843,34 +786,8 @@ impl<'a: 'b, 'b> LogEntryBuilder<'a, 'b> {
 impl core::fmt::Debug for LogEntry<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("LogEntry");
-      ds.field("entry_type", &self.entry_type());
-      match self.entry_type() {
-        Entry::PrepareRecord => {
-          if let Some(x) = self.entry_as_prepare_record() {
-            ds.field("entry", &x)
-          } else {
-            ds.field("entry", &"InvalidFlatbuffer: Union discriminant does not match value.")
-          }
-        },
-        Entry::CommitRecord => {
-          if let Some(x) = self.entry_as_commit_record() {
-            ds.field("entry", &x)
-          } else {
-            ds.field("entry", &"InvalidFlatbuffer: Union discriminant does not match value.")
-          }
-        },
-        Entry::AbortRecord => {
-          if let Some(x) = self.entry_as_abort_record() {
-            ds.field("entry", &x)
-          } else {
-            ds.field("entry", &"InvalidFlatbuffer: Union discriminant does not match value.")
-          }
-        },
-        _ => {
-          let x: Option<()> = None;
-          ds.field("entry", &x)
-        },
-      };
+      ds.field("entry", &self.entry());
+      ds.field("bytes", &self.bytes());
       ds.finish()
   }
 }

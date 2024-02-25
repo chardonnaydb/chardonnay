@@ -25,10 +25,11 @@ table AbortRecord {
     transaction_id:string;
 }
 
-union Entry { PrepareRecord, CommitRecord, AbortRecord }
+enum Entry:byte { Prepare = 0, Commit, Abort = 2 }
 
 table LogEntry {
   entry:Entry;
+  bytes:[ubyte];
 }
 
 root_type LogEntry;

@@ -1,9 +1,10 @@
 use crate::{
-    epoch_provider::EpochProvider, persistence::Persistence, persistence::RangeInfo,
-    transaction_info::TransactionInfo, wal::Wal,
+    epoch_provider::EpochProvider, key_version::KeyVersion, persistence::Persistence,
+    persistence::RangeInfo, transaction_info::TransactionInfo, wal::Iterator, wal::Wal,
 };
 use bytes::Bytes;
 use chrono::DateTime;
+use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use uuid::Uuid;
 enum Error {
     RangeIsNotLoaded,
     WaitDieAbort,
+    TransactionLockLost,
     Unknown,
 }
 
@@ -127,6 +129,13 @@ impl LockTable {
                 self.current_holder = Some(new_holder);
                 req.sender.send(()).unwrap();
             }
+        }
+    }
+
+    pub fn is_currently_holding(&self, tx: Arc<TransactionInfo>) -> bool {
+        match &self.current_holder {
+            None => false,
+            Some(current) => current.transaction.id == tx.id,
         }
     }
 }
@@ -251,6 +260,125 @@ where
                     .await
                     .unwrap();
                 Ok(val.clone())
+            }
+        }
+    }
+
+    pub async fn prepare(
+        &mut self,
+        tx: Arc<TransactionInfo>,
+        prepare: PrepareRecord<'_>,
+    ) -> Result<(), Error> {
+        let s = self.state.write().await;
+        match s.deref() {
+            State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
+            State::Loaded(state) => {
+                let lock_table = state.lock_table.lock().await;
+                if !lock_table.is_currently_holding(tx.clone()) {
+                    return Err(Error::TransactionLockLost);
+                }
+                self.wal.append_prepare(prepare).await.unwrap();
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn abort(
+        &mut self,
+        tx: Arc<TransactionInfo>,
+        abort: AbortRecord<'_>,
+    ) -> Result<(), Error> {
+        let s = self.state.write().await;
+        match s.deref() {
+            State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
+            State::Loaded(state) => {
+                let mut lock_table = state.lock_table.lock().await;
+                if !lock_table.is_currently_holding(tx.clone()) {
+                    return Ok(());
+                }
+                self.wal.append_abort(abort).await.unwrap();
+                lock_table.release();
+                Ok(())
+            }
+        }
+    }
+
+    pub async fn commit(
+        &mut self,
+        tx: Arc<TransactionInfo>,
+        commit: CommitRecord<'_>,
+    ) -> Result<(), Error> {
+        let s = self.state.write().await;
+        match s.deref() {
+            State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
+            State::Loaded(state) => {
+                let mut lock_table = state.lock_table.lock().await;
+                if !lock_table.is_currently_holding(tx.clone()) {
+                    panic!("committing a transaction that is not holding the lock!!!")
+                }
+                // TODO: update highest known epoch!
+                self.wal.append_commit(commit).await.unwrap();
+                // Find the corresponding prepare entry in the WAL to get the writes.
+                // This is quite inefficient, we should cache a copy in memory instead, but for now
+                // it's convenient to also test WAL iteration.
+                let mut wal_iterator = self.wal.iterator();
+                let prepare_record = {
+                    loop {
+                        let next = wal_iterator.next().await;
+                        match next {
+                            None => break None,
+                            Some(entry) => match entry.entry() {
+                                Entry::Prepare => {
+                                    let bytes = entry.bytes().unwrap().bytes();
+                                    let flatbuf =
+                                        flatbuffers::root::<PrepareRecord>(bytes).unwrap();
+                                    let tid =
+                                        Uuid::parse_str(flatbuf.transaction_id().unwrap()).unwrap();
+                                    if tid == tx.id {
+                                        break (Some(flatbuf));
+                                    }
+                                }
+                                _ => (),
+                            },
+                        }
+                    }
+                }
+                .unwrap();
+                let version = KeyVersion {
+                    epoch: commit.epoch() as u64,
+                    // TODO: version counter should be an internal counter per range.
+                    // Remove from the commit message.
+                    version_counter: commit.vid() as u64,
+                };
+                // TODO: we shouldn't be doing a persistence operation per individual key put or delete.
+                // Instead we should write them in batches, and whenever we do multiple operations they
+                // should go in parallel not sequentially.
+                for put in prepare_record.puts().iter() {
+                    for put in put.iter() {
+                        // TODO: too much copying :(
+                        let key = Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
+                        let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
+
+                        self.persistence
+                            .upsert(self.range_id, key, val, version)
+                            .await
+                            .unwrap();
+                    }
+                }
+                for del in prepare_record.deletes().iter() {
+                    for del in del.iter() {
+                        let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
+                        self.persistence
+                            .delete(self.range_id, key, version)
+                            .await
+                            .unwrap()
+                    }
+                }
+                // We apply the writes to persistence before releasing the lock since we send all
+                // gets to persistence directly. We should implement a memtable to allow us to release
+                // the lock sooner.
+                lock_table.release();
+                Ok(())
             }
         }
     }
