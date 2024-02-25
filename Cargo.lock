@@ -692,6 +692,7 @@ dependencies = [
  "bytes",
  "chrono",
  "flatbuff",
+ "flatbuffers",
  "scylla",
  "tokio",
  "uuid",

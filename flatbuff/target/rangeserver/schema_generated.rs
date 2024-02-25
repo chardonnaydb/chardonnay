@@ -19,22 +19,22 @@ pub mod range_server {
   use self::flatbuffers::{EndianScalar, Follow};
 
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MIN_LOG_ENTRY: u8 = 0;
+pub const ENUM_MIN_ENTRY: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_LOG_ENTRY: u8 = 2;
+pub const ENUM_MAX_ENTRY: u8 = 2;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_LOG_ENTRY: [LogEntry; 3] = [
-  LogEntry::NONE,
-  LogEntry::Prepare,
-  LogEntry::Commit,
+pub const ENUM_VALUES_ENTRY: [Entry; 3] = [
+  Entry::NONE,
+  Entry::Prepare,
+  Entry::Commit,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[repr(transparent)]
-pub struct LogEntry(pub u8);
+pub struct Entry(pub u8);
 #[allow(non_upper_case_globals)]
-impl LogEntry {
+impl Entry {
   pub const NONE: Self = Self(0);
   pub const Prepare: Self = Self(1);
   pub const Commit: Self = Self(2);
@@ -56,7 +56,7 @@ impl LogEntry {
     }
   }
 }
-impl core::fmt::Debug for LogEntry {
+impl core::fmt::Debug for Entry {
   fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
     if let Some(name) = self.variant_name() {
       f.write_str(name)
@@ -65,7 +65,7 @@ impl core::fmt::Debug for LogEntry {
     }
   }
 }
-impl<'a> flatbuffers::Follow<'a> for LogEntry {
+impl<'a> flatbuffers::Follow<'a> for Entry {
   type Inner = Self;
   #[inline]
   unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
@@ -74,15 +74,15 @@ impl<'a> flatbuffers::Follow<'a> for LogEntry {
   }
 }
 
-impl flatbuffers::Push for LogEntry {
-    type Output = LogEntry;
+impl flatbuffers::Push for Entry {
+    type Output = Entry;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
         flatbuffers::emplace_scalar::<u8>(dst, self.0);
     }
 }
 
-impl flatbuffers::EndianScalar for LogEntry {
+impl flatbuffers::EndianScalar for Entry {
   type Scalar = u8;
   #[inline]
   fn to_little_endian(self) -> u8 {
@@ -96,7 +96,7 @@ impl flatbuffers::EndianScalar for LogEntry {
   }
 }
 
-impl<'a> flatbuffers::Verifiable for LogEntry {
+impl<'a> flatbuffers::Verifiable for Entry {
   #[inline]
   fn run_verifier(
     v: &mut flatbuffers::Verifier, pos: usize
@@ -106,8 +106,8 @@ impl<'a> flatbuffers::Verifiable for LogEntry {
   }
 }
 
-impl flatbuffers::SimpleToVerifyInSlice for LogEntry {}
-pub struct LogEntryUnionTableOffset {}
+impl flatbuffers::SimpleToVerifyInSlice for Entry {}
+pub struct EntryUnionTableOffset {}
 
 pub enum KeyOffset {}
 #[derive(Copy, Clone, PartialEq)]
@@ -582,35 +582,35 @@ impl core::fmt::Debug for CommitRecord<'_> {
       ds.finish()
   }
 }
-pub enum LogOffset {}
+pub enum LogEntryOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
-pub struct Log<'a> {
+pub struct LogEntry<'a> {
   pub _tab: flatbuffers::Table<'a>,
 }
 
-impl<'a> flatbuffers::Follow<'a> for Log<'a> {
-  type Inner = Log<'a>;
+impl<'a> flatbuffers::Follow<'a> for LogEntry<'a> {
+  type Inner = LogEntry<'a>;
   #[inline]
   unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
     Self { _tab: flatbuffers::Table::new(buf, loc) }
   }
 }
 
-impl<'a> Log<'a> {
+impl<'a> LogEntry<'a> {
   pub const VT_ENTRY_TYPE: flatbuffers::VOffsetT = 4;
   pub const VT_ENTRY: flatbuffers::VOffsetT = 6;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
-    Log { _tab: table }
+    LogEntry { _tab: table }
   }
   #[allow(unused_mut)]
   pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
     _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
-    args: &'args LogArgs
-  ) -> flatbuffers::WIPOffset<Log<'bldr>> {
-    let mut builder = LogBuilder::new(_fbb);
+    args: &'args LogEntryArgs
+  ) -> flatbuffers::WIPOffset<LogEntry<'bldr>> {
+    let mut builder = LogEntryBuilder::new(_fbb);
     if let Some(x) = args.entry { builder.add_entry(x); }
     builder.add_entry_type(args.entry_type);
     builder.finish()
@@ -618,23 +618,23 @@ impl<'a> Log<'a> {
 
 
   #[inline]
-  pub fn entry_type(&self) -> LogEntry {
+  pub fn entry_type(&self) -> Entry {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<LogEntry>(Log::VT_ENTRY_TYPE, Some(LogEntry::NONE)).unwrap()}
+    unsafe { self._tab.get::<Entry>(LogEntry::VT_ENTRY_TYPE, Some(Entry::NONE)).unwrap()}
   }
   #[inline]
   pub fn entry(&self) -> Option<flatbuffers::Table<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Table<'a>>>(Log::VT_ENTRY, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Table<'a>>>(LogEntry::VT_ENTRY, None)}
   }
   #[inline]
   #[allow(non_snake_case)]
   pub fn entry_as_prepare(&self) -> Option<PrepareRecord<'a>> {
-    if self.entry_type() == LogEntry::Prepare {
+    if self.entry_type() == Entry::Prepare {
       self.entry().map(|t| {
        // Safety:
        // Created from a valid Table for this object
@@ -649,7 +649,7 @@ impl<'a> Log<'a> {
   #[inline]
   #[allow(non_snake_case)]
   pub fn entry_as_commit(&self) -> Option<CommitRecord<'a>> {
-    if self.entry_type() == LogEntry::Commit {
+    if self.entry_type() == Entry::Commit {
       self.entry().map(|t| {
        // Safety:
        // Created from a valid Table for this object
@@ -663,17 +663,17 @@ impl<'a> Log<'a> {
 
 }
 
-impl flatbuffers::Verifiable for Log<'_> {
+impl flatbuffers::Verifiable for LogEntry<'_> {
   #[inline]
   fn run_verifier(
     v: &mut flatbuffers::Verifier, pos: usize
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_union::<LogEntry, _>("entry_type", Self::VT_ENTRY_TYPE, "entry", Self::VT_ENTRY, false, |key, v, pos| {
+     .visit_union::<Entry, _>("entry_type", Self::VT_ENTRY_TYPE, "entry", Self::VT_ENTRY, false, |key, v, pos| {
         match key {
-          LogEntry::Prepare => v.verify_union_variant::<flatbuffers::ForwardsUOffset<PrepareRecord>>("LogEntry::Prepare", pos),
-          LogEntry::Commit => v.verify_union_variant::<flatbuffers::ForwardsUOffset<CommitRecord>>("LogEntry::Commit", pos),
+          Entry::Prepare => v.verify_union_variant::<flatbuffers::ForwardsUOffset<PrepareRecord>>("Entry::Prepare", pos),
+          Entry::Commit => v.verify_union_variant::<flatbuffers::ForwardsUOffset<CommitRecord>>("Entry::Commit", pos),
           _ => Ok(()),
         }
      })?
@@ -681,61 +681,61 @@ impl flatbuffers::Verifiable for Log<'_> {
     Ok(())
   }
 }
-pub struct LogArgs {
-    pub entry_type: LogEntry,
+pub struct LogEntryArgs {
+    pub entry_type: Entry,
     pub entry: Option<flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>>,
 }
-impl<'a> Default for LogArgs {
+impl<'a> Default for LogEntryArgs {
   #[inline]
   fn default() -> Self {
-    LogArgs {
-      entry_type: LogEntry::NONE,
+    LogEntryArgs {
+      entry_type: Entry::NONE,
       entry: None,
     }
   }
 }
 
-pub struct LogBuilder<'a: 'b, 'b> {
+pub struct LogEntryBuilder<'a: 'b, 'b> {
   fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
   start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b> LogBuilder<'a, 'b> {
+impl<'a: 'b, 'b> LogEntryBuilder<'a, 'b> {
   #[inline]
-  pub fn add_entry_type(&mut self, entry_type: LogEntry) {
-    self.fbb_.push_slot::<LogEntry>(Log::VT_ENTRY_TYPE, entry_type, LogEntry::NONE);
+  pub fn add_entry_type(&mut self, entry_type: Entry) {
+    self.fbb_.push_slot::<Entry>(LogEntry::VT_ENTRY_TYPE, entry_type, Entry::NONE);
   }
   #[inline]
   pub fn add_entry(&mut self, entry: flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Log::VT_ENTRY, entry);
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(LogEntry::VT_ENTRY, entry);
   }
   #[inline]
-  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> LogBuilder<'a, 'b> {
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> LogEntryBuilder<'a, 'b> {
     let start = _fbb.start_table();
-    LogBuilder {
+    LogEntryBuilder {
       fbb_: _fbb,
       start_: start,
     }
   }
   #[inline]
-  pub fn finish(self) -> flatbuffers::WIPOffset<Log<'a>> {
+  pub fn finish(self) -> flatbuffers::WIPOffset<LogEntry<'a>> {
     let o = self.fbb_.end_table(self.start_);
     flatbuffers::WIPOffset::new(o.value())
   }
 }
 
-impl core::fmt::Debug for Log<'_> {
+impl core::fmt::Debug for LogEntry<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    let mut ds = f.debug_struct("Log");
+    let mut ds = f.debug_struct("LogEntry");
       ds.field("entry_type", &self.entry_type());
       match self.entry_type() {
-        LogEntry::Prepare => {
+        Entry::Prepare => {
           if let Some(x) = self.entry_as_prepare() {
             ds.field("entry", &x)
           } else {
             ds.field("entry", &"InvalidFlatbuffer: Union discriminant does not match value.")
           }
         },
-        LogEntry::Commit => {
+        Entry::Commit => {
           if let Some(x) = self.entry_as_commit() {
             ds.field("entry", &x)
           } else {
@@ -751,74 +751,74 @@ impl core::fmt::Debug for Log<'_> {
   }
 }
 #[inline]
-/// Verifies that a buffer of bytes contains a `Log`
+/// Verifies that a buffer of bytes contains a `LogEntry`
 /// and returns it.
 /// Note that verification is still experimental and may not
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
-/// `root_as_log_unchecked`.
-pub fn root_as_log(buf: &[u8]) -> Result<Log, flatbuffers::InvalidFlatbuffer> {
-  flatbuffers::root::<Log>(buf)
+/// `root_as_log_entry_unchecked`.
+pub fn root_as_log_entry(buf: &[u8]) -> Result<LogEntry, flatbuffers::InvalidFlatbuffer> {
+  flatbuffers::root::<LogEntry>(buf)
 }
 #[inline]
 /// Verifies that a buffer of bytes contains a size prefixed
-/// `Log` and returns it.
+/// `LogEntry` and returns it.
 /// Note that verification is still experimental and may not
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
-/// `size_prefixed_root_as_log_unchecked`.
-pub fn size_prefixed_root_as_log(buf: &[u8]) -> Result<Log, flatbuffers::InvalidFlatbuffer> {
-  flatbuffers::size_prefixed_root::<Log>(buf)
+/// `size_prefixed_root_as_log_entry_unchecked`.
+pub fn size_prefixed_root_as_log_entry(buf: &[u8]) -> Result<LogEntry, flatbuffers::InvalidFlatbuffer> {
+  flatbuffers::size_prefixed_root::<LogEntry>(buf)
 }
 #[inline]
 /// Verifies, with the given options, that a buffer of bytes
-/// contains a `Log` and returns it.
+/// contains a `LogEntry` and returns it.
 /// Note that verification is still experimental and may not
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
-/// `root_as_log_unchecked`.
-pub fn root_as_log_with_opts<'b, 'o>(
+/// `root_as_log_entry_unchecked`.
+pub fn root_as_log_entry_with_opts<'b, 'o>(
   opts: &'o flatbuffers::VerifierOptions,
   buf: &'b [u8],
-) -> Result<Log<'b>, flatbuffers::InvalidFlatbuffer> {
-  flatbuffers::root_with_opts::<Log<'b>>(opts, buf)
+) -> Result<LogEntry<'b>, flatbuffers::InvalidFlatbuffer> {
+  flatbuffers::root_with_opts::<LogEntry<'b>>(opts, buf)
 }
 #[inline]
 /// Verifies, with the given verifier options, that a buffer of
-/// bytes contains a size prefixed `Log` and returns
+/// bytes contains a size prefixed `LogEntry` and returns
 /// it. Note that verification is still experimental and may not
 /// catch every error, or be maximally performant. For the
 /// previous, unchecked, behavior use
-/// `root_as_log_unchecked`.
-pub fn size_prefixed_root_as_log_with_opts<'b, 'o>(
+/// `root_as_log_entry_unchecked`.
+pub fn size_prefixed_root_as_log_entry_with_opts<'b, 'o>(
   opts: &'o flatbuffers::VerifierOptions,
   buf: &'b [u8],
-) -> Result<Log<'b>, flatbuffers::InvalidFlatbuffer> {
-  flatbuffers::size_prefixed_root_with_opts::<Log<'b>>(opts, buf)
+) -> Result<LogEntry<'b>, flatbuffers::InvalidFlatbuffer> {
+  flatbuffers::size_prefixed_root_with_opts::<LogEntry<'b>>(opts, buf)
 }
 #[inline]
-/// Assumes, without verification, that a buffer of bytes contains a Log and returns it.
+/// Assumes, without verification, that a buffer of bytes contains a LogEntry and returns it.
 /// # Safety
-/// Callers must trust the given bytes do indeed contain a valid `Log`.
-pub unsafe fn root_as_log_unchecked(buf: &[u8]) -> Log {
-  flatbuffers::root_unchecked::<Log>(buf)
+/// Callers must trust the given bytes do indeed contain a valid `LogEntry`.
+pub unsafe fn root_as_log_entry_unchecked(buf: &[u8]) -> LogEntry {
+  flatbuffers::root_unchecked::<LogEntry>(buf)
 }
 #[inline]
-/// Assumes, without verification, that a buffer of bytes contains a size prefixed Log and returns it.
+/// Assumes, without verification, that a buffer of bytes contains a size prefixed LogEntry and returns it.
 /// # Safety
-/// Callers must trust the given bytes do indeed contain a valid size prefixed `Log`.
-pub unsafe fn size_prefixed_root_as_log_unchecked(buf: &[u8]) -> Log {
-  flatbuffers::size_prefixed_root_unchecked::<Log>(buf)
+/// Callers must trust the given bytes do indeed contain a valid size prefixed `LogEntry`.
+pub unsafe fn size_prefixed_root_as_log_entry_unchecked(buf: &[u8]) -> LogEntry {
+  flatbuffers::size_prefixed_root_unchecked::<LogEntry>(buf)
 }
 #[inline]
-pub fn finish_log_buffer<'a, 'b>(
+pub fn finish_log_entry_buffer<'a, 'b>(
     fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>,
-    root: flatbuffers::WIPOffset<Log<'a>>) {
+    root: flatbuffers::WIPOffset<LogEntry<'a>>) {
   fbb.finish(root, None);
 }
 
 #[inline]
-pub fn finish_size_prefixed_log_buffer<'a, 'b>(fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>, root: flatbuffers::WIPOffset<Log<'a>>) {
+pub fn finish_size_prefixed_log_entry_buffer<'a, 'b>(fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>, root: flatbuffers::WIPOffset<LogEntry<'a>>) {
   fbb.finish_size_prefixed(root, None);
 }
 }  // pub mod RangeServer

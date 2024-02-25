@@ -21,10 +21,10 @@ table CommitRecord {
     vid:int64;
 }
 
-union LogEntry { Prepare:PrepareRecord, Commit:CommitRecord }
+union Entry { Prepare:PrepareRecord, Commit:CommitRecord }
 
-table Log {
-  entry:LogEntry;
+table LogEntry {
+  entry:Entry;
 }
 
-root_type Log;
+root_type LogEntry;

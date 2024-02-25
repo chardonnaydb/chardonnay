@@ -13,27 +13,26 @@ trait Iterator {
 }
 
 pub trait Wal {
-    type Entry;
-
     async fn first_offset(&self) -> Result<u64, Error>;
     async fn next_offset(&self) -> Result<u64, Error>;
-    async fn append(&mut self, entry: Self::Entry) -> Result<(), Error>;
+    async fn append(&mut self, entry: LogEntry<'_>) -> Result<(), Error>;
     async fn trim_before_offset(&mut self, offset: u64) -> Result<(), Error>;
     fn iterator(&self) -> impl Iterator;
 }
 
 struct InMemoryWal {
     first_offset: u64,
-    entries: VecDeque<LogEntry>,
+    entries: VecDeque<Vec<u8>>,
 }
 
 struct InMemIterator<'a> {
     index: u64,
     wal: &'a InMemoryWal,
+    current_entry: Option<LogEntry<'a>>,
 }
 
 impl<'a> Iterator for InMemIterator<'a> {
-    type Entry = LogEntry;
+    type Entry = LogEntry<'a>;
     async fn next_offset(&self) -> Result<u64, Error> {
         let offset = self.wal.first_offset + self.index;
         Ok(offset)
@@ -44,13 +43,15 @@ impl<'a> Iterator for InMemIterator<'a> {
         if ind >= self.wal.entries.len() {
             return None;
         }
-        self.wal.entries.get(ind)
+        self.current_entry = Some(root_as_log_entry(self.wal.entries.get(ind).unwrap()).unwrap());
+        match &self.current_entry {
+            None => None,
+            Some(e) => Some(e),
+        }
     }
 }
 
 impl Wal for InMemoryWal {
-    type Entry = LogEntry;
-
     async fn first_offset(&self) -> Result<u64, Error> {
         Ok(self.first_offset)
     }
@@ -60,8 +61,9 @@ impl Wal for InMemoryWal {
         Ok(self.first_offset + len_u64)
     }
 
-    async fn append(&mut self, entry: Self::Entry) -> Result<(), Error> {
-        self.entries.push_back(entry);
+    async fn append(&mut self, entry: LogEntry<'_>) -> Result<(), Error> {
+        let buf = Vec::from(entry._tab.buf());
+        self.entries.push_back(buf);
         Ok(())
     }
 
@@ -77,6 +79,7 @@ impl Wal for InMemoryWal {
         InMemIterator {
             index: 0,
             wal: self,
+            current_entry: None,
         }
     }
 }
