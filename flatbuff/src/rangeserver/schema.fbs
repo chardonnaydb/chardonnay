@@ -21,7 +21,11 @@ table CommitRecord {
     vid:int64;
 }
 
-union Entry { Prepare:PrepareRecord, Commit:CommitRecord }
+table AbortRecord {
+    transaction_id:string;
+}
+
+union Entry { PrepareRecord, CommitRecord, AbortRecord }
 
 table LogEntry {
   entry:Entry;

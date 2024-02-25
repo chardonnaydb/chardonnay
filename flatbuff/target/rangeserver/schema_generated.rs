@@ -21,13 +21,14 @@ pub mod range_server {
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_ENTRY: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_ENTRY: u8 = 2;
+pub const ENUM_MAX_ENTRY: u8 = 3;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_ENTRY: [Entry; 3] = [
+pub const ENUM_VALUES_ENTRY: [Entry; 4] = [
   Entry::NONE,
-  Entry::Prepare,
-  Entry::Commit,
+  Entry::PrepareRecord,
+  Entry::CommitRecord,
+  Entry::AbortRecord,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -36,22 +37,25 @@ pub struct Entry(pub u8);
 #[allow(non_upper_case_globals)]
 impl Entry {
   pub const NONE: Self = Self(0);
-  pub const Prepare: Self = Self(1);
-  pub const Commit: Self = Self(2);
+  pub const PrepareRecord: Self = Self(1);
+  pub const CommitRecord: Self = Self(2);
+  pub const AbortRecord: Self = Self(3);
 
   pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 2;
+  pub const ENUM_MAX: u8 = 3;
   pub const ENUM_VALUES: &'static [Self] = &[
     Self::NONE,
-    Self::Prepare,
-    Self::Commit,
+    Self::PrepareRecord,
+    Self::CommitRecord,
+    Self::AbortRecord,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
     match self {
       Self::NONE => Some("NONE"),
-      Self::Prepare => Some("Prepare"),
-      Self::Commit => Some("Commit"),
+      Self::PrepareRecord => Some("PrepareRecord"),
+      Self::CommitRecord => Some("CommitRecord"),
+      Self::AbortRecord => Some("AbortRecord"),
       _ => None,
     }
   }
@@ -582,6 +586,103 @@ impl core::fmt::Debug for CommitRecord<'_> {
       ds.finish()
   }
 }
+pub enum AbortRecordOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct AbortRecord<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for AbortRecord<'a> {
+  type Inner = AbortRecord<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> AbortRecord<'a> {
+  pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 4;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    AbortRecord { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args AbortRecordArgs<'args>
+  ) -> flatbuffers::WIPOffset<AbortRecord<'bldr>> {
+    let mut builder = AbortRecordBuilder::new(_fbb);
+    if let Some(x) = args.transaction_id { builder.add_transaction_id(x); }
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn transaction_id(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(AbortRecord::VT_TRANSACTION_ID, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for AbortRecord<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct AbortRecordArgs<'a> {
+    pub transaction_id: Option<flatbuffers::WIPOffset<&'a str>>,
+}
+impl<'a> Default for AbortRecordArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    AbortRecordArgs {
+      transaction_id: None,
+    }
+  }
+}
+
+pub struct AbortRecordBuilder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> AbortRecordBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(AbortRecord::VT_TRANSACTION_ID, transaction_id);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> AbortRecordBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    AbortRecordBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<AbortRecord<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for AbortRecord<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("AbortRecord");
+      ds.field("transaction_id", &self.transaction_id());
+      ds.finish()
+  }
+}
 pub enum LogEntryOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -633,8 +734,8 @@ impl<'a> LogEntry<'a> {
   }
   #[inline]
   #[allow(non_snake_case)]
-  pub fn entry_as_prepare(&self) -> Option<PrepareRecord<'a>> {
-    if self.entry_type() == Entry::Prepare {
+  pub fn entry_as_prepare_record(&self) -> Option<PrepareRecord<'a>> {
+    if self.entry_type() == Entry::PrepareRecord {
       self.entry().map(|t| {
        // Safety:
        // Created from a valid Table for this object
@@ -648,13 +749,28 @@ impl<'a> LogEntry<'a> {
 
   #[inline]
   #[allow(non_snake_case)]
-  pub fn entry_as_commit(&self) -> Option<CommitRecord<'a>> {
-    if self.entry_type() == Entry::Commit {
+  pub fn entry_as_commit_record(&self) -> Option<CommitRecord<'a>> {
+    if self.entry_type() == Entry::CommitRecord {
       self.entry().map(|t| {
        // Safety:
        // Created from a valid Table for this object
        // Which contains a valid union in this slot
        unsafe { CommitRecord::init_from_table(t) }
+     })
+    } else {
+      None
+    }
+  }
+
+  #[inline]
+  #[allow(non_snake_case)]
+  pub fn entry_as_abort_record(&self) -> Option<AbortRecord<'a>> {
+    if self.entry_type() == Entry::AbortRecord {
+      self.entry().map(|t| {
+       // Safety:
+       // Created from a valid Table for this object
+       // Which contains a valid union in this slot
+       unsafe { AbortRecord::init_from_table(t) }
      })
     } else {
       None
@@ -672,8 +788,9 @@ impl flatbuffers::Verifiable for LogEntry<'_> {
     v.visit_table(pos)?
      .visit_union::<Entry, _>("entry_type", Self::VT_ENTRY_TYPE, "entry", Self::VT_ENTRY, false, |key, v, pos| {
         match key {
-          Entry::Prepare => v.verify_union_variant::<flatbuffers::ForwardsUOffset<PrepareRecord>>("Entry::Prepare", pos),
-          Entry::Commit => v.verify_union_variant::<flatbuffers::ForwardsUOffset<CommitRecord>>("Entry::Commit", pos),
+          Entry::PrepareRecord => v.verify_union_variant::<flatbuffers::ForwardsUOffset<PrepareRecord>>("Entry::PrepareRecord", pos),
+          Entry::CommitRecord => v.verify_union_variant::<flatbuffers::ForwardsUOffset<CommitRecord>>("Entry::CommitRecord", pos),
+          Entry::AbortRecord => v.verify_union_variant::<flatbuffers::ForwardsUOffset<AbortRecord>>("Entry::AbortRecord", pos),
           _ => Ok(()),
         }
      })?
@@ -728,15 +845,22 @@ impl core::fmt::Debug for LogEntry<'_> {
     let mut ds = f.debug_struct("LogEntry");
       ds.field("entry_type", &self.entry_type());
       match self.entry_type() {
-        Entry::Prepare => {
-          if let Some(x) = self.entry_as_prepare() {
+        Entry::PrepareRecord => {
+          if let Some(x) = self.entry_as_prepare_record() {
             ds.field("entry", &x)
           } else {
             ds.field("entry", &"InvalidFlatbuffer: Union discriminant does not match value.")
           }
         },
-        Entry::Commit => {
-          if let Some(x) = self.entry_as_commit() {
+        Entry::CommitRecord => {
+          if let Some(x) = self.entry_as_commit_record() {
+            ds.field("entry", &x)
+          } else {
+            ds.field("entry", &"InvalidFlatbuffer: Union discriminant does not match value.")
+          }
+        },
+        Entry::AbortRecord => {
+          if let Some(x) = self.entry_as_abort_record() {
             ds.field("entry", &x)
           } else {
             ds.field("entry", &"InvalidFlatbuffer: Union discriminant does not match value.")
