@@ -11,5 +11,5 @@ pub trait EpochProvider {
     // than the true epoch.
     async fn read_epoch(&self) -> Result<u64, Error>;
 
-    async fn wait_until_epoch(&self, epoch: u64) -> Result<u64, Error>;
+    async fn wait_until_epoch(&self, epoch: u64) -> Result<(), Error>;
 }
