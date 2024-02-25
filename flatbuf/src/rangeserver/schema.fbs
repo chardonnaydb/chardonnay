@@ -11,6 +11,8 @@ table Record {
 
 table PrepareRecord {
   transaction_id:string;
+  range_id:string;
+  has_reads:bool;
   puts:[Record];
   deletes:[Key];
 }

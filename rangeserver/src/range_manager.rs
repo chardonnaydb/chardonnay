@@ -273,12 +273,13 @@ where
         match s.deref() {
             State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
-                let lock_table = state.lock_table.lock().await;
-                if !lock_table.is_currently_holding(tx.clone()) {
-                    // TODO: this is overly conservative and would lead to aborts in case of
-                    // blind writes (i.e. writes without first reading).
-                    return Err(Error::TransactionLockLost);
-                }
+                {
+                    let lock_table = state.lock_table.lock().await;
+                    if prepare.has_reads() && !lock_table.is_currently_holding(tx.clone()) {
+                        return Err(Error::TransactionLockLost);
+                    }
+                };
+                self.acquire_range_lock(state, tx.clone()).await?;
                 self.wal.append_prepare(prepare).await.unwrap();
                 Ok(())
             }

@@ -335,8 +335,10 @@ impl<'a> flatbuffers::Follow<'a> for PrepareRecord<'a> {
 
 impl<'a> PrepareRecord<'a> {
   pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 4;
-  pub const VT_PUTS: flatbuffers::VOffsetT = 6;
-  pub const VT_DELETES: flatbuffers::VOffsetT = 8;
+  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 6;
+  pub const VT_HAS_READS: flatbuffers::VOffsetT = 8;
+  pub const VT_PUTS: flatbuffers::VOffsetT = 10;
+  pub const VT_DELETES: flatbuffers::VOffsetT = 12;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -350,7 +352,9 @@ impl<'a> PrepareRecord<'a> {
     let mut builder = PrepareRecordBuilder::new(_fbb);
     if let Some(x) = args.deletes { builder.add_deletes(x); }
     if let Some(x) = args.puts { builder.add_puts(x); }
+    if let Some(x) = args.range_id { builder.add_range_id(x); }
     if let Some(x) = args.transaction_id { builder.add_transaction_id(x); }
+    builder.add_has_reads(args.has_reads);
     builder.finish()
   }
 
@@ -361,6 +365,20 @@ impl<'a> PrepareRecord<'a> {
     // Created from valid Table for this object
     // which contains a valid value in this slot
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrepareRecord::VT_TRANSACTION_ID, None)}
+  }
+  #[inline]
+  pub fn range_id(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrepareRecord::VT_RANGE_ID, None)}
+  }
+  #[inline]
+  pub fn has_reads(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(PrepareRecord::VT_HAS_READS, Some(false)).unwrap()}
   }
   #[inline]
   pub fn puts(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Record<'a>>>> {
@@ -386,6 +404,8 @@ impl flatbuffers::Verifiable for PrepareRecord<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("range_id", Self::VT_RANGE_ID, false)?
+     .visit_field::<bool>("has_reads", Self::VT_HAS_READS, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Record>>>>("puts", Self::VT_PUTS, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Key>>>>("deletes", Self::VT_DELETES, false)?
      .finish();
@@ -394,6 +414,8 @@ impl flatbuffers::Verifiable for PrepareRecord<'_> {
 }
 pub struct PrepareRecordArgs<'a> {
     pub transaction_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub range_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub has_reads: bool,
     pub puts: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Record<'a>>>>>,
     pub deletes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>>>,
 }
@@ -402,6 +424,8 @@ impl<'a> Default for PrepareRecordArgs<'a> {
   fn default() -> Self {
     PrepareRecordArgs {
       transaction_id: None,
+      range_id: None,
+      has_reads: false,
       puts: None,
       deletes: None,
     }
@@ -416,6 +440,14 @@ impl<'a: 'b, 'b> PrepareRecordBuilder<'a, 'b> {
   #[inline]
   pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<&'b  str>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrepareRecord::VT_TRANSACTION_ID, transaction_id);
+  }
+  #[inline]
+  pub fn add_range_id(&mut self, range_id: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrepareRecord::VT_RANGE_ID, range_id);
+  }
+  #[inline]
+  pub fn add_has_reads(&mut self, has_reads: bool) {
+    self.fbb_.push_slot::<bool>(PrepareRecord::VT_HAS_READS, has_reads, false);
   }
   #[inline]
   pub fn add_puts(&mut self, puts: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<Record<'b >>>>) {
@@ -444,6 +476,8 @@ impl core::fmt::Debug for PrepareRecord<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("PrepareRecord");
       ds.field("transaction_id", &self.transaction_id());
+      ds.field("range_id", &self.range_id());
+      ds.field("has_reads", &self.has_reads());
       ds.field("puts", &self.puts());
       ds.field("deletes", &self.deletes());
       ds.finish()
