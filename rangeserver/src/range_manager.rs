@@ -160,7 +160,7 @@ where
 {
     persistence: Arc<P>,
     epoch_provider: Arc<E>,
-    wal: W,
+    wal: Mutex<W>,
     range_id: Uuid,
     state: RwLock<State>,
 }
@@ -176,7 +176,7 @@ where
             range_id,
             persistence,
             epoch_provider,
-            wal,
+            wal: Mutex::new(wal),
             state: RwLock::new(State::Unloaded),
         })
     }
@@ -265,7 +265,7 @@ where
     }
 
     pub async fn prepare(
-        &mut self,
+        &self,
         tx: Arc<TransactionInfo>,
         prepare: PrepareRecord<'_>,
     ) -> Result<(), Error> {
@@ -280,14 +280,18 @@ where
                     }
                 };
                 self.acquire_range_lock(state, tx.clone()).await?;
-                self.wal.append_prepare(prepare).await.unwrap();
+                {
+                    let mut wal = self.wal.lock().await;
+                    wal.append_prepare(prepare).await.unwrap();
+                }
+
                 Ok(())
             }
         }
     }
 
     pub async fn abort(
-        &mut self,
+        &self,
         tx: Arc<TransactionInfo>,
         abort: AbortRecord<'_>,
     ) -> Result<(), Error> {
@@ -299,7 +303,10 @@ where
                 if !lock_table.is_currently_holding(tx.clone()) {
                     return Ok(());
                 }
-                self.wal.append_abort(abort).await.unwrap();
+                {
+                    let mut wal = self.wal.lock().await;
+                    wal.append_abort(abort).await.unwrap();
+                }
                 lock_table.release();
                 Ok(())
             }
@@ -307,7 +314,7 @@ where
     }
 
     pub async fn commit(
-        &mut self,
+        &self,
         tx: Arc<TransactionInfo>,
         commit: CommitRecord<'_>,
     ) -> Result<(), Error> {
@@ -319,64 +326,70 @@ where
                 if !lock_table.is_currently_holding(tx.clone()) {
                     panic!("committing a transaction that is not holding the lock!!!")
                 }
-                // TODO: update highest known epoch!
-                self.wal.append_commit(commit).await.unwrap();
-                // Find the corresponding prepare entry in the WAL to get the writes.
-                // This is quite inefficient, we should cache a copy in memory instead, but for now
-                // it's convenient to also test WAL iteration.
-                let mut wal_iterator = self.wal.iterator();
-                let prepare_record = {
-                    loop {
-                        let next = wal_iterator.next().await;
-                        match next {
-                            None => break None,
-                            Some(entry) => match entry.entry() {
-                                Entry::Prepare => {
-                                    let bytes = entry.bytes().unwrap().bytes();
-                                    let flatbuf =
-                                        flatbuffers::root::<PrepareRecord>(bytes).unwrap();
-                                    let tid =
-                                        Uuid::parse_str(flatbuf.transaction_id().unwrap()).unwrap();
-                                    if tid == tx.id {
-                                        break (Some(flatbuf));
+                {
+                    // TODO: update highest known epoch!
+                    let mut wal = self.wal.lock().await;
+                    wal.append_commit(commit).await.unwrap();
+                    // Find the corresponding prepare entry in the WAL to get the writes.
+                    // This is quite inefficient, we should cache a copy in memory instead, but for now
+                    // it's convenient to also test WAL iteration.
+                    let mut wal_iterator = wal.iterator();
+                    let prepare_record = {
+                        loop {
+                            let next = wal_iterator.next().await;
+                            match next {
+                                None => break None,
+                                Some(entry) => match entry.entry() {
+                                    Entry::Prepare => {
+                                        let bytes = entry.bytes().unwrap().bytes();
+                                        let flatbuf =
+                                            flatbuffers::root::<PrepareRecord>(bytes).unwrap();
+                                        let tid =
+                                            Uuid::parse_str(flatbuf.transaction_id().unwrap())
+                                                .unwrap();
+                                        if tid == tx.id {
+                                            break (Some(flatbuf));
+                                        }
                                     }
-                                }
-                                _ => (),
-                            },
+                                    _ => (),
+                                },
+                            }
+                        }
+                    }
+                    .unwrap();
+                    let version = KeyVersion {
+                        epoch: commit.epoch() as u64,
+                        // TODO: version counter should be an internal counter per range.
+                        // Remove from the commit message.
+                        version_counter: commit.vid() as u64,
+                    };
+                    // TODO: we shouldn't be doing a persistence operation per individual key put or delete.
+                    // Instead we should write them in batches, and whenever we do multiple operations they
+                    // should go in parallel not sequentially.
+                    for put in prepare_record.puts().iter() {
+                        for put in put.iter() {
+                            // TODO: too much copying :(
+                            let key =
+                                Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
+                            let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
+
+                            self.persistence
+                                .upsert(self.range_id, key, val, version)
+                                .await
+                                .unwrap();
+                        }
+                    }
+                    for del in prepare_record.deletes().iter() {
+                        for del in del.iter() {
+                            let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
+                            self.persistence
+                                .delete(self.range_id, key, version)
+                                .await
+                                .unwrap()
                         }
                     }
                 }
-                .unwrap();
-                let version = KeyVersion {
-                    epoch: commit.epoch() as u64,
-                    // TODO: version counter should be an internal counter per range.
-                    // Remove from the commit message.
-                    version_counter: commit.vid() as u64,
-                };
-                // TODO: we shouldn't be doing a persistence operation per individual key put or delete.
-                // Instead we should write them in batches, and whenever we do multiple operations they
-                // should go in parallel not sequentially.
-                for put in prepare_record.puts().iter() {
-                    for put in put.iter() {
-                        // TODO: too much copying :(
-                        let key = Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
-                        let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
 
-                        self.persistence
-                            .upsert(self.range_id, key, val, version)
-                            .await
-                            .unwrap();
-                    }
-                }
-                for del in prepare_record.deletes().iter() {
-                    for del in del.iter() {
-                        let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
-                        self.persistence
-                            .delete(self.range_id, key, version)
-                            .await
-                            .unwrap()
-                    }
-                }
                 // We apply the writes to persistence before releasing the lock since we send all
                 // gets to persistence directly. We should implement a memtable to allow us to release
                 // the lock sooner.
@@ -389,31 +402,111 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    use flatbuffers::FlatBufferBuilder;
+
     use super::*;
+    use crate::epoch_provider::EpochProvider as EpochProviderTrait;
     use crate::for_testing::epoch_provider::EpochProvider;
     use crate::for_testing::in_memory_wal::InMemoryWal;
     use crate::persistence::cassandra::tests::TEST_RANGE_UUID;
     use crate::persistence::cassandra::Cassandra;
 
-    type RM<'a> = RangeManager<Cassandra, EpochProvider, InMemoryWal<'a>>;
+    type RM = RangeManager<Cassandra, EpochProvider, InMemoryWal>;
 
-    async fn init<'a>() -> Arc<RM<'a>> {
-        let epoch_provider = Arc::new(EpochProvider::new());
-        let wal = InMemoryWal::new();
-        let cassandra = Arc::new(crate::persistence::cassandra::tests::init().await);
-        let range_id = Uuid::parse_str(TEST_RANGE_UUID).unwrap();
-        Arc::new(RM {
-            range_id,
-            persistence: cassandra,
-            wal: wal,
-            epoch_provider,
-            state: RwLock::new(State::Unloaded),
-        })
+    impl RM {
+        async fn abort_transaction(&self, tx: Arc<TransactionInfo>) {
+            let mut fbb = FlatBufferBuilder::new();
+            let tx_id_string = tx.id.to_string();
+            let transaction_id = Some(fbb.create_string(&tx_id_string));
+            let fbb_root = AbortRecord::create(&mut fbb, &AbortRecordArgs { transaction_id });
+            fbb.finish(fbb_root, None);
+            let abort_record_bytes = fbb.finished_data();
+            let abort_record = flatbuffers::root::<AbortRecord>(abort_record_bytes).unwrap();
+            self.abort(tx.clone(), abort_record).await.unwrap()
+        }
+
+        async fn prepare_transaction(
+            &self,
+            tx: Arc<TransactionInfo>,
+            writes: Vec<(Bytes, Bytes)>,
+            deletes: Vec<Bytes>,
+            has_reads: bool,
+        ) -> Result<(), Error> {
+            let mut fbb = FlatBufferBuilder::new();
+            let tx_id_string = tx.id.to_string();
+            let transaction_id = Some(fbb.create_string(&tx_id_string));
+            let mut puts_vector = Vec::new();
+            for (k, v) in writes {
+                let k = Some(fbb.create_vector(k.to_vec().as_slice()));
+                let key = Key::create(&mut fbb, &KeyArgs { k });
+                let value = fbb.create_vector(v.to_vec().as_slice());
+                puts_vector.push(Record::create(
+                    &mut fbb,
+                    &RecordArgs {
+                        key: Some(key),
+                        value: Some(value),
+                    },
+                ));
+            }
+            let puts = Some(fbb.create_vector(&puts_vector));
+            let mut del_vector = Vec::new();
+            for k in deletes {
+                let k = Some(fbb.create_vector(k.to_vec().as_slice()));
+                let key = Key::create(&mut fbb, &KeyArgs { k });
+                del_vector.push(key);
+            }
+            let deletes = Some(fbb.create_vector(&del_vector));
+            let range_id_string = self.range_id.to_string();
+            let range_id = Some(fbb.create_string(&range_id_string));
+            let fbb_root = PrepareRecord::create(
+                &mut fbb,
+                &PrepareRecordArgs {
+                    transaction_id,
+                    range_id,
+                    has_reads,
+                    puts,
+                    deletes,
+                },
+            );
+            fbb.finish(fbb_root, None);
+            let prepare_record_bytes = fbb.finished_data();
+            let prepare_record = flatbuffers::root::<PrepareRecord>(prepare_record_bytes).unwrap();
+            self.prepare(tx.clone(), prepare_record).await
+        }
+
+        async fn commit_transaction(&self, tx: Arc<TransactionInfo>) -> Result<(), Error> {
+            let epoch = self.epoch_provider.read_epoch().await.unwrap();
+            let mut fbb = FlatBufferBuilder::new();
+            let tx_id_string = tx.id.to_string();
+            let transaction_id = Some(fbb.create_string(&tx_id_string));
+            let fbb_root = CommitRecord::create(
+                &mut fbb,
+                &CommitRecordArgs {
+                    transaction_id,
+                    epoch: epoch as i64,
+                    vid: 0,
+                },
+            );
+            fbb.finish(fbb_root, None);
+            let commit_record_bytes = fbb.finished_data();
+            let commit_record = flatbuffers::root::<CommitRecord>(commit_record_bytes).unwrap();
+            self.commit(tx.clone(), commit_record).await
+        }
     }
 
-    #[tokio::test]
-    async fn basic_load() {
-        let rm = init().await;
+    async fn init() -> Arc<RM> {
+        let epoch_provider = Arc::new(EpochProvider::new());
+        let wal = Mutex::new(InMemoryWal::new());
+        let cassandra = Arc::new(crate::persistence::cassandra::tests::init().await);
+        let range_id = Uuid::parse_str(TEST_RANGE_UUID).unwrap();
+        let rm = Arc::new(RM {
+            range_id,
+            persistence: cassandra,
+            wal,
+            epoch_provider,
+            state: RwLock::new(State::Unloaded),
+        });
         let rm_copy = rm.clone();
         let init_handle = tokio::spawn(async move { rm_copy.load().await.unwrap() });
         let epoch_provider = rm.epoch_provider.clone();
@@ -421,5 +514,33 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         epoch_provider.set_epoch(1).await;
         init_handle.await.unwrap();
+        rm
+    }
+
+    fn start_transaction() -> Arc<TransactionInfo> {
+        Arc::new(TransactionInfo { id: Uuid::new_v4() })
+    }
+
+    #[tokio::test]
+    async fn basic_get_put() {
+        let rm = init().await;
+        let key = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+        let tx1 = start_transaction();
+        assert!(rm.get(tx1.clone(), key.clone()).await.unwrap().is_none());
+        rm.abort_transaction(tx1.clone()).await;
+        let tx2 = start_transaction();
+        let val = Bytes::from_static(b"I have a value!");
+        rm.prepare_transaction(
+            tx2.clone(),
+            Vec::from([(key.clone(), val.clone())]),
+            Vec::new(),
+            false,
+        )
+        .await
+        .unwrap();
+        rm.commit_transaction(tx2.clone()).await.unwrap();
+        let tx3 = start_transaction();
+        let val_after_commit = rm.get(tx3.clone(), key.clone()).await.unwrap().unwrap();
+        assert!(val_after_commit == val);
     }
 }

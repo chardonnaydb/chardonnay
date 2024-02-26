@@ -5,15 +5,15 @@ use std::collections::VecDeque;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use flatbuffers::FlatBufferBuilder;
 
-pub struct InMemoryWal<'a> {
+pub struct InMemoryWal {
     first_offset: u64,
     entries: VecDeque<Vec<u8>>,
-    flatbuf_builder: FlatBufferBuilder<'a>,
+    flatbuf_builder: FlatBufferBuilder<'static>,
 }
 
 struct InMemIterator<'a> {
     index: u64,
-    wal: &'a InMemoryWal<'a>,
+    wal: &'a InMemoryWal,
     current_entry: Option<LogEntry<'a>>,
 }
 
@@ -29,6 +29,7 @@ impl<'a> Iterator<'a> for InMemIterator<'a> {
             return None;
         }
         self.current_entry = Some(root_as_log_entry(self.wal.entries.get(ind).unwrap()).unwrap());
+        self.index += 1;
         match &self.current_entry {
             None => None,
             Some(e) => Some(e),
@@ -36,7 +37,7 @@ impl<'a> Iterator<'a> for InMemIterator<'a> {
     }
 }
 
-impl<'a> InMemoryWal<'a> {
+impl InMemoryWal {
     pub fn new() -> Self {
         InMemoryWal {
             first_offset: 0,
@@ -44,16 +45,16 @@ impl<'a> InMemoryWal<'a> {
             flatbuf_builder: FlatBufferBuilder::new(),
         }
     }
-
     fn append_data_currently_in_builder(&mut self) -> Result<(), Error> {
         let bytes = self.flatbuf_builder.finished_data();
         let buf = Vec::from(bytes);
         self.entries.push_back(buf);
+        self.flatbuf_builder.reset();
         Ok(())
     }
 }
 
-impl<'a> Wal for InMemoryWal<'a> {
+impl Wal for InMemoryWal {
     async fn first_offset(&self) -> Result<u64, Error> {
         Ok(self.first_offset)
     }
@@ -73,41 +74,44 @@ impl<'a> Wal for InMemoryWal<'a> {
 
     async fn append_prepare(&mut self, entry: PrepareRecord<'_>) -> Result<(), Error> {
         let prepare_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
-        LogEntry::create(
+        let fb_root = LogEntry::create(
             &mut self.flatbuf_builder,
             &LogEntryArgs {
                 entry: Entry::Prepare,
                 bytes: Some(prepare_bytes),
             },
         );
+        self.flatbuf_builder.finish(fb_root, None);
         self.append_data_currently_in_builder()
     }
 
     async fn append_commit(&mut self, entry: CommitRecord<'_>) -> Result<(), Error> {
         let commit_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
-        LogEntry::create(
+        let fb_root = LogEntry::create(
             &mut self.flatbuf_builder,
             &LogEntryArgs {
                 entry: Entry::Commit,
                 bytes: Some(commit_bytes),
             },
         );
+        self.flatbuf_builder.finish(fb_root, None);
         self.append_data_currently_in_builder()
     }
 
     async fn append_abort(&mut self, entry: AbortRecord<'_>) -> Result<(), Error> {
         let abort_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
-        LogEntry::create(
+        let fb_root = LogEntry::create(
             &mut self.flatbuf_builder,
             &LogEntryArgs {
                 entry: Entry::Commit,
                 bytes: Some(abort_bytes),
             },
         );
+        self.flatbuf_builder.finish(fb_root, None);
         self.append_data_currently_in_builder()
     }
 
-    fn iterator<'b>(&'b self) -> InMemIterator<'b> {
+    fn iterator<'a>(&'a self) -> InMemIterator<'a> {
         InMemIterator {
             index: 0,
             wal: self,
