@@ -1,6 +1,8 @@
 use crate::{
-    epoch_provider::EpochProvider, key_version::KeyVersion, persistence::Persistence,
-    persistence::RangeInfo, transaction_info::TransactionInfo, wal::Iterator, wal::Wal,
+    epoch_provider::EpochProvider, key_version::KeyVersion, persistence::Error as PersistenceError,
+    persistence::Persistence, persistence::RangeInfo,
+    transaction_abort_reason::TransactionAbortReason, transaction_info::TransactionInfo,
+    wal::Iterator, wal::Wal,
 };
 use bytes::Bytes;
 use chrono::DateTime;
@@ -13,12 +15,26 @@ use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Error {
+    RangeDoesNotExist,
     RangeIsNotLoaded,
-    WaitDieAbort,
-    TransactionLockLost,
-    Unknown,
+    KeyIsOutOfRange,
+    RangeOwnershipLost,
+    Timeout,
+    TransactionAborted(TransactionAbortReason),
+    InternalError(Arc<dyn std::error::Error + Send + Sync>),
+}
+
+impl Error {
+    fn from_persistence_error(e: PersistenceError) -> Self {
+        match e {
+            PersistenceError::RangeDoesNotExist => Self::RangeDoesNotExist,
+            PersistenceError::RangeOwnershipLost => Self::RangeOwnershipLost,
+            PersistenceError::Timeout => Self::Timeout,
+            PersistenceError::InternalError(_) => Self::InternalError(Arc::new(e)),
+        }
+    }
 }
 
 type UtcDateTime = DateTime<chrono::Utc>;
@@ -96,7 +112,7 @@ impl LockTable {
                         .map_or(current_holder.transaction.id, |r| r.transaction.id);
                     if highest_waiter > tx.id {
                         // TODO: allow for skipping these checks if locks are ordered!
-                        Err(Error::WaitDieAbort)
+                        Err(Error::TransactionAborted(TransactionAbortReason::WaitDie))
                     } else {
                         let req = LockRequest {
                             transaction: tx.clone(),
@@ -181,58 +197,66 @@ where
         })
     }
 
+    async fn load_inner(&self) -> Result<LoadedState, Error> {
+        // TODO: handle all errors instead of panicing.
+        let epoch = self.epoch_provider.read_epoch().await.unwrap();
+        let range_info = self
+            .persistence
+            .take_ownership_and_load_range(self.range_id)
+            .await
+            .map_err(Error::from_persistence_error)?;
+        // Epoch read from the provider can be 1 less than the true epoch. The highest known epoch
+        // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
+        // we just wait for the epoch to advance once.
+        self.epoch_provider
+            .wait_until_epoch(epoch + 1)
+            .await
+            .unwrap();
+        // Get a new epoch lease.
+        // TODO: Create a recurrent task to renew.
+        let highest_known_epoch = epoch + 1;
+        let new_epoch_lease_lower_bound =
+            std::cmp::max(highest_known_epoch, range_info.epoch_lease.1 + 1);
+        let new_epoch_lease_upper_bound = new_epoch_lease_lower_bound + 10;
+        self.persistence
+            .renew_epoch_lease(
+                self.range_id,
+                (new_epoch_lease_lower_bound, new_epoch_lease_upper_bound),
+                range_info.leader_sequence_number,
+            )
+            .await
+            .map_err(Error::from_persistence_error)?;
+        // TODO: apply WAL here!
+        Ok(LoadedState {
+            range_info,
+            highest_known_epoch,
+            lock_table: Mutex::new(LockTable::new()),
+        })
+    }
+
     pub async fn load(&self) -> Result<(), Error> {
-        let should_load = {
+        {
             let mut state = self.state.write().await;
             match *state {
-                State::Loading | State::Loaded(_) => false,
+                State::Loaded(_) => return Ok(()),
+                State::Loading => todo!(),
                 State::Unloaded => {
                     *state = State::Loading;
                     true
                 }
             }
         };
-
-        if !should_load {
-            Ok(())
-        } else {
-            // TODO: handle errors and restore state to Unloaded on failures, instead of panicing.
-            let epoch = self.epoch_provider.read_epoch().await.unwrap();
-            let range_info = self
-                .persistence
-                .take_ownership_and_load_range(self.range_id)
-                .await
-                .unwrap();
-            // Epoch read from the provider can be 1 less than the true epoch. The highest known epoch
-            // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
-            // we just wait for the epoch to advance once.
-            self.epoch_provider
-                .wait_until_epoch(epoch + 1)
-                .await
-                .unwrap();
-            // Get a new epoch lease.
-            // TODO: Create a recurrent task to renew.
-            let highest_known_epoch = epoch + 1;
-            let new_epoch_lease_lower_bound =
-                std::cmp::max(highest_known_epoch, range_info.epoch_lease.1 + 1);
-            let new_epoch_lease_upper_bound = new_epoch_lease_lower_bound + 10;
-            self.persistence
-                .renew_epoch_lease(
-                    self.range_id,
-                    (new_epoch_lease_lower_bound, new_epoch_lease_upper_bound),
-                    range_info.leader_sequence_number,
-                )
-                .await
-                .unwrap();
-            // TODO: apply WAL here!
-            let loaded_state = LoadedState {
-                range_info,
-                highest_known_epoch,
-                lock_table: Mutex::new(LockTable::new()),
-            };
-            let mut state = self.state.write().await;
-            *state = State::Loaded(loaded_state);
-            Ok(())
+        let load_result: Result<LoadedState, Error> = self.load_inner().await;
+        let mut state = self.state.write().await;
+        match load_result {
+            Err(e) => {
+                *state = State::Unloaded;
+                Err(e)
+            }
+            Ok(loaded_state) => {
+                *state = State::Loaded(loaded_state);
+                Ok(())
+            }
         }
     }
 
@@ -276,7 +300,9 @@ where
                 {
                     let lock_table = state.lock_table.lock().await;
                     if prepare.has_reads() && !lock_table.is_currently_holding(tx.clone()) {
-                        return Err(Error::TransactionLockLost);
+                        return Err(Error::TransactionAborted(
+                            TransactionAbortReason::TransactionLockLost,
+                        ));
                     }
                 };
                 self.acquire_range_lock(state, tx.clone()).await?;
@@ -304,6 +330,7 @@ where
                     return Ok(());
                 }
                 {
+                    // TODO: We can skip aborting to the log if we never appended a prepare record.
                     let mut wal = self.wal.lock().await;
                     wal.append_abort(abort).await.unwrap();
                 }
@@ -313,6 +340,10 @@ where
         }
     }
 
+    // Commit *informs* the range manager of a transaction commit, it does not
+    // decide the transaction outcome.
+    // A call to commit can fail only for intermittent reasons, and must be
+    // idempotent and safe to retry any number of times.
     pub async fn commit(
         &self,
         tx: Arc<TransactionInfo>,
@@ -324,7 +355,9 @@ where
             State::Loaded(state) => {
                 let mut lock_table = state.lock_table.lock().await;
                 if !lock_table.is_currently_holding(tx.clone()) {
-                    panic!("committing a transaction that is not holding the lock!!!")
+                    // it must be that we already finished committing, but perhaps the coordinator didn't
+                    // realize that, so we just return success.
+                    return Ok(());
                 }
                 {
                     // TODO: update highest known epoch!

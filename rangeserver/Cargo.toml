@@ -13,4 +13,6 @@ bytes = "1"
 flatbuf = {path = "../flatbuf"}
 chrono = "0.4.34"
 flatbuffers = "*"
+thiserror = "1.0.57"
+strum = {version ="0.26.1", features = ["std", "derive"]}
 

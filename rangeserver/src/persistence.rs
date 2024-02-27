@@ -1,8 +1,11 @@
 pub mod cassandra;
 
+use std::sync::Arc;
+
 use crate::key_range::KeyRange;
 use crate::key_version::KeyVersion;
 use bytes::Bytes;
+use thiserror::Error;
 use uuid::Uuid;
 
 type EpochLease = (u64, u64);
@@ -14,12 +17,16 @@ pub struct RangeInfo {
     pub epoch_lease: EpochLease,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Error)]
 pub enum Error {
+    #[error("Timeout Error")]
     Timeout,
+    #[error("No range with this id exists in the persistence layer")]
     RangeDoesNotExist,
+    #[error("Range ownership claimed by another range server")]
     RangeOwnershipLost,
-    InternalError(Box<dyn std::error::Error>),
+    #[error("Persistence Layer error: {0}")]
+    InternalError(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 pub trait Persistence {

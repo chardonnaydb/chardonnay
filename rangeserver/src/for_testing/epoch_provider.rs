@@ -3,7 +3,6 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::RwLock;
 use tokio::sync::oneshot;
-use tokio::sync::Mutex;
 
 struct EpochWaiter {
     epoch: u64,

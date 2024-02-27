@@ -4,5 +4,6 @@ mod key_range;
 mod key_version;
 mod persistence;
 mod range_manager;
+mod transaction_abort_reason;
 mod transaction_info;
 mod wal;

@@ -1,7 +1,9 @@
 use flatbuf::rangeserver_flatbuffers::range_server::*;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
+    #[error("Unknown")]
     Unknown,
 }
 

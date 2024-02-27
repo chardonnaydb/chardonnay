@@ -95,7 +95,7 @@ fn scylla_query_error_to_persistence_error(qe: QueryError) -> Error {
             // TODO: It is essential to correctly categorize timeout errors, since these could indicate an operation
             // might still succeed and require extra care in dealing with. Having a catch-all is bad since we might
             // break if a new timeout variant is added.
-            Error::InternalError(From::from(qe))
+            Error::InternalError(Arc::new(qe))
         }
     }
 }

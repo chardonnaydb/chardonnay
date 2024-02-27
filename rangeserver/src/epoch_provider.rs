@@ -1,6 +1,9 @@
-#[derive(Debug)]
+use thiserror::Error;
+
+#[derive(Debug, Error)]
 pub enum Error {
-    UNKNOWN,
+    #[error("Unknown")]
+    Unknown,
 }
 
 pub trait EpochProvider {
