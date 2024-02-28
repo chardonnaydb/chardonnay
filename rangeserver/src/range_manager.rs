@@ -1,8 +1,8 @@
 use crate::{
-    epoch_provider::EpochProvider, key_version::KeyVersion, persistence::Error as PersistenceError,
-    persistence::Persistence, persistence::RangeInfo,
-    transaction_abort_reason::TransactionAbortReason, transaction_info::TransactionInfo,
-    wal::Iterator, wal::Wal,
+    epoch_provider::EpochProvider, epoch_provider::Error as EpochProviderError,
+    key_version::KeyVersion, persistence::Error as PersistenceError, persistence::Persistence,
+    persistence::RangeInfo, transaction_abort_reason::TransactionAbortReason,
+    transaction_info::TransactionInfo, wal::Error as WalError, wal::Iterator, wal::Wal,
 };
 use bytes::Bytes;
 use chrono::DateTime;
@@ -33,6 +33,18 @@ impl Error {
             PersistenceError::RangeOwnershipLost => Self::RangeOwnershipLost,
             PersistenceError::Timeout => Self::Timeout,
             PersistenceError::InternalError(_) => Self::InternalError(Arc::new(e)),
+        }
+    }
+
+    fn from_wal_error(e: WalError) -> Self {
+        match e {
+            WalError::Unknown => Self::InternalError(Arc::new(e)),
+        }
+    }
+
+    fn from_epoch_provider_error(e: EpochProviderError) -> Self {
+        match e {
+            EpochProviderError::Unknown => Self::InternalError(Arc::new(e)),
         }
     }
 }
@@ -199,7 +211,11 @@ where
 
     async fn load_inner(&self) -> Result<LoadedState, Error> {
         // TODO: handle all errors instead of panicing.
-        let epoch = self.epoch_provider.read_epoch().await.unwrap();
+        let epoch = self
+            .epoch_provider
+            .read_epoch()
+            .await
+            .map_err(Error::from_epoch_provider_error)?;
         let range_info = self
             .persistence
             .take_ownership_and_load_range(self.range_id)
@@ -211,7 +227,7 @@ where
         self.epoch_provider
             .wait_until_epoch(epoch + 1)
             .await
-            .unwrap();
+            .map_err(Error::from_epoch_provider_error)?;
         // Get a new epoch lease.
         // TODO: Create a recurrent task to renew.
         let highest_known_epoch = epoch + 1;
@@ -282,12 +298,17 @@ where
                     .persistence
                     .get(self.range_id, key.clone())
                     .await
-                    .unwrap();
+                    .map_err(Error::from_persistence_error)?;
                 Ok(val.clone())
             }
         }
     }
 
+    // If prepare ever returns success, we must be able to (eventually) commit the
+    // transaction no matter what, unless we get an abort call from the coordinator
+    // or know for certain that the transaction aborted.
+    // It is possible that prepare gets called multiple times due to retries from the
+    // coordinator, so we must be able to handle that.
     pub async fn prepare(
         &self,
         tx: Arc<TransactionInfo>,
@@ -308,7 +329,9 @@ where
                 self.acquire_range_lock(state, tx.clone()).await?;
                 {
                     let mut wal = self.wal.lock().await;
-                    wal.append_prepare(prepare).await.unwrap();
+                    wal.append_prepare(prepare)
+                        .await
+                        .map_err(Error::from_wal_error)?;
                 }
 
                 Ok(())
@@ -332,7 +355,11 @@ where
                 {
                     // TODO: We can skip aborting to the log if we never appended a prepare record.
                     let mut wal = self.wal.lock().await;
-                    wal.append_abort(abort).await.unwrap();
+                    // TODO: It's possible the WAL already contains this record in case this is a retry
+                    // so avoid re-inserting in that case.
+                    wal.append_abort(abort)
+                        .await
+                        .map_err(Error::from_wal_error)?;
                 }
                 lock_table.release();
                 Ok(())
@@ -362,7 +389,9 @@ where
                 {
                     // TODO: update highest known epoch!
                     let mut wal = self.wal.lock().await;
-                    wal.append_commit(commit).await.unwrap();
+                    wal.append_commit(commit)
+                        .await
+                        .map_err(Error::from_wal_error)?;
                     // Find the corresponding prepare entry in the WAL to get the writes.
                     // This is quite inefficient, we should cache a copy in memory instead, but for now
                     // it's convenient to also test WAL iteration.
@@ -399,6 +428,8 @@ where
                     // TODO: we shouldn't be doing a persistence operation per individual key put or delete.
                     // Instead we should write them in batches, and whenever we do multiple operations they
                     // should go in parallel not sequentially.
+                    // We should also add retries in case of intermittent failures. Note that all our
+                    // persistence operations here are idempotent and safe to retry any number of times.
                     for put in prepare_record.puts().iter() {
                         for put in put.iter() {
                             // TODO: too much copying :(
@@ -409,7 +440,7 @@ where
                             self.persistence
                                 .upsert(self.range_id, key, val, version)
                                 .await
-                                .unwrap();
+                                .map_err(Error::from_persistence_error)?;
                         }
                     }
                     for del in prepare_record.deletes().iter() {
@@ -418,7 +449,7 @@ where
                             self.persistence
                                 .delete(self.range_id, key, version)
                                 .await
-                                .unwrap()
+                                .map_err(Error::from_persistence_error)?;
                         }
                     }
                 }
