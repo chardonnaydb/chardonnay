@@ -1,8 +1,9 @@
 use crate::{
     epoch_provider::EpochProvider, epoch_provider::Error as EpochProviderError,
-    key_version::KeyVersion, persistence::Error as PersistenceError, persistence::Persistence,
-    persistence::RangeInfo, transaction_abort_reason::TransactionAbortReason,
-    transaction_info::TransactionInfo, wal::Error as WalError, wal::Iterator, wal::Wal,
+    full_range_id::FullRangeId, key_version::KeyVersion, persistence::Error as PersistenceError,
+    persistence::Persistence, persistence::RangeInfo,
+    transaction_abort_reason::TransactionAbortReason, transaction_info::TransactionInfo,
+    wal::Error as WalError, wal::Iterator, wal::Wal,
 };
 use bytes::Bytes;
 use chrono::DateTime;
@@ -186,10 +187,10 @@ where
     E: EpochProvider,
     W: Wal,
 {
+    range_id: FullRangeId,
     persistence: Arc<P>,
     epoch_provider: Arc<E>,
     wal: Mutex<W>,
-    range_id: Uuid,
     state: RwLock<State>,
 }
 
@@ -199,7 +200,13 @@ where
     E: EpochProvider,
     W: Wal,
 {
-    pub fn new(range_id: Uuid, persistence: Arc<P>, epoch_provider: Arc<E>, wal: W) -> Box<Self> {
+    pub fn new(
+        range_id: FullRangeId,
+
+        persistence: Arc<P>,
+        epoch_provider: Arc<E>,
+        wal: W,
+    ) -> Box<Self> {
         Box::new(RangeManager {
             range_id,
             persistence,
@@ -473,6 +480,7 @@ mod tests {
     use crate::epoch_provider::EpochProvider as EpochProviderTrait;
     use crate::for_testing::epoch_provider::EpochProvider;
     use crate::for_testing::in_memory_wal::InMemoryWal;
+    use crate::persistence::cassandra::tests::TEST_KEYSPACE_ID;
     use crate::persistence::cassandra::tests::TEST_RANGE_UUID;
     use crate::persistence::cassandra::Cassandra;
 
@@ -521,7 +529,7 @@ mod tests {
                 del_vector.push(key);
             }
             let deletes = Some(fbb.create_vector(&del_vector));
-            let range_id_string = self.range_id.to_string();
+            let range_id_string = self.range_id.range_id.to_string();
             let range_id = Some(fbb.create_string(&range_id_string));
             let fbb_root = PrepareRecord::create(
                 &mut fbb,
@@ -563,7 +571,10 @@ mod tests {
         let epoch_provider = Arc::new(EpochProvider::new());
         let wal = Mutex::new(InMemoryWal::new());
         let cassandra = Arc::new(crate::persistence::cassandra::tests::init().await);
-        let range_id = Uuid::parse_str(TEST_RANGE_UUID).unwrap();
+        let range_id = FullRangeId {
+            keyspace_id: Uuid::parse_str(TEST_KEYSPACE_ID).unwrap(),
+            range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),
+        };
         let rm = Arc::new(RM {
             range_id,
             persistence: cassandra,
