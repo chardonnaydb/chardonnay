@@ -7,6 +7,7 @@ use crate::{
 };
 use bytes::Bytes;
 use chrono::DateTime;
+use core::time;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -174,6 +175,7 @@ struct LoadedState {
     range_info: RangeInfo,
     highest_known_epoch: u64,
     lock_table: Mutex<LockTable>,
+    lease_renewal_task: tokio::task::JoinHandle<Result<(), Error>>,
 }
 
 enum State {
@@ -192,7 +194,7 @@ where
     persistence: Arc<P>,
     epoch_provider: Arc<E>,
     wal: Mutex<W>,
-    state: RwLock<State>,
+    state: Arc<RwLock<State>>,
 }
 
 impl<P, E, W> RangeManager<P, E, W>
@@ -213,12 +215,12 @@ where
             persistence,
             epoch_provider,
             wal: Mutex::new(wal),
-            state: RwLock::new(State::Unloaded),
+            state: Arc::new(RwLock::new(State::Unloaded)),
         })
     }
 
     async fn load_inner(&self) -> Result<LoadedState, Error> {
-        // TODO: handle all errors instead of panicing.
+        // TODO: handle all errors instead of panicking.
         let epoch = self
             .epoch_provider
             .read_epoch()
@@ -237,7 +239,6 @@ where
             .await
             .map_err(Error::from_epoch_provider_error)?;
         // Get a new epoch lease.
-        // TODO: Create a recurrent task to renew.
         let highest_known_epoch = epoch + 1;
         let new_epoch_lease_lower_bound =
             std::cmp::max(highest_known_epoch, range_info.epoch_lease.1 + 1);
@@ -250,12 +251,102 @@ where
             )
             .await
             .map_err(Error::from_persistence_error)?;
+        // Create a recurrent task to renew.
+        // TODO: Decide on a better interval.
+        let lease_renewal_interval = time::Duration::from_secs(10);
+        // TODO: Check on the task handle to see if it errored out.
+        let lease_renewal_task = self
+            .start_renew_epoch_lease_task(lease_renewal_interval)
+            .await;
         // TODO: apply WAL here!
         Ok(LoadedState {
             range_info,
             highest_known_epoch,
             lock_table: Mutex::new(LockTable::new()),
+            lease_renewal_task: lease_renewal_task,
         })
+    }
+
+    async fn renew_epoch_lease_task(
+        range_id: FullRangeId,
+        epoch_provider: Arc<E>,
+        persistence: Arc<P>,
+        state: Arc<RwLock<State>>,
+        lease_renewal_interval: std::time::Duration,
+    ) -> Result<(), Error> {
+        loop {
+            let leader_sequence_number: u64;
+            let old_lease: (u64, u64);
+            let epoch = epoch_provider
+                .read_epoch()
+                .await
+                .map_err(Error::from_epoch_provider_error)?;
+            let highest_known_epoch = epoch + 1;
+            if let State::Loaded(state) = state.read().await.deref() {
+                old_lease = state.range_info.epoch_lease;
+                leader_sequence_number = state.range_info.leader_sequence_number;
+            } else {
+                return Err(Error::RangeIsNotLoaded);
+            }
+            // TODO: If we renew too often, this could get out of hand.
+            // We should probably limit the max number of epochs in the future
+            // we can request a lease for.
+            let new_epoch_lease_lower_bound = std::cmp::max(highest_known_epoch, old_lease.1 + 1);
+            let new_epoch_lease_upper_bound = new_epoch_lease_lower_bound + 10;
+            // TODO: We should handle some errors here. For example:
+            // - If the error seems transient (e.g., a timeout), we should retry.
+            // - If the error is something like RangeOwnershipLost, we should unload the range.
+            persistence
+                .renew_epoch_lease(
+                    range_id,
+                    (new_epoch_lease_lower_bound, new_epoch_lease_upper_bound),
+                    leader_sequence_number,
+                )
+                .await
+                .map_err(Error::from_persistence_error)?;
+
+            // Update the state.
+            // If our new lease continues from our old lease, merge the ranges.
+            let mut new_lease = (new_epoch_lease_lower_bound, new_epoch_lease_upper_bound);
+            if (new_epoch_lease_lower_bound - old_lease.1) == 1 {
+                new_lease = (old_lease.0, new_epoch_lease_upper_bound);
+            }
+            if let State::Loaded(state) = state.write().await.deref_mut() {
+                // This should never happen as only this task changes the epoch lease.
+                assert_eq!(
+                    state.range_info.epoch_lease, old_lease,
+                    "Epoch lease changed by someone else, but only this task should be changing it!"
+                );
+                state.range_info.epoch_lease = new_lease;
+                state.highest_known_epoch =
+                    std::cmp::max(state.highest_known_epoch, highest_known_epoch);
+            } else {
+                return Err(Error::RangeIsNotLoaded);
+            }
+            // Sleep for a while before renewing the lease again.
+            tokio::time::sleep(lease_renewal_interval).await;
+        }
+    }
+
+    async fn start_renew_epoch_lease_task(
+        &self,
+        lease_renewal_interval: std::time::Duration,
+    ) -> tokio::task::JoinHandle<Result<(), Error>> {
+        let range_id = self.range_id;
+        let epoch_provider = self.epoch_provider.clone();
+        let persistence = self.persistence.clone();
+        let state = self.state.clone();
+        let task_handle = tokio::spawn(async move {
+            Self::renew_epoch_lease_task(
+                range_id,
+                epoch_provider,
+                persistence,
+                state,
+                lease_renewal_interval,
+            )
+            .await
+        });
+        task_handle
     }
 
     pub async fn load(&self) -> Result<(), Error> {
@@ -605,7 +696,7 @@ mod tests {
             persistence: cassandra,
             wal,
             epoch_provider,
-            state: RwLock::new(State::Unloaded),
+            state: Arc::new(RwLock::new(State::Unloaded)),
         });
         let rm_copy = rm.clone();
         let init_handle = tokio::spawn(async move { rm_copy.load().await.unwrap() });
@@ -642,5 +733,30 @@ mod tests {
         let tx3 = start_transaction();
         let val_after_commit = rm.get(tx3.clone(), key.clone()).await.unwrap().unwrap();
         assert!(val_after_commit == val);
+    }
+
+    #[tokio::test]
+    async fn test_recurring_lease_renewal() {
+        let rm = init().await;
+        // Get the current lease bounds.
+        let initial_lease = match rm.state.read().await.deref() {
+            State::Loaded(state) => state.range_info.epoch_lease,
+            _ => panic!("Range is not loaded"),
+        };
+        // Sleep for 15 seconds to allow the lease renewal task to run at least once.
+        tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+        let final_lease = match rm.state.read().await.deref() {
+            State::Loaded(state) => state.range_info.epoch_lease,
+            _ => panic!("Range is not loaded"),
+        };
+        // Check that the upper bound has increased.
+        assert!(
+            final_lease.1 > initial_lease.1,
+            "Lease upper bound did not increase"
+        );
+        assert_eq!(
+            final_lease.0, initial_lease.0,
+            "Lease lower bound should not change"
+        );
     }
 }

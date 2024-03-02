@@ -31,38 +31,42 @@ pub enum Error {
 }
 
 pub trait Persistence: Send + Sync + 'static {
-    async fn take_ownership_and_load_range(
+    fn take_ownership_and_load_range(
         &self,
         range_id: FullRangeId,
-    ) -> Result<RangeInfo, Error>;
-    async fn renew_epoch_lease(
+    ) -> impl std::future::Future<Output = Result<RangeInfo, Error>> + Send;
+    fn renew_epoch_lease(
         &self,
         range_id: FullRangeId,
         new_lease: EpochLease,
         leader_sequence_number: u64,
-    ) -> Result<(), Error>;
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 
     // TODO: Handle deletes and tombstones in the API too.
-    async fn put_versioned_record(
+    fn put_versioned_record(
         &self,
         range_id: FullRangeId,
         key: Bytes,
         val: Bytes,
         version: KeyVersion,
-    ) -> Result<(), Error>;
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 
-    async fn upsert(
+    fn upsert(
         &self,
         range_id: FullRangeId,
         key: Bytes,
         val: Bytes,
         version: KeyVersion,
-    ) -> Result<(), Error>;
-    async fn delete(
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
+    fn delete(
         &self,
         range_id: FullRangeId,
         key: Bytes,
         version: KeyVersion,
-    ) -> Result<(), Error>;
-    async fn get(&self, range_id: FullRangeId, key: Bytes) -> Result<Option<Bytes>, Error>;
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
+    fn get(
+        &self,
+        range_id: FullRangeId,
+        key: Bytes,
+    ) -> impl std::future::Future<Output = Result<Option<Bytes>, Error>> + Send;
 }

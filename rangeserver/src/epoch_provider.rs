@@ -12,7 +12,10 @@ pub trait EpochProvider: Send + Sync + 'static {
     // greater than or equal to e-1.
     // In particular this means that the value returned from here could be one less
     // than the true epoch.
-    async fn read_epoch(&self) -> Result<u64, Error>;
+    fn read_epoch(&self) -> impl std::future::Future<Output = Result<u64, Error>> + Send;
 
-    async fn wait_until_epoch(&self, epoch: u64) -> Result<(), Error>;
+    fn wait_until_epoch(
+        &self,
+        epoch: u64,
+    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 }
