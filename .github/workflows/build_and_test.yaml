@@ -1,0 +1,38 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+      name: Check out the repository code
+
+    # TODO: Might need to wait a bit until Cassandra becomes ready.
+    - name: Set up Docker Container
+      run: docker run -d -p 9042:9042 --name cassandra cassandra:5.0
+
+    - name: Install flatbuffers
+      run: scripts/linux_install_flatbuffers.sh
+
+    - name: Install cqlsh
+      run: pip install cqlsh
+
+    - name: Build
+      run: cargo build
+
+    - name: Create keyspace
+      run: |
+        cqlsh -f schema/cassandra/chardonnay/keyspace.cql
+        cqlsh -k e149e248_8293_4eb2_a6ff_63478dc3e533 -f schema/cassandra/chardonnay/schema.cql
+
+    - name: Run tests
+      run: cargo test
