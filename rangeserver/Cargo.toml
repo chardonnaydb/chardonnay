@@ -15,4 +15,6 @@ chrono = "0.4.34"
 flatbuffers = "*"
 thiserror = "1.0.57"
 strum = {version ="0.26.1", features = ["std", "derive"]}
+machnet = "0.1.9"
+tonic = "0.11.0"
 
