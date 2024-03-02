@@ -10,6 +10,7 @@ use chrono::DateTime;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
 use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
@@ -300,6 +301,9 @@ where
         match s.deref() {
             State::Unloaded | State::Loading => Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
+                if !state.range_info.key_range.includes(key.clone()) {
+                    return Err(Error::KeyIsOutOfRange);
+                };
                 self.acquire_range_lock(state, tx.clone()).await?;
                 let val = self
                     .persistence
@@ -325,6 +329,26 @@ where
         match s.deref() {
             State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
+                // Sanity check that the written keys are all within this range.
+                for put in prepare.puts().iter() {
+                    for put in put.iter() {
+                        // TODO: too much copying :(
+                        let key = Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
+                        if !state.range_info.key_range.includes(key) {
+                            return Err(Error::KeyIsOutOfRange);
+                        }
+                    }
+                }
+                for del in prepare.deletes().iter() {
+                    for del in del.iter() {
+                        let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
+                        if !state.range_info.key_range.includes(key) {
+                            return Err(Error::KeyIsOutOfRange);
+                        }
+                    }
+                }
+                // Validate the transaction lock is not lost, this is essential to ensure 2PL
+                // invariants still hold.
                 {
                     let lock_table = state.lock_table.lock().await;
                     if prepare.has_reads() && !lock_table.is_currently_holding(tx.clone()) {
@@ -383,8 +407,8 @@ where
         tx: Arc<TransactionInfo>,
         commit: CommitRecord<'_>,
     ) -> Result<(), Error> {
-        let s = self.state.write().await;
-        match s.deref() {
+        let mut s = self.state.write().await;
+        match s.deref_mut() {
             State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 let mut lock_table = state.lock_table.lock().await;
@@ -393,8 +417,9 @@ where
                     // realize that, so we just return success.
                     return Ok(());
                 }
+                state.highest_known_epoch =
+                    std::cmp::max(state.highest_known_epoch, commit.epoch() as u64);
                 {
-                    // TODO: update highest known epoch!
                     let mut wal = self.wal.lock().await;
                     wal.append_commit(commit)
                         .await

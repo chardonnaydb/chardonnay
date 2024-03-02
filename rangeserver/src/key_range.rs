@@ -6,7 +6,7 @@ pub struct KeyRange {
 }
 
 impl KeyRange {
-    fn includes(&self, key: Bytes) -> bool {
+    pub fn includes(&self, key: Bytes) -> bool {
         let within_lower = match &self.lower_bound_inclusive {
             None => true,
             Some(b) => key >= b,
