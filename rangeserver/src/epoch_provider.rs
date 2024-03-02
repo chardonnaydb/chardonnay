@@ -6,7 +6,7 @@ pub enum Error {
     Unknown,
 }
 
-pub trait EpochProvider {
+pub trait EpochProvider: Send + Sync + 'static {
     // Values returned must satisfy the Global Epoch Invariant:
     // If a call returns a value e, then all subsequent calls must return a value
     // greater than or equal to e-1.

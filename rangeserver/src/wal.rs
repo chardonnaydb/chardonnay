@@ -12,7 +12,7 @@ pub trait Iterator<'a> {
     async fn next_offset(&self) -> Result<u64, Error>;
 }
 
-pub trait Wal {
+pub trait Wal: Send + Sync + 'static {
     async fn first_offset(&self) -> Result<u64, Error>;
     async fn next_offset(&self) -> Result<u64, Error>;
     async fn append_prepare(&mut self, entry: PrepareRecord<'_>) -> Result<(), Error>;

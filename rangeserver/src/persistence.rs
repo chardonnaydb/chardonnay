@@ -30,7 +30,7 @@ pub enum Error {
     InternalError(Arc<dyn std::error::Error + Send + Sync>),
 }
 
-pub trait Persistence {
+pub trait Persistence: Send + Sync + 'static {
     async fn take_ownership_and_load_range(
         &self,
         range_id: FullRangeId,
