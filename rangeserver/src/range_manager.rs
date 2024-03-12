@@ -7,6 +7,7 @@ use crate::{
 };
 use bytes::Bytes;
 use chrono::DateTime;
+use common::config::Config;
 use core::time;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
@@ -191,6 +192,7 @@ where
     W: Wal,
 {
     range_id: FullRangeId,
+    config: Config,
     persistence: Arc<P>,
     epoch_provider: Arc<E>,
     wal: Mutex<W>,
@@ -205,13 +207,14 @@ where
 {
     pub fn new(
         range_id: FullRangeId,
-
+        config: Config,
         persistence: Arc<P>,
         epoch_provider: Arc<E>,
         wal: W,
     ) -> Box<Self> {
         Box::new(RangeManager {
             range_id,
+            config,
             persistence,
             epoch_provider,
             wal: Mutex::new(wal),
@@ -252,8 +255,7 @@ where
             .await
             .map_err(Error::from_persistence_error)?;
         // Create a recurrent task to renew.
-        // TODO: Decide on a better interval.
-        let lease_renewal_interval = time::Duration::from_secs(10);
+        let lease_renewal_interval = self.config.range_server.range_maintenance_duration;
         // TODO: Check on the task handle to see if it errored out.
         let lease_renewal_task = self
             .start_renew_epoch_lease_task(lease_renewal_interval)
@@ -590,6 +592,7 @@ where
 #[cfg(test)]
 mod tests {
 
+    use common::config::RangeServerConfig;
     use flatbuffers::FlatBufferBuilder;
 
     use super::*;
@@ -691,8 +694,14 @@ mod tests {
             keyspace_id: Uuid::parse_str(TEST_KEYSPACE_ID).unwrap(),
             range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),
         };
+        let config = Config {
+            range_server: RangeServerConfig {
+                range_maintenance_duration: time::Duration::from_secs(1),
+            },
+        };
         let rm = Arc::new(RM {
             range_id,
+            config,
             persistence: cassandra,
             wal,
             epoch_provider,
@@ -743,8 +752,8 @@ mod tests {
             State::Loaded(state) => state.range_info.epoch_lease,
             _ => panic!("Range is not loaded"),
         };
-        // Sleep for 15 seconds to allow the lease renewal task to run at least once.
-        tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+        // Sleep for 2 seconds to allow the lease renewal task to run at least once.
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         let final_lease = match rm.state.read().await.deref() {
             State::Loaded(state) => state.range_info.epoch_lease,
             _ => panic!("Range is not loaded"),
