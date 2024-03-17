@@ -25,7 +25,7 @@ To run the tests you need:
 
     ```sh
     cqlsh -f schema/cassandra/chardonnay/keyspace.cql
-    cqlsh -k e149e248_8293_4eb2_a6ff_63478dc3e533 -f schema/cassandra/chardonnay/schema.cql
+    cqlsh -k chardonnay -f schema/cassandra/chardonnay/schema.cql
     ```
 
 ### Run Tests

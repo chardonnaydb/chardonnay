@@ -13,10 +13,6 @@ pub struct Cassandra {
     session: Session,
 }
 
-fn cql_keyspace(full_range_id: &FullRangeId) -> String {
-    full_range_id.keyspace_id.to_string().replace("-", "_")
-}
-
 #[derive(Debug, FromUserType, IntoUserType)]
 struct CqlEpochRange {
     lower_bound_inclusive: i64,
@@ -57,37 +53,37 @@ impl CqlRangeLease {
 }
 
 static GET_RANGE_LEASE_QUERY: &str = r#"
-  SELECT * FROM "{}".range_leases
+  SELECT * FROM chardonnay.range_leases
     WHERE range_id = ?;
 "#;
 
 static ACQUIRE_RANGE_LEASE_QUERY: &str = r#"
-  UPDATE "{}".range_leases SET leader_sequence_number = ?
+  UPDATE chardonnay.range_leases SET leader_sequence_number = ?
     WHERE range_id = ? 
     IF leader_sequence_number = ? 
 "#;
 
 static RENEW_EPOCH_LEASE_QUERY: &str = r#"
-  UPDATE "{}".range_leases SET epoch_lease = ?
+  UPDATE chardonnay.range_leases SET epoch_lease = ?
     WHERE range_id = ? 
     IF leader_sequence_number = ? 
 "#;
 
 static UPSERT_QUERY: &str = r#"
-  INSERT INTO "{}".records (range_id, key, value, epoch) 
+  INSERT INTO chardonnay.records (range_id, key, value, epoch) 
     VALUES (?, ?, ?, ?) 
     USING TIMESTAMP ?
 "#;
 
 static DELETE_QUERY: &str = r#"
-  DELETE FROM "{}".records
+  DELETE FROM chardonnay.records
     USING TIMESTAMP ?
     WHERE range_id = ?
     AND key = ?
 "#;
 
 static GET_QUERY: &str = r#"
-  SELECT value from "{}".records
+  SELECT value from chardonnay.records
   WHERE range_id = ? AND key = ?
 "#;
 
@@ -107,10 +103,9 @@ fn scylla_query_error_to_persistence_error(qe: QueryError) -> Error {
 
 impl Cassandra {
     async fn get_range_lease(&self, range_id: FullRangeId) -> Result<CqlRangeLease, Error> {
-        let query = GET_RANGE_LEASE_QUERY.replace("{}", &cql_keyspace(&range_id));
         let rows = self
             .session
-            .query(query, (range_id.range_id,))
+            .query(GET_RANGE_LEASE_QUERY, (range_id.range_id,))
             .await
             .map_err(scylla_query_error_to_persistence_error)?
             .rows;
@@ -136,14 +131,13 @@ impl Persistence for Cassandra {
         &self,
         range_id: FullRangeId,
     ) -> Result<RangeInfo, Error> {
-        let query = ACQUIRE_RANGE_LEASE_QUERY.replace("{}", &cql_keyspace(&range_id));
         let cql_lease = self.get_range_lease(range_id).await?;
         let prev_leader_sequence_number = cql_lease.leader_sequence_number;
         let new_leader_sequence_number = prev_leader_sequence_number + 1;
         let _ = self
             .session
             .query(
-                query,
+                ACQUIRE_RANGE_LEASE_QUERY,
                 (
                     new_leader_sequence_number,
                     cql_lease.range_id,
@@ -177,7 +171,6 @@ impl Persistence for Cassandra {
         (llb, lup): EpochLease,
         leader_sequence_number: u64,
     ) -> Result<(), Error> {
-        let query = RENEW_EPOCH_LEASE_QUERY.replace("{}", &cql_keyspace(&range_id));
         let cql_epoch_range = CqlEpochRange {
             lower_bound_inclusive: llb as i64,
             upper_bound_inclusive: lup as i64,
@@ -185,7 +178,7 @@ impl Persistence for Cassandra {
         let _ = self
             .session
             .query(
-                query,
+                RENEW_EPOCH_LEASE_QUERY,
                 (
                     cql_epoch_range,
                     range_id.range_id,
@@ -222,11 +215,10 @@ impl Persistence for Cassandra {
         val: Bytes,
         version: KeyVersion,
     ) -> Result<(), Error> {
-        let query = UPSERT_QUERY.replace("{}", &cql_keyspace(&range_id));
         let _ = self
             .session
             .query(
-                query,
+                UPSERT_QUERY,
                 (
                     range_id.range_id,
                     key.to_vec(),
@@ -246,11 +238,10 @@ impl Persistence for Cassandra {
         key: Bytes,
         version: KeyVersion,
     ) -> Result<(), Error> {
-        let query = DELETE_QUERY.replace("{}", &cql_keyspace(&range_id));
         let _ = self
             .session
             .query(
-                query,
+                DELETE_QUERY,
                 (version.epoch as i64, range_id.range_id, key.to_vec()),
             )
             .await
@@ -259,10 +250,9 @@ impl Persistence for Cassandra {
     }
 
     async fn get(&self, range_id: FullRangeId, key: Bytes) -> Result<Option<Bytes>, Error> {
-        let query = GET_QUERY.replace("{}", &cql_keyspace(&range_id));
         let rows = self
             .session
-            .query(query, (range_id.range_id, key.to_vec()))
+            .query(GET_QUERY, (range_id.range_id, key.to_vec()))
             .await
             .map_err(scylla_query_error_to_persistence_error)?
             .rows;
@@ -320,7 +310,7 @@ pub mod tests {
         };
         cassandra
             .session
-            .query("INSERT INTO \"e149e248_8293_4eb2_a6ff_63478dc3e533\".range_leases (range_id, leader_sequence_number, epoch_lease, safe_snapshot_epochs) VALUES (?, ?, ?, ?) IF NOT EXISTS", (cql_range.range_id, cql_range.leader_sequence_number, cql_range.epoch_lease, cql_range.safe_snapshot_epochs))
+            .query("INSERT INTO chardonnay.range_leases (range_id, leader_sequence_number, epoch_lease, safe_snapshot_epochs) VALUES (?, ?, ?, ?) IF NOT EXISTS", (cql_range.range_id, cql_range.leader_sequence_number, cql_range.epoch_lease, cql_range.safe_snapshot_epochs))
             .await
             .unwrap();
         cassandra

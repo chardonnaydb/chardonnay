@@ -1,1 +1,1 @@
-CREATE KEYSPACE IF NOT EXISTS "e149e248_8293_4eb2_a6ff_63478dc3e533" WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1};
+CREATE KEYSPACE IF NOT EXISTS chardonnay WITH replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1};
