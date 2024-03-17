@@ -1,5 +1,6 @@
 use super::*;
 use bytes::Bytes;
+use common::full_range_id::FullRangeId;
 use scylla::frame::response::cql_to_rust::FromCqlVal;
 use scylla::macros::FromUserType;
 use scylla::macros::IntoUserType;
@@ -12,10 +13,8 @@ pub struct Cassandra {
     session: Session,
 }
 
-impl FullRangeId {
-    pub fn cql_keyspace(&self) -> String {
-        self.keyspace_id.to_string().replace("-", "_")
-    }
+fn cql_keyspace(full_range_id: &FullRangeId) -> String {
+    full_range_id.keyspace_id.to_string().replace("-", "_")
 }
 
 #[derive(Debug, FromUserType, IntoUserType)]
@@ -108,7 +107,7 @@ fn scylla_query_error_to_persistence_error(qe: QueryError) -> Error {
 
 impl Cassandra {
     async fn get_range_lease(&self, range_id: FullRangeId) -> Result<CqlRangeLease, Error> {
-        let query = GET_RANGE_LEASE_QUERY.replace("{}", &range_id.cql_keyspace());
+        let query = GET_RANGE_LEASE_QUERY.replace("{}", &cql_keyspace(&range_id));
         let rows = self
             .session
             .query(query, (range_id.range_id,))
@@ -137,7 +136,7 @@ impl Persistence for Cassandra {
         &self,
         range_id: FullRangeId,
     ) -> Result<RangeInfo, Error> {
-        let query = ACQUIRE_RANGE_LEASE_QUERY.replace("{}", &range_id.cql_keyspace());
+        let query = ACQUIRE_RANGE_LEASE_QUERY.replace("{}", &cql_keyspace(&range_id));
         let cql_lease = self.get_range_lease(range_id).await?;
         let prev_leader_sequence_number = cql_lease.leader_sequence_number;
         let new_leader_sequence_number = prev_leader_sequence_number + 1;
@@ -178,7 +177,7 @@ impl Persistence for Cassandra {
         (llb, lup): EpochLease,
         leader_sequence_number: u64,
     ) -> Result<(), Error> {
-        let query = RENEW_EPOCH_LEASE_QUERY.replace("{}", &range_id.cql_keyspace());
+        let query = RENEW_EPOCH_LEASE_QUERY.replace("{}", &cql_keyspace(&range_id));
         let cql_epoch_range = CqlEpochRange {
             lower_bound_inclusive: llb as i64,
             upper_bound_inclusive: lup as i64,
@@ -223,7 +222,7 @@ impl Persistence for Cassandra {
         val: Bytes,
         version: KeyVersion,
     ) -> Result<(), Error> {
-        let query = UPSERT_QUERY.replace("{}", &range_id.cql_keyspace());
+        let query = UPSERT_QUERY.replace("{}", &cql_keyspace(&range_id));
         let _ = self
             .session
             .query(
@@ -247,7 +246,7 @@ impl Persistence for Cassandra {
         key: Bytes,
         version: KeyVersion,
     ) -> Result<(), Error> {
-        let query = DELETE_QUERY.replace("{}", &range_id.cql_keyspace());
+        let query = DELETE_QUERY.replace("{}", &cql_keyspace(&range_id));
         let _ = self
             .session
             .query(
@@ -260,7 +259,7 @@ impl Persistence for Cassandra {
     }
 
     async fn get(&self, range_id: FullRangeId, key: Bytes) -> Result<Option<Bytes>, Error> {
-        let query = GET_QUERY.replace("{}", &range_id.cql_keyspace());
+        let query = GET_QUERY.replace("{}", &cql_keyspace(&range_id));
         let rows = self
             .session
             .query(query, (range_id.range_id, key.to_vec()))
