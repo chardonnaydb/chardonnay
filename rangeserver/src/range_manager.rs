@@ -377,6 +377,11 @@ where
         }
     }
 
+    pub async fn unload(&self) {
+        let mut state = self.state.write().await;
+        *state = State::Unloaded;
+    }
+
     async fn acquire_range_lock(
         &self,
         state: &LoadedState,
