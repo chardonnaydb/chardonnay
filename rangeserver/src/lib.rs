@@ -1,6 +1,5 @@
 pub mod epoch_provider;
 mod for_testing;
-mod full_range_id;
 mod key_range;
 mod key_version;
 mod persistence;
