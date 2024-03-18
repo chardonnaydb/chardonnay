@@ -1,7 +1,9 @@
 use uuid::Uuid;
 
-#[derive(Clone, Copy, Debug)]
+use crate::keyspace_id::KeyspaceId;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd)]
 pub struct FullRangeId {
-    pub keyspace_id: Uuid,
+    pub keyspace_id: KeyspaceId,
     pub range_id: Uuid,
 }
