@@ -1,6 +1,7 @@
 use super::*;
 use bytes::Bytes;
 use common::full_range_id::FullRangeId;
+use common::keyspace_id::KeyspaceId;
 use scylla::frame::response::cql_to_rust::FromCqlVal;
 use scylla::macros::FromUserType;
 use scylla::macros::IntoUserType;
@@ -320,7 +321,7 @@ pub mod tests {
     async fn basic_take_ownership_and_renew_lease() {
         let cassandra = init().await;
         let full_range_id = FullRangeId {
-            keyspace_id: Uuid::parse_str(TEST_KEYSPACE_ID).unwrap(),
+            keyspace_id: KeyspaceId::new(Uuid::parse_str(TEST_KEYSPACE_ID).unwrap()),
             range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),
         };
         let range_info = cassandra
@@ -337,7 +338,7 @@ pub mod tests {
     async fn basic_crud() {
         let cassandra = init().await;
         let full_range_id = FullRangeId {
-            keyspace_id: Uuid::parse_str(TEST_KEYSPACE_ID).unwrap(),
+            keyspace_id: KeyspaceId::new(Uuid::parse_str(TEST_KEYSPACE_ID).unwrap()),
             range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),
         };
         let key = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());

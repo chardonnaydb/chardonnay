@@ -8,7 +8,6 @@ use bytes::Bytes;
 use chrono::DateTime;
 use common::config::Config;
 use common::full_range_id::FullRangeId;
-use core::time;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -598,6 +597,8 @@ where
 mod tests {
 
     use common::config::RangeServerConfig;
+    use common::keyspace_id::KeyspaceId;
+    use core::time;
     use flatbuffers::FlatBufferBuilder;
 
     use super::*;
@@ -696,7 +697,7 @@ mod tests {
         let wal = Mutex::new(InMemoryWal::new());
         let cassandra = Arc::new(crate::persistence::cassandra::tests::init().await);
         let range_id = FullRangeId {
-            keyspace_id: Uuid::parse_str(TEST_KEYSPACE_ID).unwrap(),
+            keyspace_id: KeyspaceId::new(Uuid::parse_str(TEST_KEYSPACE_ID).unwrap()),
             range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),
         };
         let config = Config {
