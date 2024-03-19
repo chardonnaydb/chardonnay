@@ -318,6 +318,530 @@ impl core::fmt::Debug for Record<'_> {
       ds.finish()
   }
 }
+pub enum PrefetchRequestOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct PrefetchRequest<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for PrefetchRequest<'a> {
+  type Inner = PrefetchRequest<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> PrefetchRequest<'a> {
+  pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 6;
+  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 8;
+  pub const VT_KEYS: flatbuffers::VOffsetT = 10;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    PrefetchRequest { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args PrefetchRequestArgs<'args>
+  ) -> flatbuffers::WIPOffset<PrefetchRequest<'bldr>> {
+    let mut builder = PrefetchRequestBuilder::new(_fbb);
+    if let Some(x) = args.keys { builder.add_keys(x); }
+    if let Some(x) = args.range_id { builder.add_range_id(x); }
+    if let Some(x) = args.transaction_id { builder.add_transaction_id(x); }
+    if let Some(x) = args.request_id { builder.add_request_id(x); }
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn request_id(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrefetchRequest::VT_REQUEST_ID, None)}
+  }
+  #[inline]
+  pub fn transaction_id(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrefetchRequest::VT_TRANSACTION_ID, None)}
+  }
+  #[inline]
+  pub fn range_id(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrefetchRequest::VT_RANGE_ID, None)}
+  }
+  #[inline]
+  pub fn keys(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key>>>>(PrefetchRequest::VT_KEYS, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for PrefetchRequest<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("range_id", Self::VT_RANGE_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Key>>>>("keys", Self::VT_KEYS, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct PrefetchRequestArgs<'a> {
+    pub request_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub transaction_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub range_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub keys: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>>>,
+}
+impl<'a> Default for PrefetchRequestArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    PrefetchRequestArgs {
+      request_id: None,
+      transaction_id: None,
+      range_id: None,
+      keys: None,
+    }
+  }
+}
+
+pub struct PrefetchRequestBuilder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> PrefetchRequestBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrefetchRequest::VT_REQUEST_ID, request_id);
+  }
+  #[inline]
+  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrefetchRequest::VT_TRANSACTION_ID, transaction_id);
+  }
+  #[inline]
+  pub fn add_range_id(&mut self, range_id: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrefetchRequest::VT_RANGE_ID, range_id);
+  }
+  #[inline]
+  pub fn add_keys(&mut self, keys: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<Key<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrefetchRequest::VT_KEYS, keys);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> PrefetchRequestBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    PrefetchRequestBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<PrefetchRequest<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for PrefetchRequest<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("PrefetchRequest");
+      ds.field("request_id", &self.request_id());
+      ds.field("transaction_id", &self.transaction_id());
+      ds.field("range_id", &self.range_id());
+      ds.field("keys", &self.keys());
+      ds.finish()
+  }
+}
+pub enum PrefetchResponseOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct PrefetchResponse<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for PrefetchResponse<'a> {
+  type Inner = PrefetchResponse<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> PrefetchResponse<'a> {
+  pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    PrefetchResponse { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args PrefetchResponseArgs<'args>
+  ) -> flatbuffers::WIPOffset<PrefetchResponse<'bldr>> {
+    let mut builder = PrefetchResponseBuilder::new(_fbb);
+    if let Some(x) = args.request_id { builder.add_request_id(x); }
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn request_id(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrefetchResponse::VT_REQUEST_ID, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for PrefetchResponse<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("request_id", Self::VT_REQUEST_ID, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct PrefetchResponseArgs<'a> {
+    pub request_id: Option<flatbuffers::WIPOffset<&'a str>>,
+}
+impl<'a> Default for PrefetchResponseArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    PrefetchResponseArgs {
+      request_id: None,
+    }
+  }
+}
+
+pub struct PrefetchResponseBuilder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> PrefetchResponseBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrefetchResponse::VT_REQUEST_ID, request_id);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> PrefetchResponseBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    PrefetchResponseBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<PrefetchResponse<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for PrefetchResponse<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("PrefetchResponse");
+      ds.field("request_id", &self.request_id());
+      ds.finish()
+  }
+}
+pub enum GetRequestOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct GetRequest<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for GetRequest<'a> {
+  type Inner = GetRequest<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> GetRequest<'a> {
+  pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 6;
+  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 8;
+  pub const VT_KEYS: flatbuffers::VOffsetT = 10;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    GetRequest { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args GetRequestArgs<'args>
+  ) -> flatbuffers::WIPOffset<GetRequest<'bldr>> {
+    let mut builder = GetRequestBuilder::new(_fbb);
+    if let Some(x) = args.keys { builder.add_keys(x); }
+    if let Some(x) = args.range_id { builder.add_range_id(x); }
+    if let Some(x) = args.transaction_id { builder.add_transaction_id(x); }
+    if let Some(x) = args.request_id { builder.add_request_id(x); }
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn request_id(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(GetRequest::VT_REQUEST_ID, None)}
+  }
+  #[inline]
+  pub fn transaction_id(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(GetRequest::VT_TRANSACTION_ID, None)}
+  }
+  #[inline]
+  pub fn range_id(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(GetRequest::VT_RANGE_ID, None)}
+  }
+  #[inline]
+  pub fn keys(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key>>>>(GetRequest::VT_KEYS, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for GetRequest<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("range_id", Self::VT_RANGE_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Key>>>>("keys", Self::VT_KEYS, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct GetRequestArgs<'a> {
+    pub request_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub transaction_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub range_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub keys: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>>>,
+}
+impl<'a> Default for GetRequestArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    GetRequestArgs {
+      request_id: None,
+      transaction_id: None,
+      range_id: None,
+      keys: None,
+    }
+  }
+}
+
+pub struct GetRequestBuilder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> GetRequestBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GetRequest::VT_REQUEST_ID, request_id);
+  }
+  #[inline]
+  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GetRequest::VT_TRANSACTION_ID, transaction_id);
+  }
+  #[inline]
+  pub fn add_range_id(&mut self, range_id: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GetRequest::VT_RANGE_ID, range_id);
+  }
+  #[inline]
+  pub fn add_keys(&mut self, keys: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<Key<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GetRequest::VT_KEYS, keys);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> GetRequestBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    GetRequestBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<GetRequest<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for GetRequest<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("GetRequest");
+      ds.field("request_id", &self.request_id());
+      ds.field("transaction_id", &self.transaction_id());
+      ds.field("range_id", &self.range_id());
+      ds.field("keys", &self.keys());
+      ds.finish()
+  }
+}
+pub enum GetResponseOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct GetResponse<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for GetResponse<'a> {
+  type Inner = GetResponse<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> GetResponse<'a> {
+  pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_LEADER_SEQUENCE_NUMBER: flatbuffers::VOffsetT = 6;
+  pub const VT_RECORDS: flatbuffers::VOffsetT = 8;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    GetResponse { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args GetResponseArgs<'args>
+  ) -> flatbuffers::WIPOffset<GetResponse<'bldr>> {
+    let mut builder = GetResponseBuilder::new(_fbb);
+    builder.add_leader_sequence_number(args.leader_sequence_number);
+    if let Some(x) = args.records { builder.add_records(x); }
+    if let Some(x) = args.request_id { builder.add_request_id(x); }
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn request_id(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(GetResponse::VT_REQUEST_ID, None)}
+  }
+  #[inline]
+  pub fn leader_sequence_number(&self) -> i64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<i64>(GetResponse::VT_LEADER_SEQUENCE_NUMBER, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn records(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Record<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Record>>>>(GetResponse::VT_RECORDS, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for GetResponse<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<i64>("leader_sequence_number", Self::VT_LEADER_SEQUENCE_NUMBER, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Record>>>>("records", Self::VT_RECORDS, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct GetResponseArgs<'a> {
+    pub request_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub leader_sequence_number: i64,
+    pub records: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Record<'a>>>>>,
+}
+impl<'a> Default for GetResponseArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    GetResponseArgs {
+      request_id: None,
+      leader_sequence_number: 0,
+      records: None,
+    }
+  }
+}
+
+pub struct GetResponseBuilder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> GetResponseBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GetResponse::VT_REQUEST_ID, request_id);
+  }
+  #[inline]
+  pub fn add_leader_sequence_number(&mut self, leader_sequence_number: i64) {
+    self.fbb_.push_slot::<i64>(GetResponse::VT_LEADER_SEQUENCE_NUMBER, leader_sequence_number, 0);
+  }
+  #[inline]
+  pub fn add_records(&mut self, records: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<Record<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GetResponse::VT_RECORDS, records);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> GetResponseBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    GetResponseBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<GetResponse<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for GetResponse<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("GetResponse");
+      ds.field("request_id", &self.request_id());
+      ds.field("leader_sequence_number", &self.leader_sequence_number());
+      ds.field("records", &self.records());
+      ds.finish()
+  }
+}
 pub enum PrepareRecordOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
