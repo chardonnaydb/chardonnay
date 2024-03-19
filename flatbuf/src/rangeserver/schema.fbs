@@ -9,6 +9,30 @@ table Record {
     value:[ubyte];
 }
 
+table PrefetchRequest {
+  request_id:string;
+  transaction_id:string;
+  range_id:string;
+  keys:[Key];
+}
+
+table PrefetchResponse {
+  request_id:string;
+}
+
+table GetRequest {
+  request_id:string;
+  transaction_id:string;
+  range_id:string;
+  keys:[Key];
+}
+
+table GetResponse {
+  request_id:string;
+  leader_sequence_number:int64;
+  records:[Record];
+}
+
 table PrepareRecord {
   transaction_id:string;
   range_id:string;
