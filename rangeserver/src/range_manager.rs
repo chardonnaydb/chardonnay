@@ -19,7 +19,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
-enum Error {
+pub enum Error {
     RangeDoesNotExist,
     RangeIsNotLoaded,
     KeyIsOutOfRange,
@@ -184,7 +184,7 @@ enum State {
     Loaded(LoadedState),
 }
 
-struct RangeManager<P, E, W>
+pub struct RangeManager<P, E, W>
 where
     P: Persistence,
     E: EpochProvider,
@@ -210,8 +210,8 @@ where
         persistence: Arc<P>,
         epoch_provider: Arc<E>,
         wal: W,
-    ) -> Box<Self> {
-        Box::new(RangeManager {
+    ) -> Arc<Self> {
+        Arc::new(RangeManager {
             range_id,
             config,
             persistence,
