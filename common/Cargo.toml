@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 uuid = {version = "0.8", features = ["v4"]}
 bytes = "1"
+flatbuf = {path = "../flatbuf"}
