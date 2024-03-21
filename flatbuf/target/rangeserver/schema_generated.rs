@@ -107,6 +107,120 @@ impl<'a> flatbuffers::Verifiable for Entry {
 }
 
 impl flatbuffers::SimpleToVerifyInSlice for Entry {}
+pub enum Uuidu128Offset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct Uuidu128<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for Uuidu128<'a> {
+  type Inner = Uuidu128<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> Uuidu128<'a> {
+  pub const VT_LOWER: flatbuffers::VOffsetT = 4;
+  pub const VT_UPPER: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    Uuidu128 { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args Uuidu128Args
+  ) -> flatbuffers::WIPOffset<Uuidu128<'bldr>> {
+    let mut builder = Uuidu128Builder::new(_fbb);
+    builder.add_upper(args.upper);
+    builder.add_lower(args.lower);
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn lower(&self) -> u64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u64>(Uuidu128::VT_LOWER, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn upper(&self) -> u64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u64>(Uuidu128::VT_UPPER, Some(0)).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for Uuidu128<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u64>("lower", Self::VT_LOWER, false)?
+     .visit_field::<u64>("upper", Self::VT_UPPER, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct Uuidu128Args {
+    pub lower: u64,
+    pub upper: u64,
+}
+impl<'a> Default for Uuidu128Args {
+  #[inline]
+  fn default() -> Self {
+    Uuidu128Args {
+      lower: 0,
+      upper: 0,
+    }
+  }
+}
+
+pub struct Uuidu128Builder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> Uuidu128Builder<'a, 'b> {
+  #[inline]
+  pub fn add_lower(&mut self, lower: u64) {
+    self.fbb_.push_slot::<u64>(Uuidu128::VT_LOWER, lower, 0);
+  }
+  #[inline]
+  pub fn add_upper(&mut self, upper: u64) {
+    self.fbb_.push_slot::<u64>(Uuidu128::VT_UPPER, upper, 0);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> Uuidu128Builder<'a, 'b> {
+    let start = _fbb.start_table();
+    Uuidu128Builder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<Uuidu128<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for Uuidu128<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("Uuidu128");
+      ds.field("lower", &self.lower());
+      ds.field("upper", &self.upper());
+      ds.finish()
+  }
+}
 pub enum KeyOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -358,25 +472,25 @@ impl<'a> PrefetchRequest<'a> {
 
 
   #[inline]
-  pub fn request_id(&self) -> Option<&'a str> {
+  pub fn request_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrefetchRequest::VT_REQUEST_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(PrefetchRequest::VT_REQUEST_ID, None)}
   }
   #[inline]
-  pub fn transaction_id(&self) -> Option<&'a str> {
+  pub fn transaction_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrefetchRequest::VT_TRANSACTION_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(PrefetchRequest::VT_TRANSACTION_ID, None)}
   }
   #[inline]
-  pub fn range_id(&self) -> Option<&'a str> {
+  pub fn range_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrefetchRequest::VT_RANGE_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(PrefetchRequest::VT_RANGE_ID, None)}
   }
   #[inline]
   pub fn keys(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>> {
@@ -394,18 +508,18 @@ impl flatbuffers::Verifiable for PrefetchRequest<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("request_id", Self::VT_REQUEST_ID, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("range_id", Self::VT_RANGE_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("range_id", Self::VT_RANGE_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Key>>>>("keys", Self::VT_KEYS, false)?
      .finish();
     Ok(())
   }
 }
 pub struct PrefetchRequestArgs<'a> {
-    pub request_id: Option<flatbuffers::WIPOffset<&'a str>>,
-    pub transaction_id: Option<flatbuffers::WIPOffset<&'a str>>,
-    pub range_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
+    pub transaction_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
+    pub range_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub keys: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>>>,
 }
 impl<'a> Default for PrefetchRequestArgs<'a> {
@@ -426,16 +540,16 @@ pub struct PrefetchRequestBuilder<'a: 'b, 'b> {
 }
 impl<'a: 'b, 'b> PrefetchRequestBuilder<'a, 'b> {
   #[inline]
-  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrefetchRequest::VT_REQUEST_ID, request_id);
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(PrefetchRequest::VT_REQUEST_ID, request_id);
   }
   #[inline]
-  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrefetchRequest::VT_TRANSACTION_ID, transaction_id);
+  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(PrefetchRequest::VT_TRANSACTION_ID, transaction_id);
   }
   #[inline]
-  pub fn add_range_id(&mut self, range_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrefetchRequest::VT_RANGE_ID, range_id);
+  pub fn add_range_id(&mut self, range_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(PrefetchRequest::VT_RANGE_ID, range_id);
   }
   #[inline]
   pub fn add_keys(&mut self, keys: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<Key<'b >>>>) {
@@ -500,11 +614,11 @@ impl<'a> PrefetchResponse<'a> {
 
 
   #[inline]
-  pub fn request_id(&self) -> Option<&'a str> {
+  pub fn request_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrefetchResponse::VT_REQUEST_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(PrefetchResponse::VT_REQUEST_ID, None)}
   }
 }
 
@@ -515,13 +629,13 @@ impl flatbuffers::Verifiable for PrefetchResponse<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
      .finish();
     Ok(())
   }
 }
 pub struct PrefetchResponseArgs<'a> {
-    pub request_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
 }
 impl<'a> Default for PrefetchResponseArgs<'a> {
   #[inline]
@@ -538,8 +652,8 @@ pub struct PrefetchResponseBuilder<'a: 'b, 'b> {
 }
 impl<'a: 'b, 'b> PrefetchResponseBuilder<'a, 'b> {
   #[inline]
-  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrefetchResponse::VT_REQUEST_ID, request_id);
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(PrefetchResponse::VT_REQUEST_ID, request_id);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> PrefetchResponseBuilder<'a, 'b> {
@@ -603,25 +717,25 @@ impl<'a> GetRequest<'a> {
 
 
   #[inline]
-  pub fn request_id(&self) -> Option<&'a str> {
+  pub fn request_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(GetRequest::VT_REQUEST_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(GetRequest::VT_REQUEST_ID, None)}
   }
   #[inline]
-  pub fn transaction_id(&self) -> Option<&'a str> {
+  pub fn transaction_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(GetRequest::VT_TRANSACTION_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(GetRequest::VT_TRANSACTION_ID, None)}
   }
   #[inline]
-  pub fn range_id(&self) -> Option<&'a str> {
+  pub fn range_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(GetRequest::VT_RANGE_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(GetRequest::VT_RANGE_ID, None)}
   }
   #[inline]
   pub fn keys(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>> {
@@ -639,18 +753,18 @@ impl flatbuffers::Verifiable for GetRequest<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("request_id", Self::VT_REQUEST_ID, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("range_id", Self::VT_RANGE_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("range_id", Self::VT_RANGE_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Key>>>>("keys", Self::VT_KEYS, false)?
      .finish();
     Ok(())
   }
 }
 pub struct GetRequestArgs<'a> {
-    pub request_id: Option<flatbuffers::WIPOffset<&'a str>>,
-    pub transaction_id: Option<flatbuffers::WIPOffset<&'a str>>,
-    pub range_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
+    pub transaction_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
+    pub range_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub keys: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>>>,
 }
 impl<'a> Default for GetRequestArgs<'a> {
@@ -671,16 +785,16 @@ pub struct GetRequestBuilder<'a: 'b, 'b> {
 }
 impl<'a: 'b, 'b> GetRequestBuilder<'a, 'b> {
   #[inline]
-  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GetRequest::VT_REQUEST_ID, request_id);
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(GetRequest::VT_REQUEST_ID, request_id);
   }
   #[inline]
-  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GetRequest::VT_TRANSACTION_ID, transaction_id);
+  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(GetRequest::VT_TRANSACTION_ID, transaction_id);
   }
   #[inline]
-  pub fn add_range_id(&mut self, range_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GetRequest::VT_RANGE_ID, range_id);
+  pub fn add_range_id(&mut self, range_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(GetRequest::VT_RANGE_ID, range_id);
   }
   #[inline]
   pub fn add_keys(&mut self, keys: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<Key<'b >>>>) {
@@ -749,11 +863,11 @@ impl<'a> GetResponse<'a> {
 
 
   #[inline]
-  pub fn request_id(&self) -> Option<&'a str> {
+  pub fn request_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(GetResponse::VT_REQUEST_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(GetResponse::VT_REQUEST_ID, None)}
   }
   #[inline]
   pub fn leader_sequence_number(&self) -> i64 {
@@ -778,7 +892,7 @@ impl flatbuffers::Verifiable for GetResponse<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
      .visit_field::<i64>("leader_sequence_number", Self::VT_LEADER_SEQUENCE_NUMBER, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Record>>>>("records", Self::VT_RECORDS, false)?
      .finish();
@@ -786,7 +900,7 @@ impl flatbuffers::Verifiable for GetResponse<'_> {
   }
 }
 pub struct GetResponseArgs<'a> {
-    pub request_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub leader_sequence_number: i64,
     pub records: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Record<'a>>>>>,
 }
@@ -807,8 +921,8 @@ pub struct GetResponseBuilder<'a: 'b, 'b> {
 }
 impl<'a: 'b, 'b> GetResponseBuilder<'a, 'b> {
   #[inline]
-  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GetResponse::VT_REQUEST_ID, request_id);
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(GetResponse::VT_REQUEST_ID, request_id);
   }
   #[inline]
   pub fn add_leader_sequence_number(&mut self, leader_sequence_number: i64) {
@@ -884,18 +998,18 @@ impl<'a> PrepareRecord<'a> {
 
 
   #[inline]
-  pub fn transaction_id(&self) -> Option<&'a str> {
+  pub fn transaction_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrepareRecord::VT_TRANSACTION_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(PrepareRecord::VT_TRANSACTION_ID, None)}
   }
   #[inline]
-  pub fn range_id(&self) -> Option<&'a str> {
+  pub fn range_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(PrepareRecord::VT_RANGE_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(PrepareRecord::VT_RANGE_ID, None)}
   }
   #[inline]
   pub fn has_reads(&self) -> bool {
@@ -927,8 +1041,8 @@ impl flatbuffers::Verifiable for PrepareRecord<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("range_id", Self::VT_RANGE_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("range_id", Self::VT_RANGE_ID, false)?
      .visit_field::<bool>("has_reads", Self::VT_HAS_READS, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Record>>>>("puts", Self::VT_PUTS, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Key>>>>("deletes", Self::VT_DELETES, false)?
@@ -937,8 +1051,8 @@ impl flatbuffers::Verifiable for PrepareRecord<'_> {
   }
 }
 pub struct PrepareRecordArgs<'a> {
-    pub transaction_id: Option<flatbuffers::WIPOffset<&'a str>>,
-    pub range_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub transaction_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
+    pub range_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub has_reads: bool,
     pub puts: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Record<'a>>>>>,
     pub deletes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>>>,
@@ -962,12 +1076,12 @@ pub struct PrepareRecordBuilder<'a: 'b, 'b> {
 }
 impl<'a: 'b, 'b> PrepareRecordBuilder<'a, 'b> {
   #[inline]
-  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrepareRecord::VT_TRANSACTION_ID, transaction_id);
+  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(PrepareRecord::VT_TRANSACTION_ID, transaction_id);
   }
   #[inline]
-  pub fn add_range_id(&mut self, range_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(PrepareRecord::VT_RANGE_ID, range_id);
+  pub fn add_range_id(&mut self, range_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(PrepareRecord::VT_RANGE_ID, range_id);
   }
   #[inline]
   pub fn add_has_reads(&mut self, has_reads: bool) {
@@ -1045,11 +1159,11 @@ impl<'a> CommitRecord<'a> {
 
 
   #[inline]
-  pub fn transaction_id(&self) -> Option<&'a str> {
+  pub fn transaction_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(CommitRecord::VT_TRANSACTION_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(CommitRecord::VT_TRANSACTION_ID, None)}
   }
   #[inline]
   pub fn epoch(&self) -> i64 {
@@ -1074,7 +1188,7 @@ impl flatbuffers::Verifiable for CommitRecord<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
      .visit_field::<i64>("epoch", Self::VT_EPOCH, false)?
      .visit_field::<i64>("vid", Self::VT_VID, false)?
      .finish();
@@ -1082,7 +1196,7 @@ impl flatbuffers::Verifiable for CommitRecord<'_> {
   }
 }
 pub struct CommitRecordArgs<'a> {
-    pub transaction_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub transaction_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub epoch: i64,
     pub vid: i64,
 }
@@ -1103,8 +1217,8 @@ pub struct CommitRecordBuilder<'a: 'b, 'b> {
 }
 impl<'a: 'b, 'b> CommitRecordBuilder<'a, 'b> {
   #[inline]
-  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(CommitRecord::VT_TRANSACTION_ID, transaction_id);
+  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(CommitRecord::VT_TRANSACTION_ID, transaction_id);
   }
   #[inline]
   pub fn add_epoch(&mut self, epoch: i64) {
@@ -1172,11 +1286,11 @@ impl<'a> AbortRecord<'a> {
 
 
   #[inline]
-  pub fn transaction_id(&self) -> Option<&'a str> {
+  pub fn transaction_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(AbortRecord::VT_TRANSACTION_ID, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(AbortRecord::VT_TRANSACTION_ID, None)}
   }
 }
 
@@ -1187,13 +1301,13 @@ impl flatbuffers::Verifiable for AbortRecord<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
      .finish();
     Ok(())
   }
 }
 pub struct AbortRecordArgs<'a> {
-    pub transaction_id: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub transaction_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
 }
 impl<'a> Default for AbortRecordArgs<'a> {
   #[inline]
@@ -1210,8 +1324,8 @@ pub struct AbortRecordBuilder<'a: 'b, 'b> {
 }
 impl<'a: 'b, 'b> AbortRecordBuilder<'a, 'b> {
   #[inline]
-  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(AbortRecord::VT_TRANSACTION_ID, transaction_id);
+  pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(AbortRecord::VT_TRANSACTION_ID, transaction_id);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> AbortRecordBuilder<'a, 'b> {

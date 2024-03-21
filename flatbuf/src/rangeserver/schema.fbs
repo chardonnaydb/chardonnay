@@ -1,5 +1,10 @@
 namespace RangeServer;
 
+table Uuidu128 {
+  lower:uint64;
+  upper:uint64;
+}
+
 table Key {
   k:[ubyte];
 }
@@ -10,45 +15,45 @@ table Record {
 }
 
 table PrefetchRequest {
-  request_id:string;
-  transaction_id:string;
-  range_id:string;
+  request_id:Uuidu128;
+  transaction_id:Uuidu128;
+  range_id:Uuidu128;
   keys:[Key];
 }
 
 table PrefetchResponse {
-  request_id:string;
+  request_id:Uuidu128;
 }
 
 table GetRequest {
-  request_id:string;
-  transaction_id:string;
-  range_id:string;
+  request_id:Uuidu128;
+  transaction_id:Uuidu128;
+  range_id:Uuidu128;
   keys:[Key];
 }
 
 table GetResponse {
-  request_id:string;
+  request_id:Uuidu128;
   leader_sequence_number:int64;
   records:[Record];
 }
 
 table PrepareRecord {
-  transaction_id:string;
-  range_id:string;
+  transaction_id:Uuidu128;
+  range_id:Uuidu128;
   has_reads:bool;
   puts:[Record];
   deletes:[Key];
 }
 
 table CommitRecord {
-    transaction_id:string;
+    transaction_id:Uuidu128;
     epoch:int64;
     vid:int64;
 }
 
 table AbortRecord {
-    transaction_id:string;
+    transaction_id:Uuidu128;
 }
 
 enum Entry:byte { Prepare = 0, Commit, Abort = 2 }

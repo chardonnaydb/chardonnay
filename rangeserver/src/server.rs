@@ -75,7 +75,7 @@ where
         rm.clone()
     }
 
-    async fn get(&self, request: GetRequest<'_>) -> Result<GetResponse, Error> {
+    async fn get(&self, request: GetRequest<'_>) -> GetResponse {
         todo!();
     }
 

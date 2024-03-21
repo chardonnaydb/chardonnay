@@ -8,6 +8,7 @@ use bytes::Bytes;
 use chrono::DateTime;
 use common::config::Config;
 use common::full_range_id::FullRangeId;
+use common::util;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -16,7 +17,6 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 #[derive(Clone, Debug)]
 pub enum Error {
@@ -535,9 +535,9 @@ where
                                         let bytes = entry.bytes().unwrap().bytes();
                                         let flatbuf =
                                             flatbuffers::root::<PrepareRecord>(bytes).unwrap();
-                                        let tid =
-                                            Uuid::parse_str(flatbuf.transaction_id().unwrap())
-                                                .unwrap();
+                                        let tid = util::flatbuf::deserialize_uuid(
+                                            flatbuf.transaction_id().unwrap(),
+                                        );
                                         if tid == tx.id {
                                             break (Some(flatbuf));
                                         }
@@ -600,6 +600,7 @@ mod tests {
     use common::keyspace_id::KeyspaceId;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
+    use uuid::Uuid;
 
     use super::*;
     use crate::epoch_provider::EpochProvider as EpochProviderTrait;
@@ -615,7 +616,10 @@ mod tests {
         async fn abort_transaction(&self, tx: Arc<TransactionInfo>) {
             let mut fbb = FlatBufferBuilder::new();
             let tx_id_string = tx.id.to_string();
-            let transaction_id = Some(fbb.create_string(&tx_id_string));
+            let transaction_id = Some(Uuidu128::create(
+                &mut fbb,
+                &util::flatbuf::serialize_uuid(tx.id),
+            ));
             let fbb_root = AbortRecord::create(&mut fbb, &AbortRecordArgs { transaction_id });
             fbb.finish(fbb_root, None);
             let abort_record_bytes = fbb.finished_data();
@@ -631,8 +635,10 @@ mod tests {
             has_reads: bool,
         ) -> Result<(), Error> {
             let mut fbb = FlatBufferBuilder::new();
-            let tx_id_string = tx.id.to_string();
-            let transaction_id = Some(fbb.create_string(&tx_id_string));
+            let transaction_id = Some(Uuidu128::create(
+                &mut fbb,
+                &util::flatbuf::serialize_uuid(tx.id),
+            ));
             let mut puts_vector = Vec::new();
             for (k, v) in writes {
                 let k = Some(fbb.create_vector(k.to_vec().as_slice()));
@@ -654,8 +660,10 @@ mod tests {
                 del_vector.push(key);
             }
             let deletes = Some(fbb.create_vector(&del_vector));
-            let range_id_string = self.range_id.range_id.to_string();
-            let range_id = Some(fbb.create_string(&range_id_string));
+            let range_id = Some(Uuidu128::create(
+                &mut fbb,
+                &util::flatbuf::serialize_uuid(self.range_id.range_id),
+            ));
             let fbb_root = PrepareRecord::create(
                 &mut fbb,
                 &PrepareRecordArgs {
@@ -675,8 +683,10 @@ mod tests {
         async fn commit_transaction(&self, tx: Arc<TransactionInfo>) -> Result<(), Error> {
             let epoch = self.epoch_provider.read_epoch().await.unwrap();
             let mut fbb = FlatBufferBuilder::new();
-            let tx_id_string = tx.id.to_string();
-            let transaction_id = Some(fbb.create_string(&tx_id_string));
+            let transaction_id = Some(Uuidu128::create(
+                &mut fbb,
+                &util::flatbuf::serialize_uuid(tx.id),
+            ));
             let fbb_root = CommitRecord::create(
                 &mut fbb,
                 &CommitRecordArgs {

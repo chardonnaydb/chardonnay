@@ -4,3 +4,4 @@ pub mod host_info;
 pub mod keyspace_id;
 pub mod membership;
 pub mod region;
+pub mod util;
