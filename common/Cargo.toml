@@ -9,3 +9,4 @@ edition = "2021"
 uuid = {version = "0.8", features = ["v4"]}
 bytes = "1"
 flatbuf = {path = "../flatbuf"}
+flatbuffers = "23.5.26"

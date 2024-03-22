@@ -615,12 +615,18 @@ mod tests {
     impl RM {
         async fn abort_transaction(&self, tx: Arc<TransactionInfo>) {
             let mut fbb = FlatBufferBuilder::new();
-            let tx_id_string = tx.id.to_string();
             let transaction_id = Some(Uuidu128::create(
                 &mut fbb,
                 &util::flatbuf::serialize_uuid(tx.id),
             ));
-            let fbb_root = AbortRecord::create(&mut fbb, &AbortRecordArgs { transaction_id });
+            let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &self.range_id));
+            let fbb_root = AbortRecord::create(
+                &mut fbb,
+                &AbortRecordArgs {
+                    transaction_id,
+                    range_id,
+                },
+            );
             fbb.finish(fbb_root, None);
             let abort_record_bytes = fbb.finished_data();
             let abort_record = flatbuffers::root::<AbortRecord>(abort_record_bytes).unwrap();
@@ -660,10 +666,7 @@ mod tests {
                 del_vector.push(key);
             }
             let deletes = Some(fbb.create_vector(&del_vector));
-            let range_id = Some(Uuidu128::create(
-                &mut fbb,
-                &util::flatbuf::serialize_uuid(self.range_id.range_id),
-            ));
+            let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &self.range_id));
             let fbb_root = PrepareRecord::create(
                 &mut fbb,
                 &PrepareRecordArgs {
@@ -687,10 +690,12 @@ mod tests {
                 &mut fbb,
                 &util::flatbuf::serialize_uuid(tx.id),
             ));
+            let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &self.range_id));
             let fbb_root = CommitRecord::create(
                 &mut fbb,
                 &CommitRecordArgs {
                     transaction_id,
+                    range_id,
                     epoch: epoch as i64,
                     vid: 0,
                 },
