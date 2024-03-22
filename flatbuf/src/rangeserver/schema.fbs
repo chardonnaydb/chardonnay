@@ -5,6 +5,11 @@ table Uuidu128 {
   upper:uint64;
 }
 
+table RangeId {
+  keyspace_id:Uuidu128;
+  range_id:Uuidu128;
+}
+
 table Key {
   k:[ubyte];
 }
@@ -17,7 +22,7 @@ table Record {
 table PrefetchRequest {
   request_id:Uuidu128;
   transaction_id:Uuidu128;
-  range_id:Uuidu128;
+  range_id:RangeId;
   keys:[Key];
 }
 
@@ -28,7 +33,7 @@ table PrefetchResponse {
 table GetRequest {
   request_id:Uuidu128;
   transaction_id:Uuidu128;
-  range_id:Uuidu128;
+  range_id:RangeId;
   keys:[Key];
 }
 
@@ -40,7 +45,7 @@ table GetResponse {
 
 table PrepareRecord {
   transaction_id:Uuidu128;
-  range_id:Uuidu128;
+  range_id:RangeId;
   has_reads:bool;
   puts:[Record];
   deletes:[Key];
@@ -48,12 +53,14 @@ table PrepareRecord {
 
 table CommitRecord {
     transaction_id:Uuidu128;
+    range_id:RangeId;
     epoch:int64;
     vid:int64;
 }
 
 table AbortRecord {
     transaction_id:Uuidu128;
+    range_id:RangeId;
 }
 
 enum Entry:byte { Prepare = 0, Commit, Abort = 2 }
