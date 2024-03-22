@@ -2,7 +2,7 @@ use flatbuf::rangeserver_flatbuffers::range_server::*;
 use flatbuffers::FlatBufferBuilder;
 use uuid::Uuid;
 
-use crate::full_range_id::FullRangeId;
+use crate::{full_range_id::FullRangeId, keyspace_id::KeyspaceId};
 
 pub fn deserialize_uuid(uuidf: Uuidu128<'_>) -> Uuid {
     let res: u128 = ((uuidf.upper() as u128) << 64) | (uuidf.lower() as u128);
@@ -29,4 +29,15 @@ pub fn serialize_range_id<'a>(
             range_id,
         },
     )
+}
+
+pub fn deserialize_range_id(id: &RangeId<'_>) -> Option<FullRangeId> {
+    let keyspace_id = id.keyspace_id()?;
+    let range_id = id.range_id()?;
+    let keyspace_id = KeyspaceId::new(deserialize_uuid(keyspace_id));
+    let range_id = deserialize_uuid(range_id);
+    Some(FullRangeId {
+        keyspace_id,
+        range_id,
+    })
 }

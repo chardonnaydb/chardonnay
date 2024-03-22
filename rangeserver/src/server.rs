@@ -1,13 +1,17 @@
+use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use common::util;
 use common::{
     config::Config, full_range_id::FullRangeId,
     membership::range_assignment_oracle::RangeAssignmentOracle,
 };
+use flatbuffers::FlatBufferBuilder;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use crate::transaction_info::TransactionInfo;
 use crate::{
     epoch_provider::EpochProvider, for_testing::in_memory_wal::InMemoryWal,
     persistence::Persistence, range_manager::RangeManager,
@@ -41,10 +45,10 @@ where
 {
     async fn maybe_load_and_get_range(
         &self,
-        id: FullRangeId,
+        id: &FullRangeId,
     ) -> Arc<RangeManager<P, E, InMemoryWal>> {
         // TODO: error handling, no panics!
-        if let Some(assignee) = self.assignment_oracle.host_of_range(&id) {
+        if let Some(assignee) = self.assignment_oracle.host_of_range(id) {
             if assignee.identity != self.identity {
                 panic!("range is not assigned to me!");
             }
@@ -60,7 +64,7 @@ where
             }
         };
         let rm = RangeManager::new(
-            id,
+            id.clone(),
             self.config,
             self.persistence.clone(),
             self.epoch_provider.clone(),
@@ -75,8 +79,69 @@ where
         rm.clone()
     }
 
-    async fn get(&self, request: GetRequest<'_>) -> GetResponse {
-        todo!();
+    async fn get<'a>(
+        &self,
+        fbb: &'a mut FlatBufferBuilder<'a>,
+        request: GetRequest<'_>,
+    ) -> GetResponse<'a> {
+        let range_id = request.range_id().unwrap();
+        let range_id = util::flatbuf::deserialize_range_id(&range_id).unwrap();
+        let request_id = util::flatbuf::deserialize_uuid(request.request_id().unwrap());
+        let rm = self.maybe_load_and_get_range(&range_id).await;
+        let transaction_id = util::flatbuf::deserialize_uuid(request.transaction_id().unwrap());
+        // TODO: don't create a new transaction info from the Get request. There should be a transactions table.
+        let tx = Arc::new(TransactionInfo { id: transaction_id });
+        // TODO: get from the RM, and check for conflicts.
+        let leader_sequence_number: i64 = -1;
+        let mut reads: HashMap<Bytes, Bytes> = HashMap::new();
+
+        // Execute the reads
+        // TODO: consider providing a batch API on the RM.
+        for key in request.keys().iter() {
+            for key in key.iter() {
+                // TODO: too much copying :(
+                let key = Bytes::copy_from_slice(key.k().unwrap().bytes());
+                let val = rm.get(tx.clone(), key.clone()).await.unwrap();
+                match val {
+                    None => (),
+                    Some(val) => {
+                        reads.insert(key, val);
+                        ()
+                    }
+                };
+            }
+        }
+
+        // Construct the response
+        let mut records_vector = Vec::new();
+        for (k, v) in reads {
+            let k = Some(fbb.create_vector(k.to_vec().as_slice()));
+            let key = Key::create(fbb, &KeyArgs { k });
+            let value = fbb.create_vector(v.to_vec().as_slice());
+            records_vector.push(Record::create(
+                fbb,
+                &RecordArgs {
+                    key: Some(key),
+                    value: Some(value),
+                },
+            ));
+        }
+        let records = Some(fbb.create_vector(&records_vector));
+        let request_id = Some(Uuidu128::create(
+            fbb,
+            &util::flatbuf::serialize_uuid(request_id),
+        ));
+        let fbb_root = GetResponse::create(
+            fbb,
+            &GetResponseArgs {
+                leader_sequence_number,
+                request_id,
+                records,
+            },
+        );
+        fbb.finish(fbb_root, None);
+        let prepare_record_bytes = fbb.finished_data();
+        flatbuffers::root::<GetResponse<'a>>(prepare_record_bytes).unwrap()
     }
 
     async fn prepare(&self, request: PrepareRecord<'_>) -> Result<(), Error> {
