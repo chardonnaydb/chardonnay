@@ -198,6 +198,11 @@ where
     state: Arc<RwLock<State>>,
 }
 
+pub struct GetResult {
+    pub val: Option<Bytes>,
+    pub leader_sequence_number: i64,
+}
+
 impl<P, E, W> RangeManager<P, E, W>
 where
     P: Persistence,
@@ -393,7 +398,7 @@ where
         Ok(())
     }
 
-    pub async fn get(&self, tx: Arc<TransactionInfo>, key: Bytes) -> Result<Option<Bytes>, Error> {
+    pub async fn get(&self, tx: Arc<TransactionInfo>, key: Bytes) -> Result<GetResult, Error> {
         let s = self.state.write().await;
         match s.deref() {
             State::Unloaded | State::Loading => Err(Error::RangeIsNotLoaded),
@@ -407,7 +412,11 @@ where
                     .get(self.range_id, key.clone())
                     .await
                     .map_err(Error::from_persistence_error)?;
-                Ok(val.clone())
+                let get_result = GetResult {
+                    val: val.clone(),
+                    leader_sequence_number: state.range_info.leader_sequence_number as i64,
+                };
+                Ok(get_result)
             }
         }
     }
@@ -747,7 +756,12 @@ mod tests {
         let rm = init().await;
         let key = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
         let tx1 = start_transaction();
-        assert!(rm.get(tx1.clone(), key.clone()).await.unwrap().is_none());
+        assert!(rm
+            .get(tx1.clone(), key.clone())
+            .await
+            .unwrap()
+            .val
+            .is_none());
         rm.abort_transaction(tx1.clone()).await;
         let tx2 = start_transaction();
         let val = Bytes::from_static(b"I have a value!");
@@ -761,7 +775,7 @@ mod tests {
         .unwrap();
         rm.commit_transaction(tx2.clone()).await.unwrap();
         let tx3 = start_transaction();
-        let val_after_commit = rm.get(tx3.clone(), key.clone()).await.unwrap().unwrap();
+        let val_after_commit = rm.get(tx3.clone(), key.clone()).await.unwrap().val.unwrap();
         assert!(val_after_commit == val);
     }
 

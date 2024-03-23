@@ -91,8 +91,7 @@ where
         let transaction_id = util::flatbuf::deserialize_uuid(request.transaction_id().unwrap());
         // TODO: don't create a new transaction info from the Get request. There should be a transactions table.
         let tx = Arc::new(TransactionInfo { id: transaction_id });
-        // TODO: get from the RM, and check for conflicts.
-        let leader_sequence_number: i64 = -1;
+        let mut leader_sequence_number: i64 = 0;
         let mut reads: HashMap<Bytes, Bytes> = HashMap::new();
 
         // Execute the reads
@@ -101,14 +100,22 @@ where
             for key in key.iter() {
                 // TODO: too much copying :(
                 let key = Bytes::copy_from_slice(key.k().unwrap().bytes());
-                let val = rm.get(tx.clone(), key.clone()).await.unwrap();
-                match val {
+                let get_result = rm.get(tx.clone(), key.clone()).await.unwrap();
+                match get_result.val {
                     None => (),
                     Some(val) => {
                         reads.insert(key, val);
                         ()
                     }
                 };
+                if leader_sequence_number == 0 {
+                    leader_sequence_number = get_result.leader_sequence_number;
+                } else if leader_sequence_number != get_result.leader_sequence_number {
+                    // This can happen if the range got loaded and unloaded between gets. A transaction cannot
+                    // observe two different leaders for the same range so set the sequence number to an invalid
+                    // value so the coordinator knows to abort.
+                    leader_sequence_number = -1;
+                }
             }
         }
 
