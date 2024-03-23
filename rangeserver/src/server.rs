@@ -144,7 +144,7 @@ where
         flatbuffers::root::<GetResponse<'a>>(prepare_record_bytes).unwrap()
     }
 
-    async fn prepare(&self, request: PrepareRecord<'_>) -> Result<(), Error> {
+    async fn prepare(&self, request: PrepareRequest<'_>) -> Result<(), Error> {
         todo!();
     }
 }

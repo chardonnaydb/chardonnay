@@ -19,17 +19,6 @@ table Record {
     value:[ubyte];
 }
 
-table PrefetchRequest {
-  request_id:Uuidu128;
-  transaction_id:Uuidu128;
-  range_id:RangeId;
-  keys:[Key];
-}
-
-table PrefetchResponse {
-  request_id:Uuidu128;
-}
-
 table GetRequest {
   request_id:Uuidu128;
   transaction_id:Uuidu128;
@@ -43,7 +32,7 @@ table GetResponse {
   records:[Record];
 }
 
-table PrepareRecord {
+table PrepareRequest {
   transaction_id:Uuidu128;
   range_id:RangeId;
   has_reads:bool;
@@ -51,14 +40,14 @@ table PrepareRecord {
   deletes:[Key];
 }
 
-table CommitRecord {
+table CommitRequest {
     transaction_id:Uuidu128;
     range_id:RangeId;
     epoch:int64;
     vid:int64;
 }
 
-table AbortRecord {
+table AbortRequest {
     transaction_id:Uuidu128;
     range_id:RangeId;
 }
