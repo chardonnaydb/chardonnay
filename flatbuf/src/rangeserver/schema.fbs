@@ -10,6 +10,11 @@ table RangeId {
   range_id:Uuidu128;
 }
 
+table EpochLease {
+  lower_bound_inclusive:uint64;
+  upper_bound_inclusive:uint64;
+}
+
 table Key {
   k:[ubyte];
 }
@@ -33,6 +38,7 @@ table GetResponse {
 }
 
 table PrepareRequest {
+  request_id:Uuidu128;
   transaction_id:Uuidu128;
   range_id:RangeId;
   has_reads:bool;
@@ -40,16 +46,35 @@ table PrepareRequest {
   deletes:[Key];
 }
 
+table PrepareResponse {
+  request_id:Uuidu128;
+  status:bool;
+  highest_known_epoch:uint64;
+  epoch_lease:EpochLease;
+}
+
 table CommitRequest {
-    transaction_id:Uuidu128;
-    range_id:RangeId;
-    epoch:int64;
-    vid:int64;
+  request_id:Uuidu128;
+  transaction_id:Uuidu128;
+  range_id:RangeId;
+  epoch:uint64;
+  vid:int64;
+}
+
+table CommitResponse {
+  request_id:Uuidu128;
+  status:bool;
 }
 
 table AbortRequest {
-    transaction_id:Uuidu128;
-    range_id:RangeId;
+  request_id:Uuidu128;
+  transaction_id:Uuidu128;
+  range_id:RangeId;
+}
+
+table AbortResponse {
+  request_id:Uuidu128;
+  status:bool;
 }
 
 enum Entry:byte { Prepare = 0, Commit, Abort = 2 }
