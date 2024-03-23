@@ -420,7 +420,7 @@ where
     pub async fn prepare(
         &self,
         tx: Arc<TransactionInfo>,
-        prepare: PrepareRecord<'_>,
+        prepare: PrepareRequest<'_>,
     ) -> Result<(), Error> {
         let s = self.state.write().await;
         match s.deref() {
@@ -470,7 +470,7 @@ where
     pub async fn abort(
         &self,
         tx: Arc<TransactionInfo>,
-        abort: AbortRecord<'_>,
+        abort: AbortRequest<'_>,
     ) -> Result<(), Error> {
         let s = self.state.write().await;
         match s.deref() {
@@ -502,7 +502,7 @@ where
     pub async fn commit(
         &self,
         tx: Arc<TransactionInfo>,
-        commit: CommitRecord<'_>,
+        commit: CommitRequest<'_>,
     ) -> Result<(), Error> {
         let mut s = self.state.write().await;
         match s.deref_mut() {
@@ -534,7 +534,7 @@ where
                                     Entry::Prepare => {
                                         let bytes = entry.bytes().unwrap().bytes();
                                         let flatbuf =
-                                            flatbuffers::root::<PrepareRecord>(bytes).unwrap();
+                                            flatbuffers::root::<PrepareRequest>(bytes).unwrap();
                                         let tid = util::flatbuf::deserialize_uuid(
                                             flatbuf.transaction_id().unwrap(),
                                         );
@@ -620,16 +620,16 @@ mod tests {
                 &util::flatbuf::serialize_uuid(tx.id),
             ));
             let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &self.range_id));
-            let fbb_root = AbortRecord::create(
+            let fbb_root = AbortRequest::create(
                 &mut fbb,
-                &AbortRecordArgs {
+                &AbortRequestArgs {
                     transaction_id,
                     range_id,
                 },
             );
             fbb.finish(fbb_root, None);
             let abort_record_bytes = fbb.finished_data();
-            let abort_record = flatbuffers::root::<AbortRecord>(abort_record_bytes).unwrap();
+            let abort_record = flatbuffers::root::<AbortRequest>(abort_record_bytes).unwrap();
             self.abort(tx.clone(), abort_record).await.unwrap()
         }
 
@@ -667,9 +667,9 @@ mod tests {
             }
             let deletes = Some(fbb.create_vector(&del_vector));
             let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &self.range_id));
-            let fbb_root = PrepareRecord::create(
+            let fbb_root = PrepareRequest::create(
                 &mut fbb,
-                &PrepareRecordArgs {
+                &PrepareRequestArgs {
                     transaction_id,
                     range_id,
                     has_reads,
@@ -679,7 +679,7 @@ mod tests {
             );
             fbb.finish(fbb_root, None);
             let prepare_record_bytes = fbb.finished_data();
-            let prepare_record = flatbuffers::root::<PrepareRecord>(prepare_record_bytes).unwrap();
+            let prepare_record = flatbuffers::root::<PrepareRequest>(prepare_record_bytes).unwrap();
             self.prepare(tx.clone(), prepare_record).await
         }
 
@@ -691,9 +691,9 @@ mod tests {
                 &util::flatbuf::serialize_uuid(tx.id),
             ));
             let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &self.range_id));
-            let fbb_root = CommitRecord::create(
+            let fbb_root = CommitRequest::create(
                 &mut fbb,
-                &CommitRecordArgs {
+                &CommitRequestArgs {
                     transaction_id,
                     range_id,
                     epoch: epoch as i64,
@@ -702,7 +702,7 @@ mod tests {
             );
             fbb.finish(fbb_root, None);
             let commit_record_bytes = fbb.finished_data();
-            let commit_record = flatbuffers::root::<CommitRecord>(commit_record_bytes).unwrap();
+            let commit_record = flatbuffers::root::<CommitRequest>(commit_record_bytes).unwrap();
             self.commit(tx.clone(), commit_record).await
         }
     }

@@ -72,7 +72,7 @@ impl Wal for InMemoryWal {
         Ok(())
     }
 
-    async fn append_prepare(&mut self, entry: PrepareRecord<'_>) -> Result<(), Error> {
+    async fn append_prepare(&mut self, entry: PrepareRequest<'_>) -> Result<(), Error> {
         let prepare_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
         let fb_root = LogEntry::create(
             &mut self.flatbuf_builder,
@@ -85,7 +85,7 @@ impl Wal for InMemoryWal {
         self.append_data_currently_in_builder()
     }
 
-    async fn append_commit(&mut self, entry: CommitRecord<'_>) -> Result<(), Error> {
+    async fn append_commit(&mut self, entry: CommitRequest<'_>) -> Result<(), Error> {
         let commit_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
         let fb_root = LogEntry::create(
             &mut self.flatbuf_builder,
@@ -98,7 +98,7 @@ impl Wal for InMemoryWal {
         self.append_data_currently_in_builder()
     }
 
-    async fn append_abort(&mut self, entry: AbortRecord<'_>) -> Result<(), Error> {
+    async fn append_abort(&mut self, entry: AbortRequest<'_>) -> Result<(), Error> {
         let abort_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
         let fb_root = LogEntry::create(
             &mut self.flatbuf_builder,
