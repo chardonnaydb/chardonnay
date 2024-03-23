@@ -203,6 +203,11 @@ pub struct GetResult {
     pub leader_sequence_number: i64,
 }
 
+pub struct PrepareResult {
+    pub highest_known_epoch: u64,
+    pub epoch_lease: (u64, u64),
+}
+
 impl<P, E, W> RangeManager<P, E, W>
 where
     P: Persistence,
@@ -430,7 +435,7 @@ where
         &self,
         tx: Arc<TransactionInfo>,
         prepare: PrepareRequest<'_>,
-    ) -> Result<(), Error> {
+    ) -> Result<PrepareResult, Error> {
         let s = self.state.write().await;
         match s.deref() {
             State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
@@ -469,9 +474,12 @@ where
                     wal.append_prepare(prepare)
                         .await
                         .map_err(Error::from_wal_error)?;
-                }
+                };
 
-                Ok(())
+                Ok(PrepareResult {
+                    highest_known_epoch: state.highest_known_epoch,
+                    epoch_lease: state.range_info.epoch_lease,
+                })
             }
         }
     }
@@ -629,9 +637,14 @@ mod tests {
                 &util::flatbuf::serialize_uuid(tx.id),
             ));
             let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &self.range_id));
+            let request_id = Some(Uuidu128::create(
+                &mut fbb,
+                &util::flatbuf::serialize_uuid(Uuid::new_v4()),
+            ));
             let fbb_root = AbortRequest::create(
                 &mut fbb,
                 &AbortRequestArgs {
+                    request_id,
                     transaction_id,
                     range_id,
                 },
@@ -653,6 +666,10 @@ mod tests {
             let transaction_id = Some(Uuidu128::create(
                 &mut fbb,
                 &util::flatbuf::serialize_uuid(tx.id),
+            ));
+            let request_id = Some(Uuidu128::create(
+                &mut fbb,
+                &util::flatbuf::serialize_uuid(Uuid::new_v4()),
             ));
             let mut puts_vector = Vec::new();
             for (k, v) in writes {
@@ -679,6 +696,7 @@ mod tests {
             let fbb_root = PrepareRequest::create(
                 &mut fbb,
                 &PrepareRequestArgs {
+                    request_id,
                     transaction_id,
                     range_id,
                     has_reads,
@@ -689,12 +707,16 @@ mod tests {
             fbb.finish(fbb_root, None);
             let prepare_record_bytes = fbb.finished_data();
             let prepare_record = flatbuffers::root::<PrepareRequest>(prepare_record_bytes).unwrap();
-            self.prepare(tx.clone(), prepare_record).await
+            self.prepare(tx.clone(), prepare_record).await.map(|_| ())
         }
 
         async fn commit_transaction(&self, tx: Arc<TransactionInfo>) -> Result<(), Error> {
             let epoch = self.epoch_provider.read_epoch().await.unwrap();
             let mut fbb = FlatBufferBuilder::new();
+            let request_id = Some(Uuidu128::create(
+                &mut fbb,
+                &util::flatbuf::serialize_uuid(Uuid::new_v4()),
+            ));
             let transaction_id = Some(Uuidu128::create(
                 &mut fbb,
                 &util::flatbuf::serialize_uuid(tx.id),
@@ -703,9 +725,10 @@ mod tests {
             let fbb_root = CommitRequest::create(
                 &mut fbb,
                 &CommitRequestArgs {
+                    request_id,
                     transaction_id,
                     range_id,
-                    epoch: epoch as i64,
+                    epoch,
                     vid: 0,
                 },
             );

@@ -147,11 +147,113 @@ where
             },
         );
         fbb.finish(fbb_root, None);
-        let prepare_record_bytes = fbb.finished_data();
-        flatbuffers::root::<GetResponse<'a>>(prepare_record_bytes).unwrap()
+        let get_response_bytes = fbb.finished_data();
+        flatbuffers::root::<GetResponse<'a>>(get_response_bytes).unwrap()
     }
 
-    async fn prepare(&self, request: PrepareRequest<'_>) -> Result<(), Error> {
-        todo!();
+    async fn prepare<'a>(
+        &self,
+        fbb: &'a mut FlatBufferBuilder<'a>,
+        request: PrepareRequest<'_>,
+    ) -> PrepareResponse<'a> {
+        let range_id = request.range_id().unwrap();
+        let range_id = util::flatbuf::deserialize_range_id(&range_id).unwrap();
+        let request_id = util::flatbuf::deserialize_uuid(request.request_id().unwrap());
+        let rm = self.maybe_load_and_get_range(&range_id).await;
+        let transaction_id = util::flatbuf::deserialize_uuid(request.transaction_id().unwrap());
+        // TODO: don't create a new transaction info from the request. There should be a transactions table.
+        let tx = Arc::new(TransactionInfo { id: transaction_id });
+
+        let prepare_result = rm.prepare(tx.clone(), request).await.unwrap();
+
+        // Construct the response.
+        let request_id = Some(Uuidu128::create(
+            fbb,
+            &util::flatbuf::serialize_uuid(request_id),
+        ));
+        let epoch_lease = Some(EpochLease::create(
+            fbb,
+            &EpochLeaseArgs {
+                lower_bound_inclusive: prepare_result.epoch_lease.0,
+                upper_bound_inclusive: prepare_result.epoch_lease.1,
+            },
+        ));
+
+        let fbb_root = PrepareResponse::create(
+            fbb,
+            &PrepareResponseArgs {
+                request_id,
+                status: true,
+                epoch_lease,
+                highest_known_epoch: prepare_result.highest_known_epoch,
+            },
+        );
+        fbb.finish(fbb_root, None);
+        let prepare_response_bytes = fbb.finished_data();
+        flatbuffers::root::<PrepareResponse<'a>>(prepare_response_bytes).unwrap()
+    }
+
+    async fn commit<'a>(
+        &self,
+        fbb: &'a mut FlatBufferBuilder<'a>,
+        request: CommitRequest<'_>,
+    ) -> CommitResponse<'a> {
+        let range_id = request.range_id().unwrap();
+        let range_id = util::flatbuf::deserialize_range_id(&range_id).unwrap();
+        let request_id = util::flatbuf::deserialize_uuid(request.request_id().unwrap());
+        let rm = self.maybe_load_and_get_range(&range_id).await;
+        let transaction_id = util::flatbuf::deserialize_uuid(request.transaction_id().unwrap());
+        // TODO: don't create a new transaction info from the request. There should be a transactions table.
+        let tx = Arc::new(TransactionInfo { id: transaction_id });
+
+        rm.commit(tx.clone(), request).await.unwrap();
+
+        // Construct the response.
+        let request_id = Some(Uuidu128::create(
+            fbb,
+            &util::flatbuf::serialize_uuid(request_id),
+        ));
+        let fbb_root = CommitResponse::create(
+            fbb,
+            &CommitResponseArgs {
+                request_id,
+                status: true,
+            },
+        );
+        fbb.finish(fbb_root, None);
+        let commit_response_bytes = fbb.finished_data();
+        flatbuffers::root::<CommitResponse<'a>>(commit_response_bytes).unwrap()
+    }
+
+    async fn abort<'a>(
+        &self,
+        fbb: &'a mut FlatBufferBuilder<'a>,
+        request: AbortRequest<'_>,
+    ) -> AbortResponse<'a> {
+        let range_id = request.range_id().unwrap();
+        let range_id = util::flatbuf::deserialize_range_id(&range_id).unwrap();
+        let request_id = util::flatbuf::deserialize_uuid(request.request_id().unwrap());
+        let rm = self.maybe_load_and_get_range(&range_id).await;
+        let transaction_id = util::flatbuf::deserialize_uuid(request.transaction_id().unwrap());
+        // TODO: don't create a new transaction info from the request. There should be a transactions table.
+        let tx = Arc::new(TransactionInfo { id: transaction_id });
+
+        rm.abort(tx.clone(), request).await.unwrap();
+
+        // Construct the response.
+        let request_id = Some(Uuidu128::create(
+            fbb,
+            &util::flatbuf::serialize_uuid(request_id),
+        ));
+        let fbb_root = AbortResponse::create(
+            fbb,
+            &AbortResponseArgs {
+                request_id,
+                status: true,
+            },
+        );
+        fbb.finish(fbb_root, None);
+        let abort_response_bytes = fbb.finished_data();
+        flatbuffers::root::<AbortResponse<'a>>(abort_response_bytes).unwrap()
     }
 }

@@ -335,6 +335,120 @@ impl core::fmt::Debug for RangeId<'_> {
       ds.finish()
   }
 }
+pub enum EpochLeaseOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct EpochLease<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for EpochLease<'a> {
+  type Inner = EpochLease<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> EpochLease<'a> {
+  pub const VT_LOWER_BOUND_INCLUSIVE: flatbuffers::VOffsetT = 4;
+  pub const VT_UPPER_BOUND_INCLUSIVE: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    EpochLease { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args EpochLeaseArgs
+  ) -> flatbuffers::WIPOffset<EpochLease<'bldr>> {
+    let mut builder = EpochLeaseBuilder::new(_fbb);
+    builder.add_upper_bound_inclusive(args.upper_bound_inclusive);
+    builder.add_lower_bound_inclusive(args.lower_bound_inclusive);
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn lower_bound_inclusive(&self) -> u64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u64>(EpochLease::VT_LOWER_BOUND_INCLUSIVE, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn upper_bound_inclusive(&self) -> u64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u64>(EpochLease::VT_UPPER_BOUND_INCLUSIVE, Some(0)).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for EpochLease<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u64>("lower_bound_inclusive", Self::VT_LOWER_BOUND_INCLUSIVE, false)?
+     .visit_field::<u64>("upper_bound_inclusive", Self::VT_UPPER_BOUND_INCLUSIVE, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct EpochLeaseArgs {
+    pub lower_bound_inclusive: u64,
+    pub upper_bound_inclusive: u64,
+}
+impl<'a> Default for EpochLeaseArgs {
+  #[inline]
+  fn default() -> Self {
+    EpochLeaseArgs {
+      lower_bound_inclusive: 0,
+      upper_bound_inclusive: 0,
+    }
+  }
+}
+
+pub struct EpochLeaseBuilder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> EpochLeaseBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_lower_bound_inclusive(&mut self, lower_bound_inclusive: u64) {
+    self.fbb_.push_slot::<u64>(EpochLease::VT_LOWER_BOUND_INCLUSIVE, lower_bound_inclusive, 0);
+  }
+  #[inline]
+  pub fn add_upper_bound_inclusive(&mut self, upper_bound_inclusive: u64) {
+    self.fbb_.push_slot::<u64>(EpochLease::VT_UPPER_BOUND_INCLUSIVE, upper_bound_inclusive, 0);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> EpochLeaseBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    EpochLeaseBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<EpochLease<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for EpochLease<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("EpochLease");
+      ds.field("lower_bound_inclusive", &self.lower_bound_inclusive());
+      ds.field("upper_bound_inclusive", &self.upper_bound_inclusive());
+      ds.finish()
+  }
+}
 pub enum KeyOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -841,11 +955,12 @@ impl<'a> flatbuffers::Follow<'a> for PrepareRequest<'a> {
 }
 
 impl<'a> PrepareRequest<'a> {
-  pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 4;
-  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 6;
-  pub const VT_HAS_READS: flatbuffers::VOffsetT = 8;
-  pub const VT_PUTS: flatbuffers::VOffsetT = 10;
-  pub const VT_DELETES: flatbuffers::VOffsetT = 12;
+  pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 6;
+  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 8;
+  pub const VT_HAS_READS: flatbuffers::VOffsetT = 10;
+  pub const VT_PUTS: flatbuffers::VOffsetT = 12;
+  pub const VT_DELETES: flatbuffers::VOffsetT = 14;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -861,11 +976,19 @@ impl<'a> PrepareRequest<'a> {
     if let Some(x) = args.puts { builder.add_puts(x); }
     if let Some(x) = args.range_id { builder.add_range_id(x); }
     if let Some(x) = args.transaction_id { builder.add_transaction_id(x); }
+    if let Some(x) = args.request_id { builder.add_request_id(x); }
     builder.add_has_reads(args.has_reads);
     builder.finish()
   }
 
 
+  #[inline]
+  pub fn request_id(&self) -> Option<Uuidu128<'a>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(PrepareRequest::VT_REQUEST_ID, None)}
+  }
   #[inline]
   pub fn transaction_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
@@ -910,6 +1033,7 @@ impl flatbuffers::Verifiable for PrepareRequest<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<RangeId>>("range_id", Self::VT_RANGE_ID, false)?
      .visit_field::<bool>("has_reads", Self::VT_HAS_READS, false)?
@@ -920,6 +1044,7 @@ impl flatbuffers::Verifiable for PrepareRequest<'_> {
   }
 }
 pub struct PrepareRequestArgs<'a> {
+    pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub transaction_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub range_id: Option<flatbuffers::WIPOffset<RangeId<'a>>>,
     pub has_reads: bool,
@@ -930,6 +1055,7 @@ impl<'a> Default for PrepareRequestArgs<'a> {
   #[inline]
   fn default() -> Self {
     PrepareRequestArgs {
+      request_id: None,
       transaction_id: None,
       range_id: None,
       has_reads: false,
@@ -944,6 +1070,10 @@ pub struct PrepareRequestBuilder<'a: 'b, 'b> {
   start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b> PrepareRequestBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(PrepareRequest::VT_REQUEST_ID, request_id);
+  }
   #[inline]
   pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(PrepareRequest::VT_TRANSACTION_ID, transaction_id);
@@ -982,11 +1112,160 @@ impl<'a: 'b, 'b> PrepareRequestBuilder<'a, 'b> {
 impl core::fmt::Debug for PrepareRequest<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("PrepareRequest");
+      ds.field("request_id", &self.request_id());
       ds.field("transaction_id", &self.transaction_id());
       ds.field("range_id", &self.range_id());
       ds.field("has_reads", &self.has_reads());
       ds.field("puts", &self.puts());
       ds.field("deletes", &self.deletes());
+      ds.finish()
+  }
+}
+pub enum PrepareResponseOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct PrepareResponse<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for PrepareResponse<'a> {
+  type Inner = PrepareResponse<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> PrepareResponse<'a> {
+  pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_STATUS: flatbuffers::VOffsetT = 6;
+  pub const VT_HIGHEST_KNOWN_EPOCH: flatbuffers::VOffsetT = 8;
+  pub const VT_EPOCH_LEASE: flatbuffers::VOffsetT = 10;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    PrepareResponse { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args PrepareResponseArgs<'args>
+  ) -> flatbuffers::WIPOffset<PrepareResponse<'bldr>> {
+    let mut builder = PrepareResponseBuilder::new(_fbb);
+    builder.add_highest_known_epoch(args.highest_known_epoch);
+    if let Some(x) = args.epoch_lease { builder.add_epoch_lease(x); }
+    if let Some(x) = args.request_id { builder.add_request_id(x); }
+    builder.add_status(args.status);
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn request_id(&self) -> Option<Uuidu128<'a>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(PrepareResponse::VT_REQUEST_ID, None)}
+  }
+  #[inline]
+  pub fn status(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(PrepareResponse::VT_STATUS, Some(false)).unwrap()}
+  }
+  #[inline]
+  pub fn highest_known_epoch(&self) -> u64 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u64>(PrepareResponse::VT_HIGHEST_KNOWN_EPOCH, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn epoch_lease(&self) -> Option<EpochLease<'a>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<EpochLease>>(PrepareResponse::VT_EPOCH_LEASE, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for PrepareResponse<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<bool>("status", Self::VT_STATUS, false)?
+     .visit_field::<u64>("highest_known_epoch", Self::VT_HIGHEST_KNOWN_EPOCH, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<EpochLease>>("epoch_lease", Self::VT_EPOCH_LEASE, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct PrepareResponseArgs<'a> {
+    pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
+    pub status: bool,
+    pub highest_known_epoch: u64,
+    pub epoch_lease: Option<flatbuffers::WIPOffset<EpochLease<'a>>>,
+}
+impl<'a> Default for PrepareResponseArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    PrepareResponseArgs {
+      request_id: None,
+      status: false,
+      highest_known_epoch: 0,
+      epoch_lease: None,
+    }
+  }
+}
+
+pub struct PrepareResponseBuilder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> PrepareResponseBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(PrepareResponse::VT_REQUEST_ID, request_id);
+  }
+  #[inline]
+  pub fn add_status(&mut self, status: bool) {
+    self.fbb_.push_slot::<bool>(PrepareResponse::VT_STATUS, status, false);
+  }
+  #[inline]
+  pub fn add_highest_known_epoch(&mut self, highest_known_epoch: u64) {
+    self.fbb_.push_slot::<u64>(PrepareResponse::VT_HIGHEST_KNOWN_EPOCH, highest_known_epoch, 0);
+  }
+  #[inline]
+  pub fn add_epoch_lease(&mut self, epoch_lease: flatbuffers::WIPOffset<EpochLease<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<EpochLease>>(PrepareResponse::VT_EPOCH_LEASE, epoch_lease);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> PrepareResponseBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    PrepareResponseBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<PrepareResponse<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for PrepareResponse<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("PrepareResponse");
+      ds.field("request_id", &self.request_id());
+      ds.field("status", &self.status());
+      ds.field("highest_known_epoch", &self.highest_known_epoch());
+      ds.field("epoch_lease", &self.epoch_lease());
       ds.finish()
   }
 }
@@ -1006,10 +1285,11 @@ impl<'a> flatbuffers::Follow<'a> for CommitRequest<'a> {
 }
 
 impl<'a> CommitRequest<'a> {
-  pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 4;
-  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 6;
-  pub const VT_EPOCH: flatbuffers::VOffsetT = 8;
-  pub const VT_VID: flatbuffers::VOffsetT = 10;
+  pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 6;
+  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 8;
+  pub const VT_EPOCH: flatbuffers::VOffsetT = 10;
+  pub const VT_VID: flatbuffers::VOffsetT = 12;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -1025,10 +1305,18 @@ impl<'a> CommitRequest<'a> {
     builder.add_epoch(args.epoch);
     if let Some(x) = args.range_id { builder.add_range_id(x); }
     if let Some(x) = args.transaction_id { builder.add_transaction_id(x); }
+    if let Some(x) = args.request_id { builder.add_request_id(x); }
     builder.finish()
   }
 
 
+  #[inline]
+  pub fn request_id(&self) -> Option<Uuidu128<'a>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(CommitRequest::VT_REQUEST_ID, None)}
+  }
   #[inline]
   pub fn transaction_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
@@ -1044,11 +1332,11 @@ impl<'a> CommitRequest<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<RangeId>>(CommitRequest::VT_RANGE_ID, None)}
   }
   #[inline]
-  pub fn epoch(&self) -> i64 {
+  pub fn epoch(&self) -> u64 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<i64>(CommitRequest::VT_EPOCH, Some(0)).unwrap()}
+    unsafe { self._tab.get::<u64>(CommitRequest::VT_EPOCH, Some(0)).unwrap()}
   }
   #[inline]
   pub fn vid(&self) -> i64 {
@@ -1066,24 +1354,27 @@ impl flatbuffers::Verifiable for CommitRequest<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<RangeId>>("range_id", Self::VT_RANGE_ID, false)?
-     .visit_field::<i64>("epoch", Self::VT_EPOCH, false)?
+     .visit_field::<u64>("epoch", Self::VT_EPOCH, false)?
      .visit_field::<i64>("vid", Self::VT_VID, false)?
      .finish();
     Ok(())
   }
 }
 pub struct CommitRequestArgs<'a> {
+    pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub transaction_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub range_id: Option<flatbuffers::WIPOffset<RangeId<'a>>>,
-    pub epoch: i64,
+    pub epoch: u64,
     pub vid: i64,
 }
 impl<'a> Default for CommitRequestArgs<'a> {
   #[inline]
   fn default() -> Self {
     CommitRequestArgs {
+      request_id: None,
       transaction_id: None,
       range_id: None,
       epoch: 0,
@@ -1098,6 +1389,10 @@ pub struct CommitRequestBuilder<'a: 'b, 'b> {
 }
 impl<'a: 'b, 'b> CommitRequestBuilder<'a, 'b> {
   #[inline]
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(CommitRequest::VT_REQUEST_ID, request_id);
+  }
+  #[inline]
   pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(CommitRequest::VT_TRANSACTION_ID, transaction_id);
   }
@@ -1106,8 +1401,8 @@ impl<'a: 'b, 'b> CommitRequestBuilder<'a, 'b> {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<RangeId>>(CommitRequest::VT_RANGE_ID, range_id);
   }
   #[inline]
-  pub fn add_epoch(&mut self, epoch: i64) {
-    self.fbb_.push_slot::<i64>(CommitRequest::VT_EPOCH, epoch, 0);
+  pub fn add_epoch(&mut self, epoch: u64) {
+    self.fbb_.push_slot::<u64>(CommitRequest::VT_EPOCH, epoch, 0);
   }
   #[inline]
   pub fn add_vid(&mut self, vid: i64) {
@@ -1131,10 +1426,125 @@ impl<'a: 'b, 'b> CommitRequestBuilder<'a, 'b> {
 impl core::fmt::Debug for CommitRequest<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("CommitRequest");
+      ds.field("request_id", &self.request_id());
       ds.field("transaction_id", &self.transaction_id());
       ds.field("range_id", &self.range_id());
       ds.field("epoch", &self.epoch());
       ds.field("vid", &self.vid());
+      ds.finish()
+  }
+}
+pub enum CommitResponseOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct CommitResponse<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for CommitResponse<'a> {
+  type Inner = CommitResponse<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> CommitResponse<'a> {
+  pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_STATUS: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    CommitResponse { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args CommitResponseArgs<'args>
+  ) -> flatbuffers::WIPOffset<CommitResponse<'bldr>> {
+    let mut builder = CommitResponseBuilder::new(_fbb);
+    if let Some(x) = args.request_id { builder.add_request_id(x); }
+    builder.add_status(args.status);
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn request_id(&self) -> Option<Uuidu128<'a>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(CommitResponse::VT_REQUEST_ID, None)}
+  }
+  #[inline]
+  pub fn status(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(CommitResponse::VT_STATUS, Some(false)).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for CommitResponse<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<bool>("status", Self::VT_STATUS, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct CommitResponseArgs<'a> {
+    pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
+    pub status: bool,
+}
+impl<'a> Default for CommitResponseArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    CommitResponseArgs {
+      request_id: None,
+      status: false,
+    }
+  }
+}
+
+pub struct CommitResponseBuilder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> CommitResponseBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(CommitResponse::VT_REQUEST_ID, request_id);
+  }
+  #[inline]
+  pub fn add_status(&mut self, status: bool) {
+    self.fbb_.push_slot::<bool>(CommitResponse::VT_STATUS, status, false);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> CommitResponseBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    CommitResponseBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<CommitResponse<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for CommitResponse<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("CommitResponse");
+      ds.field("request_id", &self.request_id());
+      ds.field("status", &self.status());
       ds.finish()
   }
 }
@@ -1154,8 +1564,9 @@ impl<'a> flatbuffers::Follow<'a> for AbortRequest<'a> {
 }
 
 impl<'a> AbortRequest<'a> {
-  pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 4;
-  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 6;
+  pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 6;
+  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 8;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -1169,10 +1580,18 @@ impl<'a> AbortRequest<'a> {
     let mut builder = AbortRequestBuilder::new(_fbb);
     if let Some(x) = args.range_id { builder.add_range_id(x); }
     if let Some(x) = args.transaction_id { builder.add_transaction_id(x); }
+    if let Some(x) = args.request_id { builder.add_request_id(x); }
     builder.finish()
   }
 
 
+  #[inline]
+  pub fn request_id(&self) -> Option<Uuidu128<'a>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(AbortRequest::VT_REQUEST_ID, None)}
+  }
   #[inline]
   pub fn transaction_id(&self) -> Option<Uuidu128<'a>> {
     // Safety:
@@ -1196,6 +1615,7 @@ impl flatbuffers::Verifiable for AbortRequest<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<RangeId>>("range_id", Self::VT_RANGE_ID, false)?
      .finish();
@@ -1203,6 +1623,7 @@ impl flatbuffers::Verifiable for AbortRequest<'_> {
   }
 }
 pub struct AbortRequestArgs<'a> {
+    pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub transaction_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub range_id: Option<flatbuffers::WIPOffset<RangeId<'a>>>,
 }
@@ -1210,6 +1631,7 @@ impl<'a> Default for AbortRequestArgs<'a> {
   #[inline]
   fn default() -> Self {
     AbortRequestArgs {
+      request_id: None,
       transaction_id: None,
       range_id: None,
     }
@@ -1221,6 +1643,10 @@ pub struct AbortRequestBuilder<'a: 'b, 'b> {
   start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b> AbortRequestBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(AbortRequest::VT_REQUEST_ID, request_id);
+  }
   #[inline]
   pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(AbortRequest::VT_TRANSACTION_ID, transaction_id);
@@ -1247,8 +1673,123 @@ impl<'a: 'b, 'b> AbortRequestBuilder<'a, 'b> {
 impl core::fmt::Debug for AbortRequest<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("AbortRequest");
+      ds.field("request_id", &self.request_id());
       ds.field("transaction_id", &self.transaction_id());
       ds.field("range_id", &self.range_id());
+      ds.finish()
+  }
+}
+pub enum AbortResponseOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct AbortResponse<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for AbortResponse<'a> {
+  type Inner = AbortResponse<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> AbortResponse<'a> {
+  pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_STATUS: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    AbortResponse { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args AbortResponseArgs<'args>
+  ) -> flatbuffers::WIPOffset<AbortResponse<'bldr>> {
+    let mut builder = AbortResponseBuilder::new(_fbb);
+    if let Some(x) = args.request_id { builder.add_request_id(x); }
+    builder.add_status(args.status);
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn request_id(&self) -> Option<Uuidu128<'a>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(AbortResponse::VT_REQUEST_ID, None)}
+  }
+  #[inline]
+  pub fn status(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(AbortResponse::VT_STATUS, Some(false)).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for AbortResponse<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<bool>("status", Self::VT_STATUS, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct AbortResponseArgs<'a> {
+    pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
+    pub status: bool,
+}
+impl<'a> Default for AbortResponseArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    AbortResponseArgs {
+      request_id: None,
+      status: false,
+    }
+  }
+}
+
+pub struct AbortResponseBuilder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> AbortResponseBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(AbortResponse::VT_REQUEST_ID, request_id);
+  }
+  #[inline]
+  pub fn add_status(&mut self, status: bool) {
+    self.fbb_.push_slot::<bool>(AbortResponse::VT_STATUS, status, false);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> AbortResponseBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    AbortResponseBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<AbortResponse<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for AbortResponse<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("AbortResponse");
+      ds.field("request_id", &self.request_id());
+      ds.field("status", &self.status());
       ds.finish()
   }
 }
