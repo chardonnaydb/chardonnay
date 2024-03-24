@@ -1,4 +1,5 @@
 pub mod epoch_provider;
+mod error;
 mod for_testing;
 mod key_range;
 mod key_version;

@@ -1,8 +1,7 @@
 use crate::{
-    epoch_provider::EpochProvider, epoch_provider::Error as EpochProviderError,
-    key_version::KeyVersion, persistence::Error as PersistenceError, persistence::Persistence,
+    epoch_provider::EpochProvider, error::Error, key_version::KeyVersion, persistence::Persistence,
     persistence::RangeInfo, transaction_abort_reason::TransactionAbortReason,
-    transaction_info::TransactionInfo, wal::Error as WalError, wal::Iterator, wal::Wal,
+    transaction_info::TransactionInfo, wal::Iterator, wal::Wal,
 };
 use bytes::Bytes;
 use chrono::DateTime;
@@ -17,40 +16,6 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
-
-#[derive(Clone, Debug)]
-pub enum Error {
-    RangeDoesNotExist,
-    RangeIsNotLoaded,
-    KeyIsOutOfRange,
-    RangeOwnershipLost,
-    Timeout,
-    TransactionAborted(TransactionAbortReason),
-    InternalError(Arc<dyn std::error::Error + Send + Sync>),
-}
-
-impl Error {
-    fn from_persistence_error(e: PersistenceError) -> Self {
-        match e {
-            PersistenceError::RangeDoesNotExist => Self::RangeDoesNotExist,
-            PersistenceError::RangeOwnershipLost => Self::RangeOwnershipLost,
-            PersistenceError::Timeout => Self::Timeout,
-            PersistenceError::InternalError(_) => Self::InternalError(Arc::new(e)),
-        }
-    }
-
-    fn from_wal_error(e: WalError) -> Self {
-        match e {
-            WalError::Unknown => Self::InternalError(Arc::new(e)),
-        }
-    }
-
-    fn from_epoch_provider_error(e: EpochProviderError) -> Self {
-        match e {
-            EpochProviderError::Unknown => Self::InternalError(Arc::new(e)),
-        }
-    }
-}
 
 type UtcDateTime = DateTime<chrono::Utc>;
 struct CurrentLockHolder {
