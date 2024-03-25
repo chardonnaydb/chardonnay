@@ -13,14 +13,10 @@ use uuid::Uuid;
 
 use crate::transaction_info::TransactionInfo;
 use crate::{
-    epoch_provider::EpochProvider, for_testing::in_memory_wal::InMemoryWal,
+    epoch_provider::EpochProvider, error::Error, for_testing::in_memory_wal::InMemoryWal,
     persistence::Persistence, range_manager::RangeManager,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::*;
-
-pub enum Error {
-    Unknown,
-}
 
 pub struct Server<P, E, O>
 where
@@ -46,20 +42,19 @@ where
     async fn maybe_load_and_get_range(
         &self,
         id: &FullRangeId,
-    ) -> Arc<RangeManager<P, E, InMemoryWal>> {
-        // TODO: error handling, no panics!
+    ) -> Result<Arc<RangeManager<P, E, InMemoryWal>>, Error> {
         if let Some(assignee) = self.assignment_oracle.host_of_range(id) {
             if assignee.identity != self.identity {
-                panic!("range is not assigned to me!");
+                return Err(Error::RangeIsNotLoaded);
             }
         } else {
-            panic!("range is not assigned to me!");
+            return Err(Error::RangeIsNotLoaded);
         }
 
         {
             let range_table = self.loaded_ranges.read().await;
             match (*range_table).get(&id.range_id) {
-                Some(r) => return r.clone(),
+                Some(r) => return Ok(r.clone()),
                 None => (),
             }
         };
@@ -71,24 +66,35 @@ where
             InMemoryWal::new(),
         );
 
-        rm.load().await.unwrap();
+        rm.load().await?;
         {
             let mut range_table = self.loaded_ranges.write().await;
             (*range_table).insert(id.range_id, rm.clone());
         };
-        rm.clone()
+        Ok(rm.clone())
     }
 
-    async fn get<'a>(
+    async fn get_inner(
         &self,
-        fbb: &'a mut FlatBufferBuilder<'a>,
         request: GetRequest<'_>,
-    ) -> GetResponse<'a> {
-        let range_id = request.range_id().unwrap();
-        let range_id = util::flatbuf::deserialize_range_id(&range_id).unwrap();
-        let request_id = util::flatbuf::deserialize_uuid(request.request_id().unwrap());
-        let rm = self.maybe_load_and_get_range(&range_id).await;
-        let transaction_id = util::flatbuf::deserialize_uuid(request.transaction_id().unwrap());
+    ) -> Result<(i64, HashMap<Bytes, Bytes>), Error> {
+        let range_id = match request.range_id() {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => id,
+        };
+        let range_id = match util::flatbuf::deserialize_range_id(&range_id) {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => id,
+        };
+        let transaction_id = match request.transaction_id() {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => util::flatbuf::deserialize_uuid(id),
+        };
+        match request.request_id() {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(_) => (),
+        }
+        let rm = self.maybe_load_and_get_range(&range_id).await?;
         // TODO: don't create a new transaction info from the Get request. There should be a transactions table.
         let tx = Arc::new(TransactionInfo { id: transaction_id });
         let mut leader_sequence_number: i64 = 0;
@@ -100,7 +106,7 @@ where
             for key in key.iter() {
                 // TODO: too much copying :(
                 let key = Bytes::copy_from_slice(key.k().unwrap().bytes());
-                let get_result = rm.get(tx.clone(), key.clone()).await.unwrap();
+                let get_result = rm.get(tx.clone(), key.clone()).await?;
                 match get_result.val {
                     None => (),
                     Some(val) => {
@@ -118,79 +124,164 @@ where
                 }
             }
         }
+        Ok((leader_sequence_number, reads))
+    }
 
-        // Construct the response
-        let mut records_vector = Vec::new();
-        for (k, v) in reads {
-            let k = Some(fbb.create_vector(k.to_vec().as_slice()));
-            let key = Key::create(fbb, &KeyArgs { k });
-            let value = fbb.create_vector(v.to_vec().as_slice());
-            records_vector.push(Record::create(
+    pub async fn get<'a>(
+        &self,
+        fbb: &'a mut FlatBufferBuilder<'a>,
+        request: GetRequest<'_>,
+    ) -> GetResponse<'a> {
+        let fbb_root = match request.request_id() {
+            None => GetResponse::create(
                 fbb,
-                &RecordArgs {
-                    key: Some(key),
-                    value: Some(value),
+                &GetResponseArgs {
+                    request_id: None,
+                    status: Status::InvalidRequestFormat,
+                    leader_sequence_number: 0,
+                    records: None,
                 },
-            ));
-        }
-        let records = Some(fbb.create_vector(&records_vector));
-        let request_id = Some(Uuidu128::create(
-            fbb,
-            &util::flatbuf::serialize_uuid(request_id),
-        ));
-        let fbb_root = GetResponse::create(
-            fbb,
-            &GetResponseArgs {
-                leader_sequence_number,
-                request_id,
-                records,
-            },
-        );
+            ),
+            Some(req_id) => {
+                let request_id = util::flatbuf::deserialize_uuid(req_id);
+                let read_result = self.get_inner(request).await;
+
+                // Construct the response
+                let mut records_vector = Vec::new();
+                let (status, leader_sequence_number) = match read_result {
+                    Err(e) => (e.to_flatbuf_status(), -1),
+                    Ok((leader_sequence_number, reads)) => {
+                        for (k, v) in reads {
+                            let k = Some(fbb.create_vector(k.to_vec().as_slice()));
+                            let key = Key::create(fbb, &KeyArgs { k });
+                            let value = fbb.create_vector(v.to_vec().as_slice());
+                            records_vector.push(Record::create(
+                                fbb,
+                                &RecordArgs {
+                                    key: Some(key),
+                                    value: Some(value),
+                                },
+                            ));
+                        }
+                        (Status::Ok, leader_sequence_number)
+                    }
+                };
+                let records = Some(fbb.create_vector(&records_vector));
+                let request_id = Some(Uuidu128::create(
+                    fbb,
+                    &util::flatbuf::serialize_uuid(request_id),
+                ));
+                GetResponse::create(
+                    fbb,
+                    &GetResponseArgs {
+                        request_id,
+                        status,
+                        leader_sequence_number,
+                        records,
+                    },
+                )
+            }
+        };
+
         fbb.finish(fbb_root, None);
         let get_response_bytes = fbb.finished_data();
         flatbuffers::root::<GetResponse<'a>>(get_response_bytes).unwrap()
     }
 
-    async fn prepare<'a>(
+    async fn prepare_inner(
+        &self,
+        request: PrepareRequest<'_>,
+    ) -> Result<crate::range_manager::PrepareResult, Error> {
+        let range_id = match request.range_id() {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => id,
+        };
+        let range_id = match util::flatbuf::deserialize_range_id(&range_id) {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => id,
+        };
+        let transaction_id = match request.transaction_id() {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => util::flatbuf::deserialize_uuid(id),
+        };
+        let rm = self.maybe_load_and_get_range(&range_id).await?;
+        // TODO: don't create a new transaction info from the Get request. There should be a transactions table.
+        let tx = Arc::new(TransactionInfo { id: transaction_id });
+        rm.prepare(tx.clone(), request).await
+    }
+
+    pub async fn prepare<'a>(
         &self,
         fbb: &'a mut FlatBufferBuilder<'a>,
         request: PrepareRequest<'_>,
     ) -> PrepareResponse<'a> {
-        let range_id = request.range_id().unwrap();
-        let range_id = util::flatbuf::deserialize_range_id(&range_id).unwrap();
-        let request_id = util::flatbuf::deserialize_uuid(request.request_id().unwrap());
-        let rm = self.maybe_load_and_get_range(&range_id).await;
-        let transaction_id = util::flatbuf::deserialize_uuid(request.transaction_id().unwrap());
-        // TODO: don't create a new transaction info from the request. There should be a transactions table.
-        let tx = Arc::new(TransactionInfo { id: transaction_id });
+        let fbb_root = match request.request_id() {
+            None => PrepareResponse::create(
+                fbb,
+                &PrepareResponseArgs {
+                    request_id: None,
+                    status: Status::InvalidRequestFormat,
+                    epoch_lease: None,
+                    highest_known_epoch: 0,
+                },
+            ),
+            Some(req_id) => {
+                let request_id = util::flatbuf::deserialize_uuid(req_id);
 
-        let prepare_result = rm.prepare(tx.clone(), request).await.unwrap();
+                let prepare_result = self.prepare_inner(request).await;
 
-        // Construct the response.
-        let request_id = Some(Uuidu128::create(
-            fbb,
-            &util::flatbuf::serialize_uuid(request_id),
-        ));
-        let epoch_lease = Some(EpochLease::create(
-            fbb,
-            &EpochLeaseArgs {
-                lower_bound_inclusive: prepare_result.epoch_lease.0,
-                upper_bound_inclusive: prepare_result.epoch_lease.1,
-            },
-        ));
+                // Construct the response.
+                let (status, epoch_lease, highest_known_epoch) = match prepare_result {
+                    Err(e) => (e.to_flatbuf_status(), None, 0),
+                    Ok(prepare_result) => {
+                        let epoch_lease = Some(EpochLease::create(
+                            fbb,
+                            &EpochLeaseArgs {
+                                lower_bound_inclusive: prepare_result.epoch_lease.0,
+                                upper_bound_inclusive: prepare_result.epoch_lease.1,
+                            },
+                        ));
+                        (Status::Ok, epoch_lease, prepare_result.highest_known_epoch)
+                    }
+                };
+                let request_id = Some(Uuidu128::create(
+                    fbb,
+                    &util::flatbuf::serialize_uuid(request_id),
+                ));
+                PrepareResponse::create(
+                    fbb,
+                    &PrepareResponseArgs {
+                        request_id,
+                        status,
+                        epoch_lease,
+                        highest_known_epoch,
+                    },
+                )
+            }
+        };
 
-        let fbb_root = PrepareResponse::create(
-            fbb,
-            &PrepareResponseArgs {
-                request_id,
-                status: true,
-                epoch_lease,
-                highest_known_epoch: prepare_result.highest_known_epoch,
-            },
-        );
         fbb.finish(fbb_root, None);
         let prepare_response_bytes = fbb.finished_data();
         flatbuffers::root::<PrepareResponse<'a>>(prepare_response_bytes).unwrap()
+    }
+
+    async fn commit_inner(&self, request: CommitRequest<'_>) -> Result<(), Error> {
+        let range_id = match request.range_id() {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => id,
+        };
+        let range_id = match util::flatbuf::deserialize_range_id(&range_id) {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => id,
+        };
+        let transaction_id = match request.transaction_id() {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => util::flatbuf::deserialize_uuid(id),
+        };
+        let rm = self.maybe_load_and_get_range(&range_id).await?;
+        // TODO: don't create a new transaction info from the Get request. There should be a transactions table.
+        let tx = Arc::new(TransactionInfo { id: transaction_id });
+        rm.commit(tx.clone(), request).await
     }
 
     async fn commit<'a>(
@@ -198,31 +289,50 @@ where
         fbb: &'a mut FlatBufferBuilder<'a>,
         request: CommitRequest<'_>,
     ) -> CommitResponse<'a> {
-        let range_id = request.range_id().unwrap();
-        let range_id = util::flatbuf::deserialize_range_id(&range_id).unwrap();
-        let request_id = util::flatbuf::deserialize_uuid(request.request_id().unwrap());
-        let rm = self.maybe_load_and_get_range(&range_id).await;
-        let transaction_id = util::flatbuf::deserialize_uuid(request.transaction_id().unwrap());
-        // TODO: don't create a new transaction info from the request. There should be a transactions table.
-        let tx = Arc::new(TransactionInfo { id: transaction_id });
-
-        rm.commit(tx.clone(), request).await.unwrap();
-
-        // Construct the response.
-        let request_id = Some(Uuidu128::create(
-            fbb,
-            &util::flatbuf::serialize_uuid(request_id),
-        ));
-        let fbb_root = CommitResponse::create(
-            fbb,
-            &CommitResponseArgs {
-                request_id,
-                status: true,
-            },
-        );
+        let fbb_root = match request.request_id() {
+            None => CommitResponse::create(
+                fbb,
+                &CommitResponseArgs {
+                    request_id: None,
+                    status: Status::InvalidRequestFormat,
+                },
+            ),
+            Some(req_id) => {
+                let request_id = util::flatbuf::deserialize_uuid(req_id);
+                let status = match self.commit_inner(request).await {
+                    Err(e) => e.to_flatbuf_status(),
+                    Ok(()) => Status::Ok,
+                };
+                // Construct the response.
+                let request_id = Some(Uuidu128::create(
+                    fbb,
+                    &util::flatbuf::serialize_uuid(request_id),
+                ));
+                CommitResponse::create(fbb, &CommitResponseArgs { request_id, status })
+            }
+        };
         fbb.finish(fbb_root, None);
         let commit_response_bytes = fbb.finished_data();
         flatbuffers::root::<CommitResponse<'a>>(commit_response_bytes).unwrap()
+    }
+
+    async fn abort_inner(&self, request: AbortRequest<'_>) -> Result<(), Error> {
+        let range_id = match request.range_id() {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => id,
+        };
+        let range_id = match util::flatbuf::deserialize_range_id(&range_id) {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => id,
+        };
+        let transaction_id = match request.transaction_id() {
+            None => return Err(Error::InvalidRequestFormat),
+            Some(id) => util::flatbuf::deserialize_uuid(id),
+        };
+        let rm = self.maybe_load_and_get_range(&range_id).await?;
+        // TODO: don't create a new transaction info from the Get request. There should be a transactions table.
+        let tx = Arc::new(TransactionInfo { id: transaction_id });
+        rm.abort(tx.clone(), request).await
     }
 
     async fn abort<'a>(
@@ -230,28 +340,28 @@ where
         fbb: &'a mut FlatBufferBuilder<'a>,
         request: AbortRequest<'_>,
     ) -> AbortResponse<'a> {
-        let range_id = request.range_id().unwrap();
-        let range_id = util::flatbuf::deserialize_range_id(&range_id).unwrap();
-        let request_id = util::flatbuf::deserialize_uuid(request.request_id().unwrap());
-        let rm = self.maybe_load_and_get_range(&range_id).await;
-        let transaction_id = util::flatbuf::deserialize_uuid(request.transaction_id().unwrap());
-        // TODO: don't create a new transaction info from the request. There should be a transactions table.
-        let tx = Arc::new(TransactionInfo { id: transaction_id });
-
-        rm.abort(tx.clone(), request).await.unwrap();
-
-        // Construct the response.
-        let request_id = Some(Uuidu128::create(
-            fbb,
-            &util::flatbuf::serialize_uuid(request_id),
-        ));
-        let fbb_root = AbortResponse::create(
-            fbb,
-            &AbortResponseArgs {
-                request_id,
-                status: true,
-            },
-        );
+        let fbb_root = match request.request_id() {
+            None => AbortResponse::create(
+                fbb,
+                &AbortResponseArgs {
+                    request_id: None,
+                    status: Status::InvalidRequestFormat,
+                },
+            ),
+            Some(req_id) => {
+                let request_id = util::flatbuf::deserialize_uuid(req_id);
+                let status = match self.abort_inner(request).await {
+                    Err(e) => e.to_flatbuf_status(),
+                    Ok(()) => Status::Ok,
+                };
+                // Construct the response.
+                let request_id = Some(Uuidu128::create(
+                    fbb,
+                    &util::flatbuf::serialize_uuid(request_id),
+                ));
+                AbortResponse::create(fbb, &AbortResponseArgs { request_id, status })
+            }
+        };
         fbb.finish(fbb_root, None);
         let abort_response_bytes = fbb.finished_data();
         flatbuffers::root::<AbortResponse<'a>>(abort_response_bytes).unwrap()

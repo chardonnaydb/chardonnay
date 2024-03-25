@@ -24,6 +24,18 @@ table Record {
     value:[ubyte];
 }
 
+enum Status:byte {
+  Ok = 0,
+  InvalidRequestFormat,
+  RangeDoesNotExist,
+  RangeIsNotLoaded,
+  KeyIsOutOfRange,
+  RangeOwnershipLost,
+  Timeout,
+  InternalError,
+  TransactionAborted,
+}
+
 table GetRequest {
   request_id:Uuidu128;
   transaction_id:Uuidu128;
@@ -33,6 +45,7 @@ table GetRequest {
 
 table GetResponse {
   request_id:Uuidu128;
+  status:Status;
   leader_sequence_number:int64;
   records:[Record];
 }
@@ -48,7 +61,7 @@ table PrepareRequest {
 
 table PrepareResponse {
   request_id:Uuidu128;
-  status:bool;
+  status:Status;
   highest_known_epoch:uint64;
   epoch_lease:EpochLease;
 }
@@ -63,7 +76,7 @@ table CommitRequest {
 
 table CommitResponse {
   request_id:Uuidu128;
-  status:bool;
+  status:Status;
 }
 
 table AbortRequest {
@@ -74,7 +87,7 @@ table AbortRequest {
 
 table AbortResponse {
   request_id:Uuidu128;
-  status:bool;
+  status:Status;
 }
 
 enum Entry:byte { Prepare = 0, Commit, Abort = 2 }

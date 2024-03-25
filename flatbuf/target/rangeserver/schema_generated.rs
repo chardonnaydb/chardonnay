@@ -19,6 +19,119 @@ pub mod range_server {
   use self::flatbuffers::{EndianScalar, Follow};
 
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+pub const ENUM_MIN_STATUS: i8 = 0;
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+pub const ENUM_MAX_STATUS: i8 = 8;
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[allow(non_camel_case_types)]
+pub const ENUM_VALUES_STATUS: [Status; 9] = [
+  Status::Ok,
+  Status::InvalidRequestFormat,
+  Status::RangeDoesNotExist,
+  Status::RangeIsNotLoaded,
+  Status::KeyIsOutOfRange,
+  Status::RangeOwnershipLost,
+  Status::Timeout,
+  Status::InternalError,
+  Status::TransactionAborted,
+];
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(transparent)]
+pub struct Status(pub i8);
+#[allow(non_upper_case_globals)]
+impl Status {
+  pub const Ok: Self = Self(0);
+  pub const InvalidRequestFormat: Self = Self(1);
+  pub const RangeDoesNotExist: Self = Self(2);
+  pub const RangeIsNotLoaded: Self = Self(3);
+  pub const KeyIsOutOfRange: Self = Self(4);
+  pub const RangeOwnershipLost: Self = Self(5);
+  pub const Timeout: Self = Self(6);
+  pub const InternalError: Self = Self(7);
+  pub const TransactionAborted: Self = Self(8);
+
+  pub const ENUM_MIN: i8 = 0;
+  pub const ENUM_MAX: i8 = 8;
+  pub const ENUM_VALUES: &'static [Self] = &[
+    Self::Ok,
+    Self::InvalidRequestFormat,
+    Self::RangeDoesNotExist,
+    Self::RangeIsNotLoaded,
+    Self::KeyIsOutOfRange,
+    Self::RangeOwnershipLost,
+    Self::Timeout,
+    Self::InternalError,
+    Self::TransactionAborted,
+  ];
+  /// Returns the variant's name or "" if unknown.
+  pub fn variant_name(self) -> Option<&'static str> {
+    match self {
+      Self::Ok => Some("Ok"),
+      Self::InvalidRequestFormat => Some("InvalidRequestFormat"),
+      Self::RangeDoesNotExist => Some("RangeDoesNotExist"),
+      Self::RangeIsNotLoaded => Some("RangeIsNotLoaded"),
+      Self::KeyIsOutOfRange => Some("KeyIsOutOfRange"),
+      Self::RangeOwnershipLost => Some("RangeOwnershipLost"),
+      Self::Timeout => Some("Timeout"),
+      Self::InternalError => Some("InternalError"),
+      Self::TransactionAborted => Some("TransactionAborted"),
+      _ => None,
+    }
+  }
+}
+impl core::fmt::Debug for Status {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    if let Some(name) = self.variant_name() {
+      f.write_str(name)
+    } else {
+      f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+    }
+  }
+}
+impl<'a> flatbuffers::Follow<'a> for Status {
+  type Inner = Self;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    let b = flatbuffers::read_scalar_at::<i8>(buf, loc);
+    Self(b)
+  }
+}
+
+impl flatbuffers::Push for Status {
+    type Output = Status;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        flatbuffers::emplace_scalar::<i8>(dst, self.0);
+    }
+}
+
+impl flatbuffers::EndianScalar for Status {
+  type Scalar = i8;
+  #[inline]
+  fn to_little_endian(self) -> i8 {
+    self.0.to_le()
+  }
+  #[inline]
+  #[allow(clippy::wrong_self_convention)]
+  fn from_little_endian(v: i8) -> Self {
+    let b = i8::from_le(v);
+    Self(b)
+  }
+}
+
+impl<'a> flatbuffers::Verifiable for Status {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    i8::run_verifier(v, pos)
+  }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for Status {}
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_ENTRY: i8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MAX_ENTRY: i8 = 2;
@@ -825,8 +938,9 @@ impl<'a> flatbuffers::Follow<'a> for GetResponse<'a> {
 
 impl<'a> GetResponse<'a> {
   pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
-  pub const VT_LEADER_SEQUENCE_NUMBER: flatbuffers::VOffsetT = 6;
-  pub const VT_RECORDS: flatbuffers::VOffsetT = 8;
+  pub const VT_STATUS: flatbuffers::VOffsetT = 6;
+  pub const VT_LEADER_SEQUENCE_NUMBER: flatbuffers::VOffsetT = 8;
+  pub const VT_RECORDS: flatbuffers::VOffsetT = 10;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -841,6 +955,7 @@ impl<'a> GetResponse<'a> {
     builder.add_leader_sequence_number(args.leader_sequence_number);
     if let Some(x) = args.records { builder.add_records(x); }
     if let Some(x) = args.request_id { builder.add_request_id(x); }
+    builder.add_status(args.status);
     builder.finish()
   }
 
@@ -851,6 +966,13 @@ impl<'a> GetResponse<'a> {
     // Created from valid Table for this object
     // which contains a valid value in this slot
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(GetResponse::VT_REQUEST_ID, None)}
+  }
+  #[inline]
+  pub fn status(&self) -> Status {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<Status>(GetResponse::VT_STATUS, Some(Status::Ok)).unwrap()}
   }
   #[inline]
   pub fn leader_sequence_number(&self) -> i64 {
@@ -876,6 +998,7 @@ impl flatbuffers::Verifiable for GetResponse<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
+     .visit_field::<Status>("status", Self::VT_STATUS, false)?
      .visit_field::<i64>("leader_sequence_number", Self::VT_LEADER_SEQUENCE_NUMBER, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Record>>>>("records", Self::VT_RECORDS, false)?
      .finish();
@@ -884,6 +1007,7 @@ impl flatbuffers::Verifiable for GetResponse<'_> {
 }
 pub struct GetResponseArgs<'a> {
     pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
+    pub status: Status,
     pub leader_sequence_number: i64,
     pub records: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Record<'a>>>>>,
 }
@@ -892,6 +1016,7 @@ impl<'a> Default for GetResponseArgs<'a> {
   fn default() -> Self {
     GetResponseArgs {
       request_id: None,
+      status: Status::Ok,
       leader_sequence_number: 0,
       records: None,
     }
@@ -906,6 +1031,10 @@ impl<'a: 'b, 'b> GetResponseBuilder<'a, 'b> {
   #[inline]
   pub fn add_request_id(&mut self, request_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(GetResponse::VT_REQUEST_ID, request_id);
+  }
+  #[inline]
+  pub fn add_status(&mut self, status: Status) {
+    self.fbb_.push_slot::<Status>(GetResponse::VT_STATUS, status, Status::Ok);
   }
   #[inline]
   pub fn add_leader_sequence_number(&mut self, leader_sequence_number: i64) {
@@ -934,6 +1063,7 @@ impl core::fmt::Debug for GetResponse<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("GetResponse");
       ds.field("request_id", &self.request_id());
+      ds.field("status", &self.status());
       ds.field("leader_sequence_number", &self.leader_sequence_number());
       ds.field("records", &self.records());
       ds.finish()
@@ -1168,11 +1298,11 @@ impl<'a> PrepareResponse<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(PrepareResponse::VT_REQUEST_ID, None)}
   }
   #[inline]
-  pub fn status(&self) -> bool {
+  pub fn status(&self) -> Status {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<bool>(PrepareResponse::VT_STATUS, Some(false)).unwrap()}
+    unsafe { self._tab.get::<Status>(PrepareResponse::VT_STATUS, Some(Status::Ok)).unwrap()}
   }
   #[inline]
   pub fn highest_known_epoch(&self) -> u64 {
@@ -1198,7 +1328,7 @@ impl flatbuffers::Verifiable for PrepareResponse<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
-     .visit_field::<bool>("status", Self::VT_STATUS, false)?
+     .visit_field::<Status>("status", Self::VT_STATUS, false)?
      .visit_field::<u64>("highest_known_epoch", Self::VT_HIGHEST_KNOWN_EPOCH, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<EpochLease>>("epoch_lease", Self::VT_EPOCH_LEASE, false)?
      .finish();
@@ -1207,7 +1337,7 @@ impl flatbuffers::Verifiable for PrepareResponse<'_> {
 }
 pub struct PrepareResponseArgs<'a> {
     pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
-    pub status: bool,
+    pub status: Status,
     pub highest_known_epoch: u64,
     pub epoch_lease: Option<flatbuffers::WIPOffset<EpochLease<'a>>>,
 }
@@ -1216,7 +1346,7 @@ impl<'a> Default for PrepareResponseArgs<'a> {
   fn default() -> Self {
     PrepareResponseArgs {
       request_id: None,
-      status: false,
+      status: Status::Ok,
       highest_known_epoch: 0,
       epoch_lease: None,
     }
@@ -1233,8 +1363,8 @@ impl<'a: 'b, 'b> PrepareResponseBuilder<'a, 'b> {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(PrepareResponse::VT_REQUEST_ID, request_id);
   }
   #[inline]
-  pub fn add_status(&mut self, status: bool) {
-    self.fbb_.push_slot::<bool>(PrepareResponse::VT_STATUS, status, false);
+  pub fn add_status(&mut self, status: Status) {
+    self.fbb_.push_slot::<Status>(PrepareResponse::VT_STATUS, status, Status::Ok);
   }
   #[inline]
   pub fn add_highest_known_epoch(&mut self, highest_known_epoch: u64) {
@@ -1477,11 +1607,11 @@ impl<'a> CommitResponse<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(CommitResponse::VT_REQUEST_ID, None)}
   }
   #[inline]
-  pub fn status(&self) -> bool {
+  pub fn status(&self) -> Status {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<bool>(CommitResponse::VT_STATUS, Some(false)).unwrap()}
+    unsafe { self._tab.get::<Status>(CommitResponse::VT_STATUS, Some(Status::Ok)).unwrap()}
   }
 }
 
@@ -1493,21 +1623,21 @@ impl flatbuffers::Verifiable for CommitResponse<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
-     .visit_field::<bool>("status", Self::VT_STATUS, false)?
+     .visit_field::<Status>("status", Self::VT_STATUS, false)?
      .finish();
     Ok(())
   }
 }
 pub struct CommitResponseArgs<'a> {
     pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
-    pub status: bool,
+    pub status: Status,
 }
 impl<'a> Default for CommitResponseArgs<'a> {
   #[inline]
   fn default() -> Self {
     CommitResponseArgs {
       request_id: None,
-      status: false,
+      status: Status::Ok,
     }
   }
 }
@@ -1522,8 +1652,8 @@ impl<'a: 'b, 'b> CommitResponseBuilder<'a, 'b> {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(CommitResponse::VT_REQUEST_ID, request_id);
   }
   #[inline]
-  pub fn add_status(&mut self, status: bool) {
-    self.fbb_.push_slot::<bool>(CommitResponse::VT_STATUS, status, false);
+  pub fn add_status(&mut self, status: Status) {
+    self.fbb_.push_slot::<Status>(CommitResponse::VT_STATUS, status, Status::Ok);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> CommitResponseBuilder<'a, 'b> {
@@ -1722,11 +1852,11 @@ impl<'a> AbortResponse<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(AbortResponse::VT_REQUEST_ID, None)}
   }
   #[inline]
-  pub fn status(&self) -> bool {
+  pub fn status(&self) -> Status {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<bool>(AbortResponse::VT_STATUS, Some(false)).unwrap()}
+    unsafe { self._tab.get::<Status>(AbortResponse::VT_STATUS, Some(Status::Ok)).unwrap()}
   }
 }
 
@@ -1738,21 +1868,21 @@ impl flatbuffers::Verifiable for AbortResponse<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
-     .visit_field::<bool>("status", Self::VT_STATUS, false)?
+     .visit_field::<Status>("status", Self::VT_STATUS, false)?
      .finish();
     Ok(())
   }
 }
 pub struct AbortResponseArgs<'a> {
     pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
-    pub status: bool,
+    pub status: Status,
 }
 impl<'a> Default for AbortResponseArgs<'a> {
   #[inline]
   fn default() -> Self {
     AbortResponseArgs {
       request_id: None,
-      status: false,
+      status: Status::Ok,
     }
   }
 }
@@ -1767,8 +1897,8 @@ impl<'a: 'b, 'b> AbortResponseBuilder<'a, 'b> {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(AbortResponse::VT_REQUEST_ID, request_id);
   }
   #[inline]
-  pub fn add_status(&mut self, status: bool) {
-    self.fbb_.push_slot::<bool>(AbortResponse::VT_STATUS, status, false);
+  pub fn add_status(&mut self, status: Status) {
+    self.fbb_.push_slot::<Status>(AbortResponse::VT_STATUS, status, Status::Ok);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> AbortResponseBuilder<'a, 'b> {
