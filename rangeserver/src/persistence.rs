@@ -2,10 +2,10 @@ pub mod cassandra;
 
 use std::sync::Arc;
 
-use crate::key_range::KeyRange;
 use crate::key_version::KeyVersion;
 use bytes::Bytes;
 use common::full_range_id::FullRangeId;
+use common::key_range::KeyRange;
 use thiserror::Error;
 use uuid::Uuid;
 
