@@ -1,3 +1,14 @@
+  CREATE TABLE range_map (
+    keyspace_id                  uuid,
+    range_id                     uuid,
+    key_lower_bound_inclusive    blob,
+    key_upper_bound_exclusive    blob,
+    assignee                     text,
+    PRIMARY KEY  ((keyspace_id), range_id)
+  ) WITH COMPACTION = {
+    'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
+  };
+
 CREATE TYPE epoch_range (
   lower_bound_inclusive    bigint,
   upper_bound_inclusive    bigint

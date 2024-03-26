@@ -4,4 +4,5 @@ use std::net::SocketAddr;
 pub struct HostInfo {
     pub identity: String,
     pub address: SocketAddr,
+    pub zone: crate::region::Zone,
 }
