@@ -26,7 +26,7 @@ CREATE TABLE range_leases (
     'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
   };
 
-CREATE TABLE versioned_records (
+CREATE TABLE records (
     range_id           uuid,
     key                blob,
     epoch              bigint,
@@ -37,13 +37,3 @@ CREATE TABLE versioned_records (
   AND COMPACTION = {
      'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
 };
-
-CREATE TABLE records (
-    range_id           uuid,
-    key                blob,
-    value              blob,
-    epoch              bigint,
-    PRIMARY KEY  ((range_id), key)
-) WITH COMPACTION = {
-    'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
-  };

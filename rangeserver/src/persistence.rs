@@ -42,15 +42,6 @@ pub trait Persistence: Send + Sync + 'static {
         leader_sequence_number: u64,
     ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 
-    // TODO: Handle deletes and tombstones in the API too.
-    fn put_versioned_record(
-        &self,
-        range_id: FullRangeId,
-        key: Bytes,
-        val: Bytes,
-        version: KeyVersion,
-    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
-
     fn upsert(
         &self,
         range_id: FullRangeId,
