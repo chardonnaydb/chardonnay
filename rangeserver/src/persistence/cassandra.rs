@@ -3,6 +3,7 @@ use bytes::Bytes;
 use common::full_range_id::FullRangeId;
 use common::keyspace_id::KeyspaceId;
 use scylla::frame::response::cql_to_rust::FromCqlVal;
+use scylla::frame::value::Unset;
 use scylla::macros::FromUserType;
 use scylla::macros::IntoUserType;
 use scylla::transport::errors::DbError;
@@ -33,6 +34,7 @@ struct CqlRangeLease {
 #[derive(Debug, FromRow)]
 struct CqlVal {
     value: Option<Vec<u8>>,
+    is_tombstone: bool,
 }
 
 impl CqlRangeLease {
@@ -71,21 +73,15 @@ static RENEW_EPOCH_LEASE_QUERY: &str = r#"
 "#;
 
 static UPSERT_QUERY: &str = r#"
-  INSERT INTO chardonnay.records (range_id, key, value, epoch) 
-    VALUES (?, ?, ?, ?) 
+  INSERT INTO chardonnay.records (range_id, key, value, epoch, is_tombstone) 
+    VALUES (?, ?, ?, ?, ?) 
     USING TIMESTAMP ?
-"#;
-
-static DELETE_QUERY: &str = r#"
-  DELETE FROM chardonnay.records
-    USING TIMESTAMP ?
-    WHERE range_id = ?
-    AND key = ?
 "#;
 
 static GET_QUERY: &str = r#"
-  SELECT value from chardonnay.records
+  SELECT value, is_tombstone from chardonnay.records
   WHERE range_id = ? AND key = ?
+  LIMIT 1
 "#;
 
 fn scylla_query_error_to_persistence_error(qe: QueryError) -> Error {
@@ -199,16 +195,6 @@ impl Persistence for Cassandra {
         }
     }
 
-    async fn put_versioned_record(
-        &self,
-        _range_id: FullRangeId,
-        _key: Bytes,
-        _val: Bytes,
-        _version: KeyVersion,
-    ) -> Result<(), Error> {
-        todo!();
-    }
-
     async fn upsert(
         &self,
         range_id: FullRangeId,
@@ -225,7 +211,8 @@ impl Persistence for Cassandra {
                     key.to_vec(),
                     val.to_vec(),
                     version.epoch as i64,
-                    version.epoch as i64,
+                    false,
+                    version.version_counter as i64,
                 ),
             )
             .await
@@ -242,8 +229,15 @@ impl Persistence for Cassandra {
         let _ = self
             .session
             .query(
-                DELETE_QUERY,
-                (version.epoch as i64, range_id.range_id, key.to_vec()),
+                UPSERT_QUERY,
+                (
+                    range_id.range_id,
+                    key.to_vec(),
+                    Unset, /* val */
+                    version.epoch as i64,
+                    true, /* is_tombstone */
+                    version.version_counter as i64,
+                ),
             )
             .await
             .map_err(scylla_query_error_to_persistence_error)?;
@@ -268,6 +262,9 @@ impl Persistence for Cassandra {
                 } else {
                     let row = rows.pop().unwrap();
                     let row = row.into_typed::<CqlVal>().unwrap();
+                    if row.is_tombstone {
+                        return Ok(None);
+                    }
                     Ok(row.value.map(|v| Bytes::copy_from_slice(&v)))
                 }
             }
