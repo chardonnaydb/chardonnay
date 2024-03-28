@@ -736,7 +736,11 @@ mod tests {
     }
 
     fn start_transaction() -> Arc<TransactionInfo> {
-        Arc::new(TransactionInfo { id: Uuid::new_v4() })
+        Arc::new(TransactionInfo {
+            id: Uuid::new_v4(),
+            started: chrono::Utc::now(),
+            overall_timeout: time::Duration::from_secs(10),
+        })
     }
 
     #[tokio::test]

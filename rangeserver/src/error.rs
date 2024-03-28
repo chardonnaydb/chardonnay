@@ -15,6 +15,7 @@ pub enum Error {
     KeyIsOutOfRange,
     RangeOwnershipLost,
     Timeout,
+    UnknownTransaction,
     TransactionAborted(TransactionAbortReason),
     InternalError(Arc<dyn std::error::Error + Send + Sync>),
 }
@@ -49,6 +50,7 @@ impl Error {
             Self::KeyIsOutOfRange => Status::KeyIsOutOfRange,
             Self::RangeOwnershipLost => Status::RangeOwnershipLost,
             Self::Timeout => Status::Timeout,
+            Self::UnknownTransaction => Status::UnknownTransaction,
             Self::TransactionAborted(_) => Status::TransactionAborted,
             Self::InternalError(_) => Status::InternalError,
         }

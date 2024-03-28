@@ -5,6 +5,10 @@ table Uuidu128 {
   upper:uint64;
 }
 
+table TransactionInfo {
+  overall_timeout_us:uint32;
+}
+
 table RangeId {
   keyspace_id:Uuidu128;
   range_id:Uuidu128;
@@ -34,11 +38,14 @@ enum Status:byte {
   Timeout,
   InternalError,
   TransactionAborted,
+  UnknownTransaction,
 }
 
 table GetRequest {
   request_id:Uuidu128;
   transaction_id:Uuidu128;
+  // only sent on the first request a transaction makes.
+  transaction_info:TransactionInfo; 
   range_id:RangeId;
   keys:[Key];
 }
