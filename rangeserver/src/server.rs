@@ -31,6 +31,7 @@ where
     assignment_oracle: O,
     // TODO: parameterize the WAL implementation too.
     loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<P, E, InMemoryWal>>>>,
+    transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
 }
 
 impl<P, E, O> Server<P, E, O>
@@ -39,6 +40,19 @@ where
     E: EpochProvider,
     O: RangeAssignmentOracle,
 {
+    async fn get_transaction_info(&self, id: Uuid) -> Result<Arc<TransactionInfo>, Error> {
+        let tx_table = self.transaction_table.read().await;
+        match (*tx_table).get(&id) {
+            Some(i) => Ok(i.clone()),
+            None => Err(Error::UnknownTransaction),
+        }
+    }
+
+    async fn remove_transaction(&self, id: Uuid) -> () {
+        let mut tx_table = self.transaction_table.write().await;
+        (*tx_table).remove(&id);
+    }
+
     async fn maybe_load_and_get_range(
         &self,
         id: &FullRangeId,
@@ -95,8 +109,7 @@ where
             Some(_) => (),
         }
         let rm = self.maybe_load_and_get_range(&range_id).await?;
-        // TODO: don't create a new transaction info from the Get request. There should be a transactions table.
-        let tx = Arc::new(TransactionInfo { id: transaction_id });
+        let tx = self.get_transaction_info(transaction_id).await?;
         let mut leader_sequence_number: i64 = 0;
         let mut reads: HashMap<Bytes, Bytes> = HashMap::new();
 
@@ -143,6 +156,7 @@ where
                 },
             ),
             Some(req_id) => {
+                // TODO: add to transaction table if this is the first req of the transaction.
                 let request_id = util::flatbuf::deserialize_uuid(req_id);
                 let read_result = self.get_inner(request).await;
 
@@ -205,8 +219,7 @@ where
             Some(id) => util::flatbuf::deserialize_uuid(id),
         };
         let rm = self.maybe_load_and_get_range(&range_id).await?;
-        // TODO: don't create a new transaction info from the Get request. There should be a transactions table.
-        let tx = Arc::new(TransactionInfo { id: transaction_id });
+        let tx = self.get_transaction_info(transaction_id).await?;
         rm.prepare(tx.clone(), request).await
     }
 
@@ -279,9 +292,10 @@ where
             Some(id) => util::flatbuf::deserialize_uuid(id),
         };
         let rm = self.maybe_load_and_get_range(&range_id).await?;
-        // TODO: don't create a new transaction info from the Get request. There should be a transactions table.
-        let tx = Arc::new(TransactionInfo { id: transaction_id });
-        rm.commit(tx.clone(), request).await
+        let tx = self.get_transaction_info(transaction_id).await?;
+        rm.commit(tx.clone(), request).await?;
+        self.remove_transaction(transaction_id).await;
+        Ok(())
     }
 
     async fn commit<'a>(
@@ -330,9 +344,10 @@ where
             Some(id) => util::flatbuf::deserialize_uuid(id),
         };
         let rm = self.maybe_load_and_get_range(&range_id).await?;
-        // TODO: don't create a new transaction info from the Get request. There should be a transactions table.
-        let tx = Arc::new(TransactionInfo { id: transaction_id });
-        rm.abort(tx.clone(), request).await
+        let tx = self.get_transaction_info(transaction_id).await?;
+        rm.abort(tx.clone(), request).await?;
+        self.remove_transaction(transaction_id).await;
+        Ok(())
     }
 
     async fn abort<'a>(

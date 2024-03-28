@@ -21,10 +21,10 @@ pub mod range_server {
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_STATUS: i8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_STATUS: i8 = 8;
+pub const ENUM_MAX_STATUS: i8 = 9;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_STATUS: [Status; 9] = [
+pub const ENUM_VALUES_STATUS: [Status; 10] = [
   Status::Ok,
   Status::InvalidRequestFormat,
   Status::RangeDoesNotExist,
@@ -34,6 +34,7 @@ pub const ENUM_VALUES_STATUS: [Status; 9] = [
   Status::Timeout,
   Status::InternalError,
   Status::TransactionAborted,
+  Status::UnknownTransaction,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -50,9 +51,10 @@ impl Status {
   pub const Timeout: Self = Self(6);
   pub const InternalError: Self = Self(7);
   pub const TransactionAborted: Self = Self(8);
+  pub const UnknownTransaction: Self = Self(9);
 
   pub const ENUM_MIN: i8 = 0;
-  pub const ENUM_MAX: i8 = 8;
+  pub const ENUM_MAX: i8 = 9;
   pub const ENUM_VALUES: &'static [Self] = &[
     Self::Ok,
     Self::InvalidRequestFormat,
@@ -63,6 +65,7 @@ impl Status {
     Self::Timeout,
     Self::InternalError,
     Self::TransactionAborted,
+    Self::UnknownTransaction,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
@@ -76,6 +79,7 @@ impl Status {
       Self::Timeout => Some("Timeout"),
       Self::InternalError => Some("InternalError"),
       Self::TransactionAborted => Some("TransactionAborted"),
+      Self::UnknownTransaction => Some("UnknownTransaction"),
       _ => None,
     }
   }
@@ -331,6 +335,103 @@ impl core::fmt::Debug for Uuidu128<'_> {
     let mut ds = f.debug_struct("Uuidu128");
       ds.field("lower", &self.lower());
       ds.field("upper", &self.upper());
+      ds.finish()
+  }
+}
+pub enum TransactionInfoOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct TransactionInfo<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for TransactionInfo<'a> {
+  type Inner = TransactionInfo<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> TransactionInfo<'a> {
+  pub const VT_OVERALL_TIMEOUT_US: flatbuffers::VOffsetT = 4;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    TransactionInfo { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr>,
+    args: &'args TransactionInfoArgs
+  ) -> flatbuffers::WIPOffset<TransactionInfo<'bldr>> {
+    let mut builder = TransactionInfoBuilder::new(_fbb);
+    builder.add_overall_timeout_us(args.overall_timeout_us);
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn overall_timeout_us(&self) -> u32 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u32>(TransactionInfo::VT_OVERALL_TIMEOUT_US, Some(0)).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for TransactionInfo<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<u32>("overall_timeout_us", Self::VT_OVERALL_TIMEOUT_US, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct TransactionInfoArgs {
+    pub overall_timeout_us: u32,
+}
+impl<'a> Default for TransactionInfoArgs {
+  #[inline]
+  fn default() -> Self {
+    TransactionInfoArgs {
+      overall_timeout_us: 0,
+    }
+  }
+}
+
+pub struct TransactionInfoBuilder<'a: 'b, 'b> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b> TransactionInfoBuilder<'a, 'b> {
+  #[inline]
+  pub fn add_overall_timeout_us(&mut self, overall_timeout_us: u32) {
+    self.fbb_.push_slot::<u32>(TransactionInfo::VT_OVERALL_TIMEOUT_US, overall_timeout_us, 0);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a>) -> TransactionInfoBuilder<'a, 'b> {
+    let start = _fbb.start_table();
+    TransactionInfoBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<TransactionInfo<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for TransactionInfo<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("TransactionInfo");
+      ds.field("overall_timeout_us", &self.overall_timeout_us());
       ds.finish()
   }
 }
@@ -791,8 +892,9 @@ impl<'a> flatbuffers::Follow<'a> for GetRequest<'a> {
 impl<'a> GetRequest<'a> {
   pub const VT_REQUEST_ID: flatbuffers::VOffsetT = 4;
   pub const VT_TRANSACTION_ID: flatbuffers::VOffsetT = 6;
-  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 8;
-  pub const VT_KEYS: flatbuffers::VOffsetT = 10;
+  pub const VT_TRANSACTION_INFO: flatbuffers::VOffsetT = 8;
+  pub const VT_RANGE_ID: flatbuffers::VOffsetT = 10;
+  pub const VT_KEYS: flatbuffers::VOffsetT = 12;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -806,6 +908,7 @@ impl<'a> GetRequest<'a> {
     let mut builder = GetRequestBuilder::new(_fbb);
     if let Some(x) = args.keys { builder.add_keys(x); }
     if let Some(x) = args.range_id { builder.add_range_id(x); }
+    if let Some(x) = args.transaction_info { builder.add_transaction_info(x); }
     if let Some(x) = args.transaction_id { builder.add_transaction_id(x); }
     if let Some(x) = args.request_id { builder.add_request_id(x); }
     builder.finish()
@@ -825,6 +928,13 @@ impl<'a> GetRequest<'a> {
     // Created from valid Table for this object
     // which contains a valid value in this slot
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<Uuidu128>>(GetRequest::VT_TRANSACTION_ID, None)}
+  }
+  #[inline]
+  pub fn transaction_info(&self) -> Option<TransactionInfo<'a>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<TransactionInfo>>(GetRequest::VT_TRANSACTION_INFO, None)}
   }
   #[inline]
   pub fn range_id(&self) -> Option<RangeId<'a>> {
@@ -851,6 +961,7 @@ impl flatbuffers::Verifiable for GetRequest<'_> {
     v.visit_table(pos)?
      .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("request_id", Self::VT_REQUEST_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<Uuidu128>>("transaction_id", Self::VT_TRANSACTION_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<TransactionInfo>>("transaction_info", Self::VT_TRANSACTION_INFO, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<RangeId>>("range_id", Self::VT_RANGE_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Key>>>>("keys", Self::VT_KEYS, false)?
      .finish();
@@ -860,6 +971,7 @@ impl flatbuffers::Verifiable for GetRequest<'_> {
 pub struct GetRequestArgs<'a> {
     pub request_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
     pub transaction_id: Option<flatbuffers::WIPOffset<Uuidu128<'a>>>,
+    pub transaction_info: Option<flatbuffers::WIPOffset<TransactionInfo<'a>>>,
     pub range_id: Option<flatbuffers::WIPOffset<RangeId<'a>>>,
     pub keys: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Key<'a>>>>>,
 }
@@ -869,6 +981,7 @@ impl<'a> Default for GetRequestArgs<'a> {
     GetRequestArgs {
       request_id: None,
       transaction_id: None,
+      transaction_info: None,
       range_id: None,
       keys: None,
     }
@@ -887,6 +1000,10 @@ impl<'a: 'b, 'b> GetRequestBuilder<'a, 'b> {
   #[inline]
   pub fn add_transaction_id(&mut self, transaction_id: flatbuffers::WIPOffset<Uuidu128<'b >>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<Uuidu128>>(GetRequest::VT_TRANSACTION_ID, transaction_id);
+  }
+  #[inline]
+  pub fn add_transaction_info(&mut self, transaction_info: flatbuffers::WIPOffset<TransactionInfo<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<TransactionInfo>>(GetRequest::VT_TRANSACTION_INFO, transaction_info);
   }
   #[inline]
   pub fn add_range_id(&mut self, range_id: flatbuffers::WIPOffset<RangeId<'b >>) {
@@ -916,6 +1033,7 @@ impl core::fmt::Debug for GetRequest<'_> {
     let mut ds = f.debug_struct("GetRequest");
       ds.field("request_id", &self.request_id());
       ds.field("transaction_id", &self.transaction_id());
+      ds.field("transaction_info", &self.transaction_info());
       ds.field("range_id", &self.range_id());
       ds.field("keys", &self.keys());
       ds.finish()
