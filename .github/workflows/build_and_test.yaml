@@ -24,7 +24,7 @@ jobs:
       run: scripts/linux_install_flatbuffers.sh
     
     - name: Install protobuf
-      run: pip install protobuf
+      run: apt install -y protobuf-compiler
 
     - name: Install cqlsh
       run: pip install cqlsh
