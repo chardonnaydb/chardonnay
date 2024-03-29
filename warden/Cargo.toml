@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 common = {path = "../common"}
+proto = {path = "../proto"}
 tokio = { version = "1", features = ["full"] }
 uuid = {version = "0.8", features = ["v4"]}
 scylla = "0.3.1"

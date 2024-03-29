@@ -12,7 +12,7 @@ To run the tests you need:
 1. Install the necessary packages:
 
     ```sh
-    brew install cassandra docker flatbuffers
+    brew install cassandra docker flatbuffers protobuf
     ```
 
 1. Start the Cassandra server:
