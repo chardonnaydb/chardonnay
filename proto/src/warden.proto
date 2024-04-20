@@ -1,6 +1,39 @@
 syntax = "proto3";
 package warden;
 
-message HelloRequest {
-   string name = 1;
+message RangeId {
+    string keyspace_id = 1;
+    string range_id = 2;
+}
+
+message HostInfo {
+    string identity = 1;
+    string zone = 2;
+}
+
+service Warden {
+    // Called by a range server to register itself with its regional warden.
+    // Establishes a long-lived streamfor the range server to continuously receive
+    // assignment updates from the warden.
+    rpc RegisterRangeServer(RegisterRangeServerRequest) returns (stream WardenUpdate) {}
+}
+
+message FullAssignment {
+   repeated RangeId range = 1;
+}
+
+message IncrementalAssignment {
+    repeated RangeId load = 1;
+    repeated RangeId unload = 2;
+}
+
+message WardenUpdate {
+    oneof update {
+        FullAssignment full_assignment = 1;
+        IncrementalAssignment incremental_assignment = 2;
+    }
+}
+
+message RegisterRangeServerRequest {
+    HostInfo range_server = 1;
 }
