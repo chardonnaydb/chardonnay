@@ -716,6 +716,7 @@ mod tests {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
             },
+            regions: std::collections::HashMap::new(),
         };
         let rm = Arc::new(RM {
             range_id,

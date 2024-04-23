@@ -1,4 +1,4 @@
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum Cloud {
     Aws,
     Azure,
@@ -6,14 +6,14 @@ pub enum Cloud {
     Other(String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Region {
     cloud: Option<Cloud>,
     name: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Zone {
-    region: Region,
-    name: String,
+    pub region: Region,
+    pub name: String,
 }

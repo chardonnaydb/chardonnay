@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use common::util;
 use common::{
-    config::Config, full_range_id::FullRangeId,
+    config::Config, full_range_id::FullRangeId, host_info::HostInfo,
     membership::range_assignment_oracle::RangeAssignmentOracle,
 };
 use flatbuffers::FlatBufferBuilder;
 use tokio::sync::RwLock;
+
 use uuid::Uuid;
 
 use crate::transaction_info::TransactionInfo;
@@ -24,7 +25,7 @@ where
     E: EpochProvider,
     O: RangeAssignmentOracle,
 {
-    identity: String,
+    host_info: HostInfo,
     config: Config,
     persistence: Arc<P>,
     epoch_provider: Arc<E>,
@@ -58,7 +59,7 @@ where
         id: &FullRangeId,
     ) -> Result<Arc<RangeManager<P, E, InMemoryWal>>, Error> {
         if let Some(assignee) = self.assignment_oracle.host_of_range(id) {
-            if assignee.identity != self.identity {
+            if assignee.identity != self.host_info.identity {
                 return Err(Error::RangeIsNotLoaded);
             }
         } else {
@@ -74,7 +75,7 @@ where
         };
         let rm = RangeManager::new(
             id.clone(),
-            self.config,
+            self.config.clone(),
             self.persistence.clone(),
             self.epoch_provider.clone(),
             InMemoryWal::new(),
