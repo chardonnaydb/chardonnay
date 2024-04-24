@@ -1,12 +1,17 @@
-use std::ops::Deref;
+use std::collections::HashSet;
+use std::str::FromStr;
 
+use common::full_range_id::FullRangeId;
+use common::keyspace_id::KeyspaceId;
 use common::{config::Config, host_info::HostInfo};
 use proto::warden::warden_client::WardenClient;
 use std::ops::DerefMut;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tonic::Request;
+use uuid::Uuid;
 
 type warden_err = Box<dyn std::error::Error + Sync + Send + 'static>;
 struct StartedState {
@@ -19,6 +24,11 @@ enum State {
     Stopped,
 }
 
+pub enum WardenUpdate {
+    LoadRange(FullRangeId),
+    UnloadRange(FullRangeId),
+}
+
 struct WardenHandler {
     state: RwLock<State>,
     config: Config,
@@ -26,11 +36,86 @@ struct WardenHandler {
 }
 
 impl WardenHandler {
+    fn full_range_id_from_proto(proto_range_id: &proto::warden::RangeId) -> FullRangeId {
+        let keyspace_id = Uuid::from_str(proto_range_id.keyspace_id.as_str()).unwrap();
+        let keyspace_id = KeyspaceId::new(keyspace_id);
+        let range_id = Uuid::from_str(proto_range_id.range_id.as_str()).unwrap();
+        FullRangeId {
+            keyspace_id,
+            range_id,
+        }
+    }
+
+    async fn process_warden_update(
+        update: &proto::warden::WardenUpdate,
+        updates_sender: &mpsc::Sender<WardenUpdate>,
+        assigned_ranges: &mut HashSet<FullRangeId>,
+    ) {
+        let update = update.update.as_ref().unwrap();
+        match update {
+            proto::warden::warden_update::Update::FullAssignment(full_assignment) => {
+                let new_assignment: HashSet<FullRangeId> = full_assignment
+                    .range
+                    .iter()
+                    .map(Self::full_range_id_from_proto)
+                    .collect();
+
+                // Unload any ranges that are no longer assigned to us.
+                for current_range in assigned_ranges.iter() {
+                    if !new_assignment.contains(current_range) {
+                        updates_sender
+                            .send(WardenUpdate::UnloadRange(*current_range))
+                            .await
+                            .unwrap();
+                    }
+                }
+
+                // Load any ranges that got newly assigned to us.
+                for assigned_range in &new_assignment {
+                    if !assigned_ranges.contains(&assigned_range) {
+                        updates_sender
+                            .send(WardenUpdate::LoadRange(*assigned_range))
+                            .await
+                            .unwrap();
+                    }
+                }
+
+                assigned_ranges.clear();
+                assigned_ranges.clone_from(&new_assignment);
+            }
+            proto::warden::warden_update::Update::IncrementalAssignment(incremental) => {
+                for range_id in &incremental.load {
+                    let assigned_range = Self::full_range_id_from_proto(range_id);
+                    if !assigned_ranges.contains(&assigned_range) {
+                        updates_sender
+                            .send(WardenUpdate::LoadRange(assigned_range))
+                            .await
+                            .unwrap();
+                    }
+                    assigned_ranges.insert(assigned_range);
+                }
+
+                for range_id in &incremental.unload {
+                    let removed_range = Self::full_range_id_from_proto(range_id);
+                    if assigned_ranges.contains(&removed_range) {
+                        updates_sender
+                            .send(WardenUpdate::UnloadRange(removed_range))
+                            .await
+                            .unwrap();
+                    }
+                    assigned_ranges.remove(&removed_range);
+                }
+            }
+        }
+    }
+
     async fn continuously_connect_and_register(
         host_info: HostInfo,
         config: common::config::RegionConfig,
+        updates_sender: mpsc::Sender<WardenUpdate>,
         stop: CancellationToken,
     ) -> Result<(), warden_err> {
+        let mut assigned_ranges = HashSet::<FullRangeId>::new();
         loop {
             // TODO: catch retryable errors and reconnect to warden.
             let mut client = WardenClient::connect(config.warden_address.clone()).await?;
@@ -48,14 +133,15 @@ impl WardenHandler {
 
             loop {
                 tokio::select! {
+                    () = stop.cancelled() => return Ok(()),
                     maybe_update = stream.message() => {
                         let maybe_update = maybe_update?;
-                        if let None = maybe_update {
-                            return Err("connection closed with warden!".into());
+                        match maybe_update {
+                            None => { return Err("connection closed with warden!".into()); }
+                            Some(update) => Self::process_warden_update(&update, &updates_sender, &mut assigned_ranges).await
                         }
-                        // TODO: handle updates and provide a callback mechanism.
                     }
-                    () = stop.cancelled() => return Ok(())
+
                 }
             }
         }
@@ -63,7 +149,10 @@ impl WardenHandler {
 
     // If this starts correctly, returns a channel receiver that can be used to determine when
     // the warden_handler has stopped. Otherwise returns an error.
-    pub async fn start(&self) -> Result<oneshot::Receiver<Result<(), warden_err>>, warden_err> {
+    pub async fn start(
+        &self,
+        updates_sender: mpsc::Sender<WardenUpdate>,
+    ) -> Result<oneshot::Receiver<Result<(), warden_err>>, warden_err> {
         let mut state = self.state.write().await;
         if let State::NotStarted = state.deref_mut() {
             match self.config.regions.get(&self.host_info.zone.region) {
@@ -80,6 +169,7 @@ impl WardenHandler {
                         Self::continuously_connect_and_register(
                             host_info,
                             config.clone(),
+                            updates_sender,
                             stop_clone,
                         )
                         .await
