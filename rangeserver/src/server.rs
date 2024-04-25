@@ -3,43 +3,39 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use common::util;
-use common::{
-    config::Config, full_range_id::FullRangeId, host_info::HostInfo,
-    membership::range_assignment_oracle::RangeAssignmentOracle,
-};
+use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
 use flatbuffers::FlatBufferBuilder;
 use tokio::sync::RwLock;
 
 use uuid::Uuid;
 
 use crate::transaction_info::TransactionInfo;
+use crate::warden_handler::WardenHandler;
 use crate::{
     epoch_provider::EpochProvider, error::Error, for_testing::in_memory_wal::InMemoryWal,
     persistence::Persistence, range_manager::RangeManager,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 
-pub struct Server<P, E, O>
+pub struct Server<P, E>
 where
     P: Persistence,
     E: EpochProvider,
-    O: RangeAssignmentOracle,
 {
     host_info: HostInfo,
     config: Config,
     persistence: Arc<P>,
     epoch_provider: Arc<E>,
-    assignment_oracle: O,
+    warden_handler: WardenHandler,
     // TODO: parameterize the WAL implementation too.
     loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<P, E, InMemoryWal>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
 }
 
-impl<P, E, O> Server<P, E, O>
+impl<P, E> Server<P, E>
 where
     P: Persistence,
     E: EpochProvider,
-    O: RangeAssignmentOracle,
 {
     async fn get_transaction_info(&self, id: Uuid) -> Result<Arc<TransactionInfo>, Error> {
         let tx_table = self.transaction_table.read().await;
@@ -58,14 +54,6 @@ where
         &self,
         id: &FullRangeId,
     ) -> Result<Arc<RangeManager<P, E, InMemoryWal>>, Error> {
-        if let Some(assignee) = self.assignment_oracle.host_of_range(id) {
-            if assignee.identity != self.host_info.identity {
-                return Err(Error::RangeIsNotLoaded);
-            }
-        } else {
-            return Err(Error::RangeIsNotLoaded);
-        }
-
         {
             let range_table = self.loaded_ranges.read().await;
             match (*range_table).get(&id.range_id) {
@@ -73,6 +61,11 @@ where
                 None => (),
             }
         };
+
+        if !self.warden_handler.is_assigned(id).await {
+            return Err(Error::RangeIsNotLoaded);
+        }
+
         let rm = RangeManager::new(
             id.clone(),
             self.config.clone(),
