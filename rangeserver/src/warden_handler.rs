@@ -5,7 +5,9 @@ use common::full_range_id::FullRangeId;
 use common::keyspace_id::KeyspaceId;
 use common::{config::Config, host_info::HostInfo};
 use proto::warden::warden_client::WardenClient;
+use std::ops::Deref;
 use std::ops::DerefMut;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::RwLock;
@@ -16,11 +18,12 @@ use uuid::Uuid;
 type warden_err = Box<dyn std::error::Error + Sync + Send + 'static>;
 struct StartedState {
     stopper: CancellationToken,
+    assigned_ranges: RwLock<HashSet<FullRangeId>>,
 }
 
 enum State {
     NotStarted,
-    Started(StartedState),
+    Started(Arc<StartedState>),
     Stopped,
 }
 
@@ -29,7 +32,7 @@ pub enum WardenUpdate {
     UnloadRange(FullRangeId),
 }
 
-struct WardenHandler {
+pub struct WardenHandler {
     state: RwLock<State>,
     config: Config,
     host_info: HostInfo,
@@ -113,9 +116,8 @@ impl WardenHandler {
         host_info: HostInfo,
         config: common::config::RegionConfig,
         updates_sender: mpsc::Sender<WardenUpdate>,
-        stop: CancellationToken,
+        state: Arc<StartedState>,
     ) -> Result<(), warden_err> {
-        let mut assigned_ranges = HashSet::<FullRangeId>::new();
         loop {
             // TODO: catch retryable errors and reconnect to warden.
             let mut client = WardenClient::connect(config.warden_address.clone()).await?;
@@ -133,12 +135,15 @@ impl WardenHandler {
 
             loop {
                 tokio::select! {
-                    () = stop.cancelled() => return Ok(()),
+                    () = state.stopper.cancelled() => return Ok(()),
                     maybe_update = stream.message() => {
                         let maybe_update = maybe_update?;
                         match maybe_update {
                             None => { return Err("connection closed with warden!".into()); }
-                            Some(update) => Self::process_warden_update(&update, &updates_sender, &mut assigned_ranges).await
+                            Some(update) => {
+                                let mut assigned_ranges_lock = state.assigned_ranges.write().await;
+                                Self::process_warden_update(&update, &updates_sender, assigned_ranges_lock.deref_mut()).await
+                            }
                         }
                     }
 
@@ -162,15 +167,18 @@ impl WardenHandler {
                     let host_info = self.host_info.clone();
                     let config = config.clone();
                     let stop = CancellationToken::new();
-                    let stop_clone = stop.clone();
-                    *state = State::Started(StartedState { stopper: stop });
+                    let started_state = Arc::new(StartedState {
+                        stopper: stop,
+                        assigned_ranges: RwLock::new(HashSet::new()),
+                    });
+                    *state = State::Started(started_state.clone());
                     drop(state);
                     let task_result = tokio::spawn(async move {
                         Self::continuously_connect_and_register(
                             host_info,
                             config.clone(),
                             updates_sender,
-                            stop_clone,
+                            started_state,
                         )
                         .await
                     })
@@ -185,11 +193,23 @@ impl WardenHandler {
         }
     }
 
-    pub async fn stop(self) {
+    pub async fn stop(&self) {
         let mut state = self.state.write().await;
         let old_state = std::mem::replace(&mut *state, State::Stopped);
         if let State::Started(s) = old_state {
             s.stopper.cancel();
+        }
+    }
+
+    pub async fn is_assigned(&self, range_id: &FullRangeId) -> bool {
+        let state = self.state.read().await;
+        match state.deref() {
+            State::NotStarted => false,
+            State::Stopped => false,
+            State::Started(state) => {
+                let assigned_ranges = state.assigned_ranges.read().await;
+                (*assigned_ranges).contains(range_id)
+            }
         }
     }
 }
