@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use tonic::Request;
 use uuid::Uuid;
 
-type warden_err = Box<dyn std::error::Error + Sync + Send + 'static>;
+type WardenErr = Box<dyn std::error::Error + Sync + Send + 'static>;
 struct StartedState {
     stopper: CancellationToken,
     assigned_ranges: RwLock<HashSet<FullRangeId>>,
@@ -49,9 +49,9 @@ impl WardenHandler {
         }
     }
 
-    async fn process_warden_update(
+    fn process_warden_update(
         update: &proto::warden::WardenUpdate,
-        updates_sender: &mpsc::Sender<WardenUpdate>,
+        updates_sender: &mpsc::UnboundedSender<WardenUpdate>,
         assigned_ranges: &mut HashSet<FullRangeId>,
     ) {
         let update = update.update.as_ref().unwrap();
@@ -68,7 +68,6 @@ impl WardenHandler {
                     if !new_assignment.contains(current_range) {
                         updates_sender
                             .send(WardenUpdate::UnloadRange(*current_range))
-                            .await
                             .unwrap();
                     }
                 }
@@ -78,7 +77,6 @@ impl WardenHandler {
                     if !assigned_ranges.contains(&assigned_range) {
                         updates_sender
                             .send(WardenUpdate::LoadRange(*assigned_range))
-                            .await
                             .unwrap();
                     }
                 }
@@ -92,7 +90,6 @@ impl WardenHandler {
                     if !assigned_ranges.contains(&assigned_range) {
                         updates_sender
                             .send(WardenUpdate::LoadRange(assigned_range))
-                            .await
                             .unwrap();
                     }
                     assigned_ranges.insert(assigned_range);
@@ -103,7 +100,6 @@ impl WardenHandler {
                     if assigned_ranges.contains(&removed_range) {
                         updates_sender
                             .send(WardenUpdate::UnloadRange(removed_range))
-                            .await
                             .unwrap();
                     }
                     assigned_ranges.remove(&removed_range);
@@ -115,9 +111,9 @@ impl WardenHandler {
     async fn continuously_connect_and_register(
         host_info: HostInfo,
         config: common::config::RegionConfig,
-        updates_sender: mpsc::Sender<WardenUpdate>,
+        updates_sender: mpsc::UnboundedSender<WardenUpdate>,
         state: Arc<StartedState>,
-    ) -> Result<(), warden_err> {
+    ) -> Result<(), WardenErr> {
         loop {
             // TODO: catch retryable errors and reconnect to warden.
             let mut client = WardenClient::connect(config.warden_address.clone()).await?;
@@ -142,7 +138,7 @@ impl WardenHandler {
                             None => { return Err("connection closed with warden!".into()); }
                             Some(update) => {
                                 let mut assigned_ranges_lock = state.assigned_ranges.write().await;
-                                Self::process_warden_update(&update, &updates_sender, assigned_ranges_lock.deref_mut()).await
+                                Self::process_warden_update(&update, &updates_sender, assigned_ranges_lock.deref_mut())
                             }
                         }
                     }
@@ -156,14 +152,14 @@ impl WardenHandler {
     // the warden_handler has stopped. Otherwise returns an error.
     pub async fn start(
         &self,
-        updates_sender: mpsc::Sender<WardenUpdate>,
-    ) -> Result<oneshot::Receiver<Result<(), warden_err>>, warden_err> {
+        updates_sender: mpsc::UnboundedSender<WardenUpdate>,
+    ) -> Result<oneshot::Receiver<Result<(), WardenErr>>, WardenErr> {
         let mut state = self.state.write().await;
         if let State::NotStarted = state.deref_mut() {
             match self.config.regions.get(&self.host_info.zone.region) {
                 None => return Err("unknown region!".into()),
                 Some(config) => {
-                    let (done_tx, done_rx) = oneshot::channel::<Result<(), warden_err>>();
+                    let (done_tx, done_rx) = oneshot::channel::<Result<(), WardenErr>>();
                     let host_info = self.host_info.clone();
                     let config = config.clone();
                     let stop = CancellationToken::new();

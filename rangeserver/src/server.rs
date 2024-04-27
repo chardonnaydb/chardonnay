@@ -1,11 +1,13 @@
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use common::util;
 use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
 use flatbuffers::FlatBufferBuilder;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio_util::sync::CancellationToken;
 
 use uuid::Uuid;
 
@@ -32,6 +34,8 @@ where
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
 }
 
+type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
+
 impl<P, E> Server<P, E>
 where
     P: Persistence,
@@ -50,11 +54,23 @@ where
         (*tx_table).remove(&id);
     }
 
+    async fn maybe_unload_range(&self, id: &FullRangeId) {
+        let rm = {
+            let mut range_table = self.loaded_ranges.write().await;
+            (*range_table).remove(&id.range_id)
+        };
+        match rm {
+            None => (),
+            Some(r) => r.unload().await,
+        }
+    }
+
     async fn maybe_load_and_get_range(
         &self,
         id: &FullRangeId,
     ) -> Result<Arc<RangeManager<P, E, InMemoryWal>>, Error> {
         {
+            // Fast path when range has already been loaded.
             let range_table = self.loaded_ranges.read().await;
             match (*range_table).get(&id.range_id) {
                 Some(r) => return Ok(r.clone()),
@@ -66,18 +82,24 @@ where
             return Err(Error::RangeIsNotLoaded);
         }
 
-        let rm = RangeManager::new(
-            id.clone(),
-            self.config.clone(),
-            self.persistence.clone(),
-            self.epoch_provider.clone(),
-            InMemoryWal::new(),
-        );
-
-        rm.load().await?;
-        {
+        let rm = {
             let mut range_table = self.loaded_ranges.write().await;
-            (*range_table).insert(id.range_id, rm.clone());
+            match (*range_table).get(&id.range_id) {
+                Some(r) => r.clone(),
+                None => {
+                    let rm = RangeManager::new(
+                        id.clone(),
+                        self.config.clone(),
+                        self.persistence.clone(),
+                        self.epoch_provider.clone(),
+                        InMemoryWal::new(),
+                    );
+                    (*range_table).insert(id.range_id, rm.clone());
+                    drop(range_table);
+                    rm.load().await?;
+                    rm.clone()
+                }
+            }
         };
         Ok(rm.clone())
     }
@@ -292,7 +314,7 @@ where
         Ok(())
     }
 
-    async fn commit<'a>(
+    pub async fn commit<'a>(
         &self,
         fbb: &'a mut FlatBufferBuilder<'a>,
         request: CommitRequest<'_>,
@@ -344,7 +366,7 @@ where
         Ok(())
     }
 
-    async fn abort<'a>(
+    pub async fn abort<'a>(
         &self,
         fbb: &'a mut FlatBufferBuilder<'a>,
         request: AbortRequest<'_>,
@@ -374,5 +396,48 @@ where
         fbb.finish(fbb_root, None);
         let abort_response_bytes = fbb.finished_data();
         flatbuffers::root::<AbortResponse<'a>>(abort_response_bytes).unwrap()
+    }
+
+    async fn warden_update_loop(
+        server: Arc<Self>,
+        mut receiver: UnboundedReceiver<crate::warden_handler::WardenUpdate>,
+        cancellation_token: CancellationToken,
+    ) -> Result<(), DynamicErr> {
+        loop {
+            tokio::select! {
+                () = cancellation_token.cancelled() => {
+                    server.warden_handler.stop().await;
+                    return Ok(())
+                }
+                maybe_update = receiver.recv() => {
+                    match maybe_update {
+                        None => { return Err("connection closed with warden handler!".into()); }
+                        Some(update) => {
+                            match &update {
+                                crate::warden_handler::WardenUpdate::LoadRange(id) => {
+                                    // TODO: handle errors here
+                                    let _ = server.maybe_load_and_get_range(id).await;
+                                }
+                                crate::warden_handler::WardenUpdate::UnloadRange(id) => server.maybe_unload_range(id).await
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+
+    pub async fn start(
+        server: Arc<Self>,
+        cancellation_token: CancellationToken,
+    ) -> Result<oneshot::Receiver<Result<(), DynamicErr>>, DynamicErr> {
+        let (s, r) = mpsc::unbounded_channel();
+        let server_clone = server.clone();
+        tokio::spawn(
+            async move { Self::warden_update_loop(server_clone, r, cancellation_token).await },
+        );
+        let res = server.warden_handler.start(s).await?;
+        Ok(res)
     }
 }
