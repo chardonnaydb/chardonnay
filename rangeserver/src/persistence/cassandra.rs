@@ -277,8 +277,6 @@ pub mod tests {
     use super::*;
     use scylla::SessionBuilder;
 
-    pub const TEST_KEYSPACE_ID: &str = "e149e248-8293-4eb2-a6ff-63478dc3e533";
-    pub const TEST_RANGE_UUID: &str = "40fc4bf4-a79c-4740-ad29-a61bace5c251";
     impl Cassandra {
         async fn create_test() -> Cassandra {
             let session = SessionBuilder::new()
@@ -290,10 +288,41 @@ pub mod tests {
         }
     }
 
-    pub async fn init() -> Cassandra {
-        let cassandra = Cassandra::create_test().await;
+    pub struct TestContext {
+        pub keyspace_id: KeyspaceId,
+        pub range_id: Uuid,
+        pub cassandra: Arc<Cassandra>,
+    }
+
+    impl Drop for TestContext {
+        fn drop(&mut self) {
+            let cassandra = self.cassandra.clone();
+            let range_id = self.range_id;
+            tokio::spawn(async move {
+                let _ = cassandra
+                    .session
+                    .query(
+                        "DELETE FROM chardonnay.range_leases WHERE range_id = ?",
+                        (range_id,),
+                    )
+                    .await;
+                let _ = cassandra
+                    .session
+                    .query(
+                        "DELETE FROM chardonnay.records WHERE range_id = ?",
+                        (range_id,),
+                    )
+                    .await;
+            });
+        }
+    }
+
+    pub async fn init() -> TestContext {
+        let cassandra = Arc::new(Cassandra::create_test().await);
+        let keyspace_id = KeyspaceId::new(Uuid::new_v4());
+        let range_id = Uuid::new_v4();
         let cql_range = CqlRangeLease {
-            range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),
+            range_id,
             leader_sequence_number: 0,
             key_lower_bound_inclusive: None,
             key_upper_bound_exclusive: None,
@@ -311,15 +340,20 @@ pub mod tests {
             .query("INSERT INTO chardonnay.range_leases (range_id, leader_sequence_number, epoch_lease, safe_snapshot_epochs) VALUES (?, ?, ?, ?) IF NOT EXISTS", (cql_range.range_id, cql_range.leader_sequence_number, cql_range.epoch_lease, cql_range.safe_snapshot_epochs))
             .await
             .unwrap();
-        cassandra
+        TestContext {
+            keyspace_id,
+            range_id,
+            cassandra,
+        }
     }
 
     #[tokio::test]
     async fn basic_take_ownership_and_renew_lease() {
-        let cassandra = init().await;
+        let context = init().await;
+        let cassandra = context.cassandra.clone();
         let full_range_id = FullRangeId {
-            keyspace_id: KeyspaceId::new(Uuid::parse_str(TEST_KEYSPACE_ID).unwrap()),
-            range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),
+            keyspace_id: context.keyspace_id,
+            range_id: context.range_id,
         };
         let range_info = cassandra
             .take_ownership_and_load_range(full_range_id)
@@ -333,10 +367,11 @@ pub mod tests {
 
     #[tokio::test]
     async fn basic_crud() {
-        let cassandra = init().await;
+        let context = init().await;
+        let cassandra = context.cassandra.clone();
         let full_range_id = FullRangeId {
-            keyspace_id: KeyspaceId::new(Uuid::parse_str(TEST_KEYSPACE_ID).unwrap()),
-            range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),
+            keyspace_id: context.keyspace_id,
+            range_id: context.range_id,
         };
         let key = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
 

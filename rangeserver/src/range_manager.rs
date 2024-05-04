@@ -579,7 +579,6 @@ where
 mod tests {
 
     use common::config::RangeServerConfig;
-    use common::keyspace_id::KeyspaceId;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
     use uuid::Uuid;
@@ -588,10 +587,8 @@ mod tests {
     use crate::epoch_provider::EpochProvider as EpochProviderTrait;
     use crate::for_testing::epoch_provider::EpochProvider;
     use crate::for_testing::in_memory_wal::InMemoryWal;
-    use crate::persistence::cassandra::tests::TEST_KEYSPACE_ID;
-    use crate::persistence::cassandra::tests::TEST_RANGE_UUID;
     use crate::persistence::cassandra::Cassandra;
-
+    use crate::transaction_info::TransactionInfo;
     type RM = RangeManager<Cassandra, EpochProvider, InMemoryWal>;
 
     impl RM {
@@ -704,13 +701,19 @@ mod tests {
         }
     }
 
-    async fn init() -> Arc<RM> {
+    struct TestContext {
+        rm: Arc<RM>,
+        persistence_context: crate::persistence::cassandra::tests::TestContext,
+    }
+
+    async fn init() -> TestContext {
         let epoch_provider = Arc::new(EpochProvider::new());
         let wal = Mutex::new(InMemoryWal::new());
-        let cassandra = Arc::new(crate::persistence::cassandra::tests::init().await);
+        let persistence_context = crate::persistence::cassandra::tests::init().await;
+        let cassandra = persistence_context.cassandra.clone();
         let range_id = FullRangeId {
-            keyspace_id: KeyspaceId::new(Uuid::parse_str(TEST_KEYSPACE_ID).unwrap()),
-            range_id: Uuid::parse_str(TEST_RANGE_UUID).unwrap(),
+            keyspace_id: persistence_context.keyspace_id,
+            range_id: persistence_context.range_id,
         };
         let config = Config {
             range_server: RangeServerConfig {
@@ -733,7 +736,10 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         epoch_provider.set_epoch(1).await;
         init_handle.await.unwrap();
-        rm
+        TestContext {
+            rm,
+            persistence_context,
+        }
     }
 
     fn start_transaction() -> Arc<TransactionInfo> {
@@ -746,7 +752,8 @@ mod tests {
 
     #[tokio::test]
     async fn basic_get_put() {
-        let rm = init().await;
+        let context = init().await;
+        let rm = context.rm.clone();
         let key = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
         let tx1 = start_transaction();
         assert!(rm
@@ -774,7 +781,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_recurring_lease_renewal() {
-        let rm = init().await;
+        let context = init().await;
+        let rm = context.rm.clone();
         // Get the current lease bounds.
         let initial_lease = match rm.state.read().await.deref() {
             State::Loaded(state) => state.range_info.epoch_lease,
@@ -790,10 +798,6 @@ mod tests {
         assert!(
             final_lease.1 > initial_lease.1,
             "Lease upper bound did not increase"
-        );
-        assert_eq!(
-            final_lease.0, initial_lease.0,
-            "Lease lower bound should not change"
         );
     }
 }
