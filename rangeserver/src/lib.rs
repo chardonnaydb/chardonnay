@@ -4,7 +4,7 @@ mod for_testing;
 mod key_version;
 mod persistence;
 mod range_manager;
-mod server;
+pub mod server;
 mod transaction_abort_reason;
 mod transaction_info;
 mod wal;
