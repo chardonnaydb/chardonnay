@@ -20,4 +20,5 @@ strum = {version ="0.26.1", features = ["std", "derive"]}
 machnet = "0.1.9"
 tonic = "0.11.0"
 tokio-util = "0.7.10"
+tokio-stream = "0.1.15"
 
