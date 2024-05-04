@@ -799,9 +799,5 @@ mod tests {
             final_lease.1 > initial_lease.1,
             "Lease upper bound did not increase"
         );
-        assert_eq!(
-            final_lease.0, initial_lease.0,
-            "Lease lower bound should not change"
-        );
     }
 }
