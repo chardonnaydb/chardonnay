@@ -1,6 +1,6 @@
 fn main() {
     tonic_build::configure()
-        .build_server(false)
+        .build_server(true)
         .out_dir("target/warden")
         .compile(
             &["src/warden.proto"],
