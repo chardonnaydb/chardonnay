@@ -1,5 +1,5 @@
 use crate::{
-    epoch_provider::Error as EpochProviderError, persistence::Error as PersistenceError,
+    epoch_provider::Error as EpochProviderError, storage::Error as StorageError,
     transaction_abort_reason::TransactionAbortReason, wal::Error as WalError,
 };
 
@@ -21,12 +21,12 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn from_persistence_error(e: PersistenceError) -> Self {
+    pub fn from_storage_error(e: StorageError) -> Self {
         match e {
-            PersistenceError::RangeDoesNotExist => Self::RangeDoesNotExist,
-            PersistenceError::RangeOwnershipLost => Self::RangeOwnershipLost,
-            PersistenceError::Timeout => Self::Timeout,
-            PersistenceError::InternalError(_) => Self::InternalError(Arc::new(e)),
+            StorageError::RangeDoesNotExist => Self::RangeDoesNotExist,
+            StorageError::RangeOwnershipLost => Self::RangeOwnershipLost,
+            StorageError::Timeout => Self::Timeout,
+            StorageError::InternalError(_) => Self::InternalError(Arc::new(e)),
         }
     }
 

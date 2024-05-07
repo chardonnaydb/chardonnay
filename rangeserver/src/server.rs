@@ -15,30 +15,30 @@ use crate::transaction_info::TransactionInfo;
 use crate::warden_handler::WardenHandler;
 use crate::{
     epoch_provider::EpochProvider, error::Error, for_testing::in_memory_wal::InMemoryWal,
-    persistence::Persistence, range_manager::RangeManager,
+    range_manager::RangeManager, storage::Storage,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 
-pub struct Server<P, E>
+pub struct Server<S, E>
 where
-    P: Persistence,
+    S: Storage,
     E: EpochProvider,
 {
     host_info: HostInfo,
     config: Config,
-    persistence: Arc<P>,
+    storage: Arc<S>,
     epoch_provider: Arc<E>,
     warden_handler: WardenHandler,
     // TODO: parameterize the WAL implementation too.
-    loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<P, E, InMemoryWal>>>>,
+    loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, E, InMemoryWal>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
 }
 
 type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
 
-impl<P, E> Server<P, E>
+impl<S, E> Server<S, E>
 where
-    P: Persistence,
+    S: Storage,
     E: EpochProvider,
 {
     async fn get_transaction_info(&self, id: Uuid) -> Result<Arc<TransactionInfo>, Error> {
@@ -68,7 +68,7 @@ where
     async fn maybe_load_and_get_range(
         &self,
         id: &FullRangeId,
-    ) -> Result<Arc<RangeManager<P, E, InMemoryWal>>, Error> {
+    ) -> Result<Arc<RangeManager<S, E, InMemoryWal>>, Error> {
         {
             // Fast path when range has already been loaded.
             let range_table = self.loaded_ranges.read().await;
@@ -90,7 +90,7 @@ where
                     let rm = RangeManager::new(
                         id.clone(),
                         self.config.clone(),
-                        self.persistence.clone(),
+                        self.storage.clone(),
                         self.epoch_provider.clone(),
                         InMemoryWal::new(),
                     );

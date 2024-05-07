@@ -1,6 +1,6 @@
 use crate::{
-    epoch_provider::EpochProvider, error::Error, key_version::KeyVersion, persistence::Persistence,
-    persistence::RangeInfo, transaction_abort_reason::TransactionAbortReason,
+    epoch_provider::EpochProvider, error::Error, key_version::KeyVersion, storage::RangeInfo,
+    storage::Storage, transaction_abort_reason::TransactionAbortReason,
     transaction_info::TransactionInfo, wal::Iterator, wal::Wal,
 };
 use bytes::Bytes;
@@ -149,15 +149,15 @@ enum State {
     Loaded(LoadedState),
 }
 
-pub struct RangeManager<P, E, W>
+pub struct RangeManager<S, E, W>
 where
-    P: Persistence,
+    S: Storage,
     E: EpochProvider,
     W: Wal,
 {
     range_id: FullRangeId,
     config: Config,
-    persistence: Arc<P>,
+    storage: Arc<S>,
     epoch_provider: Arc<E>,
     wal: Mutex<W>,
     state: Arc<RwLock<State>>,
@@ -173,23 +173,23 @@ pub struct PrepareResult {
     pub epoch_lease: (u64, u64),
 }
 
-impl<P, E, W> RangeManager<P, E, W>
+impl<S, E, W> RangeManager<S, E, W>
 where
-    P: Persistence,
+    S: Storage,
     E: EpochProvider,
     W: Wal,
 {
     pub fn new(
         range_id: FullRangeId,
         config: Config,
-        persistence: Arc<P>,
+        storage: Arc<S>,
         epoch_provider: Arc<E>,
         wal: W,
     ) -> Arc<Self> {
         Arc::new(RangeManager {
             range_id,
             config,
-            persistence,
+            storage,
             epoch_provider,
             wal: Mutex::new(wal),
             state: Arc::new(RwLock::new(State::Unloaded)),
@@ -204,10 +204,10 @@ where
             .await
             .map_err(Error::from_epoch_provider_error)?;
         let range_info = self
-            .persistence
+            .storage
             .take_ownership_and_load_range(self.range_id)
             .await
-            .map_err(Error::from_persistence_error)?;
+            .map_err(Error::from_storage_error)?;
         // Epoch read from the provider can be 1 less than the true epoch. The highest known epoch
         // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
         // we just wait for the epoch to advance once.
@@ -220,14 +220,14 @@ where
         let new_epoch_lease_lower_bound =
             std::cmp::max(highest_known_epoch, range_info.epoch_lease.1 + 1);
         let new_epoch_lease_upper_bound = new_epoch_lease_lower_bound + 10;
-        self.persistence
+        self.storage
             .renew_epoch_lease(
                 self.range_id,
                 (new_epoch_lease_lower_bound, new_epoch_lease_upper_bound),
                 range_info.leader_sequence_number,
             )
             .await
-            .map_err(Error::from_persistence_error)?;
+            .map_err(Error::from_storage_error)?;
         // Create a recurrent task to renew.
         let lease_renewal_interval = self.config.range_server.range_maintenance_duration;
         // TODO: Check on the task handle to see if it errored out.
@@ -246,7 +246,7 @@ where
     async fn renew_epoch_lease_task(
         range_id: FullRangeId,
         epoch_provider: Arc<E>,
-        persistence: Arc<P>,
+        storage: Arc<S>,
         state: Arc<RwLock<State>>,
         lease_renewal_interval: std::time::Duration,
     ) -> Result<(), Error> {
@@ -272,14 +272,14 @@ where
             // TODO: We should handle some errors here. For example:
             // - If the error seems transient (e.g., a timeout), we should retry.
             // - If the error is something like RangeOwnershipLost, we should unload the range.
-            persistence
+            storage
                 .renew_epoch_lease(
                     range_id,
                     (new_epoch_lease_lower_bound, new_epoch_lease_upper_bound),
                     leader_sequence_number,
                 )
                 .await
-                .map_err(Error::from_persistence_error)?;
+                .map_err(Error::from_storage_error)?;
 
             // Update the state.
             // If our new lease continues from our old lease, merge the ranges.
@@ -310,13 +310,13 @@ where
     ) -> tokio::task::JoinHandle<Result<(), Error>> {
         let range_id = self.range_id;
         let epoch_provider = self.epoch_provider.clone();
-        let persistence = self.persistence.clone();
+        let storage = self.storage.clone();
         let state = self.state.clone();
         let task_handle = tokio::spawn(async move {
             Self::renew_epoch_lease_task(
                 range_id,
                 epoch_provider,
-                persistence,
+                storage,
                 state,
                 lease_renewal_interval,
             )
@@ -378,10 +378,10 @@ where
                 };
                 self.acquire_range_lock(state, tx.clone()).await?;
                 let val = self
-                    .persistence
+                    .storage
                     .get(self.range_id, key.clone())
                     .await
-                    .map_err(Error::from_persistence_error)?;
+                    .map_err(Error::from_storage_error)?;
                 let get_result = GetResult {
                     val: val.clone(),
                     leader_sequence_number: state.range_info.leader_sequence_number as i64,
@@ -536,11 +536,11 @@ where
                         // Remove from the commit message.
                         version_counter: commit.vid() as u64,
                     };
-                    // TODO: we shouldn't be doing a persistence operation per individual key put or delete.
+                    // TODO: we shouldn't be doing a storage operation per individual key put or delete.
                     // Instead we should write them in batches, and whenever we do multiple operations they
                     // should go in parallel not sequentially.
                     // We should also add retries in case of intermittent failures. Note that all our
-                    // persistence operations here are idempotent and safe to retry any number of times.
+                    // storage operations here are idempotent and safe to retry any number of times.
                     for put in prepare_record.puts().iter() {
                         for put in put.iter() {
                             // TODO: too much copying :(
@@ -548,25 +548,25 @@ where
                                 Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
                             let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
 
-                            self.persistence
+                            self.storage
                                 .upsert(self.range_id, key, val, version)
                                 .await
-                                .map_err(Error::from_persistence_error)?;
+                                .map_err(Error::from_storage_error)?;
                         }
                     }
                     for del in prepare_record.deletes().iter() {
                         for del in del.iter() {
                             let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
-                            self.persistence
+                            self.storage
                                 .delete(self.range_id, key, version)
                                 .await
-                                .map_err(Error::from_persistence_error)?;
+                                .map_err(Error::from_storage_error)?;
                         }
                     }
                 }
 
-                // We apply the writes to persistence before releasing the lock since we send all
-                // gets to persistence directly. We should implement a memtable to allow us to release
+                // We apply the writes to storage before releasing the lock since we send all
+                // gets to storage directly. We should implement a memtable to allow us to release
                 // the lock sooner.
                 lock_table.release();
                 Ok(())
@@ -587,7 +587,7 @@ mod tests {
     use crate::epoch_provider::EpochProvider as EpochProviderTrait;
     use crate::for_testing::epoch_provider::EpochProvider;
     use crate::for_testing::in_memory_wal::InMemoryWal;
-    use crate::persistence::cassandra::Cassandra;
+    use crate::storage::cassandra::Cassandra;
     use crate::transaction_info::TransactionInfo;
     type RM = RangeManager<Cassandra, EpochProvider, InMemoryWal>;
 
@@ -703,17 +703,18 @@ mod tests {
 
     struct TestContext {
         rm: Arc<RM>,
-        persistence_context: crate::persistence::cassandra::tests::TestContext,
+        storage_context: crate::storage::cassandra::tests::TestContext,
     }
 
     async fn init() -> TestContext {
         let epoch_provider = Arc::new(EpochProvider::new());
         let wal = Mutex::new(InMemoryWal::new());
-        let persistence_context = crate::persistence::cassandra::tests::init().await;
-        let cassandra = persistence_context.cassandra.clone();
+        let storage_context: crate::storage::cassandra::tests::TestContext =
+            crate::storage::cassandra::tests::init().await;
+        let cassandra = storage_context.cassandra.clone();
         let range_id = FullRangeId {
-            keyspace_id: persistence_context.keyspace_id,
-            range_id: persistence_context.range_id,
+            keyspace_id: storage_context.keyspace_id,
+            range_id: storage_context.range_id,
         };
         let config = Config {
             range_server: RangeServerConfig {
@@ -724,7 +725,7 @@ mod tests {
         let rm = Arc::new(RM {
             range_id,
             config,
-            persistence: cassandra,
+            storage: cassandra,
             wal,
             epoch_provider,
             state: Arc::new(RwLock::new(State::Unloaded)),
@@ -738,7 +739,7 @@ mod tests {
         init_handle.await.unwrap();
         TestContext {
             rm,
-            persistence_context,
+            storage_context,
         }
     }
 
