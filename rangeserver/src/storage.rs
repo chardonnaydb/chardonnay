@@ -22,15 +22,15 @@ pub struct RangeInfo {
 pub enum Error {
     #[error("Timeout Error")]
     Timeout,
-    #[error("No range with this id exists in the persistence layer")]
+    #[error("No range with this id exists in the storage layer")]
     RangeDoesNotExist,
     #[error("Range ownership claimed by another range server")]
     RangeOwnershipLost,
-    #[error("Persistence Layer error: {0}")]
+    #[error("Storage Layer error: {0}")]
     InternalError(Arc<dyn std::error::Error + Send + Sync>),
 }
 
-pub trait Persistence: Send + Sync + 'static {
+pub trait Storage: Send + Sync + 'static {
     fn take_ownership_and_load_range(
         &self,
         range_id: FullRangeId,

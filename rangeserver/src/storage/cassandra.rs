@@ -123,7 +123,7 @@ impl Cassandra {
     }
 }
 
-impl Persistence for Cassandra {
+impl Storage for Cassandra {
     async fn take_ownership_and_load_range(
         &self,
         range_id: FullRangeId,
