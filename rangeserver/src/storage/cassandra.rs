@@ -1,7 +1,7 @@
 use super::*;
 use bytes::Bytes;
 use common::full_range_id::FullRangeId;
-use common::keyspace_id::KeyspaceId;
+
 use scylla::frame::response::cql_to_rust::FromCqlVal;
 use scylla::frame::value::Unset;
 use scylla::macros::FromUserType;
@@ -275,6 +275,7 @@ impl Storage for Cassandra {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use common::keyspace_id::KeyspaceId;
     use scylla::SessionBuilder;
 
     impl Cassandra {

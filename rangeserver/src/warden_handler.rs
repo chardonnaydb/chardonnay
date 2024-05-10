@@ -39,6 +39,14 @@ pub struct WardenHandler {
 }
 
 impl WardenHandler {
+    pub fn new(config: &Config, host_info: &HostInfo) -> WardenHandler {
+        WardenHandler {
+            state: RwLock::new(State::NotStarted),
+            config: config.clone(),
+            host_info: host_info.clone(),
+        }
+    }
+
     fn full_range_id_from_proto(proto_range_id: &proto::warden::RangeId) -> FullRangeId {
         let keyspace_id = Uuid::from_str(proto_range_id.keyspace_id.as_str()).unwrap();
         let keyspace_id = KeyspaceId::new(keyspace_id);
@@ -115,8 +123,9 @@ impl WardenHandler {
         state: Arc<StartedState>,
     ) -> Result<(), WardenErr> {
         loop {
+            let addr = format!("http://{}", config.warden_address.clone());
             // TODO: catch retryable errors and reconnect to warden.
-            let mut client = WardenClient::connect(config.warden_address.clone()).await?;
+            let mut client = WardenClient::connect(addr).await.unwrap();
             let registration_request = proto::warden::RegisterRangeServerRequest {
                 range_server: Some(proto::warden::HostInfo {
                     identity: host_info.identity.clone(),
@@ -169,18 +178,16 @@ impl WardenHandler {
                     });
                     *state = State::Started(started_state.clone());
                     drop(state);
-                    let task_result = tokio::spawn(async move {
-                        Self::continuously_connect_and_register(
+                    let _ = tokio::spawn(async move {
+                        let exit_result = Self::continuously_connect_and_register(
                             host_info,
                             config.clone(),
                             updates_sender,
                             started_state,
                         )
-                        .await
-                    })
-                    .await
-                    .unwrap();
-                    done_tx.send(task_result).unwrap();
+                        .await;
+                        done_tx.send(exit_result).unwrap();
+                    });
                     Ok(done_rx)
                 }
             }

@@ -24,7 +24,6 @@ where
     S: Storage,
     E: EpochProvider,
 {
-    host_info: HostInfo,
     config: Config,
     storage: Arc<S>,
     epoch_provider: Arc<E>,
@@ -41,6 +40,23 @@ where
     S: Storage,
     E: EpochProvider,
 {
+    pub fn new(
+        config: Config,
+        host_info: HostInfo,
+        storage: Arc<S>,
+        epoch_provider: Arc<E>,
+    ) -> Arc<Self> {
+        let warden_handler = WardenHandler::new(&config, &host_info);
+        Arc::new(Server {
+            config,
+            storage,
+            epoch_provider,
+            warden_handler,
+            loaded_ranges: RwLock::new(HashMap::new()),
+            transaction_table: RwLock::new(HashMap::new()),
+        })
+    }
+
     async fn get_transaction_info(&self, id: Uuid) -> Result<Arc<TransactionInfo>, Error> {
         let tx_table = self.transaction_table.read().await;
         match (*tx_table).get(&id) {
@@ -439,5 +455,82 @@ where
         );
         let res = server.warden_handler.start(s).await?;
         Ok(res)
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use common::config::{RangeServerConfig, RegionConfig};
+    use common::region::{Region, Zone};
+    use core::time;
+
+    use super::*;
+
+    use crate::for_testing::epoch_provider::EpochProvider;
+    use crate::for_testing::mock_warden::MockWarden;
+    use crate::storage::cassandra::Cassandra;
+    type Server = super::Server<Cassandra, EpochProvider>;
+
+    struct TestContext {
+        server: Arc<Server>,
+        identity: String,
+        mock_warden: MockWarden,
+        storage_context: crate::storage::cassandra::tests::TestContext,
+    }
+
+    async fn init() -> TestContext {
+        let epoch_provider = Arc::new(EpochProvider::new());
+        let storage_context: crate::storage::cassandra::tests::TestContext =
+            crate::storage::cassandra::tests::init().await;
+        let cassandra = storage_context.cassandra.clone();
+        let region = Region {
+            cloud: None,
+            name: "test-region".into(),
+        };
+        let zone = Zone {
+            region: region.clone(),
+            name: "a".into(),
+        };
+        let region_config = RegionConfig {
+            warden_address: crate::for_testing::mock_warden::SERVER_ADDR.into(),
+        };
+        let mut config = Config {
+            range_server: RangeServerConfig {
+                range_maintenance_duration: time::Duration::from_secs(1),
+            },
+            regions: std::collections::HashMap::new(),
+        };
+        config.regions.insert(region, region_config);
+        let identity: String = "test_server".into();
+        let host_info = HostInfo {
+            identity: identity.clone(),
+            address: "127.0.0.1:10001".parse().unwrap(),
+            zone,
+        };
+        let server = Server::new(config, host_info, cassandra, epoch_provider);
+        let mock_warden = MockWarden::new();
+        mock_warden.start().await.unwrap();
+        TestContext {
+            server,
+            identity,
+            storage_context,
+            mock_warden,
+        }
+    }
+
+    #[tokio::test]
+    async fn range_server_connects() {
+        let context = init().await;
+        // Give some delay so the mock warden starts.
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        let cancellation_token = CancellationToken::new();
+        let ch = Server::start(context.server.clone(), cancellation_token.clone())
+            .await
+            .unwrap();
+        // Give some delay so the server connects.
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        assert!(context.mock_warden.is_connected(&context.identity).await);
+        cancellation_token.cancel();
+        ch.await.unwrap().unwrap()
     }
 }

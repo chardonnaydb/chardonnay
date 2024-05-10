@@ -8,8 +8,8 @@ pub enum Cloud {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Region {
-    cloud: Option<Cloud>,
-    name: String,
+    pub cloud: Option<Cloud>,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]

@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "../.."
+		}
+	],
+	"settings": {
+		"rust-analyzer.linkedProjects": [
+			"./rangeserver/Cargo.toml",
+			"./rangeserver/Cargo.toml",
+			"./rangeserver/Cargo.toml"
+		]
+	}
+}
