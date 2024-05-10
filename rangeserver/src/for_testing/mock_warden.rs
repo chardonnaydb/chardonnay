@@ -10,7 +10,7 @@ use proto::warden::{
     RegisterRangeServerRequest, WardenUpdate,
 };
 use tokio::sync::{mpsc, RwLock};
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
 
@@ -31,6 +31,8 @@ fn range_id_proto(range: &FullRangeId) -> proto::warden::RangeId {
     }
 }
 
+pub const SERVER_ADDR: &str = "[::1]:10010";
+
 impl MockWarden {
     pub fn new() -> MockWarden {
         let warden_state = Arc::new(WardenState {
@@ -44,10 +46,13 @@ impl MockWarden {
         }
     }
 
-    async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let addr = "[::1]:10000".parse().unwrap();
-        let svc = WardenServer::from_arc(self.state.clone());
-        Server::builder().add_service(svc).serve(addr).await?;
+    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let state = self.state.clone();
+        tokio::spawn(async {
+            let addr = SERVER_ADDR.parse().unwrap();
+            let svc = WardenServer::from_arc(state);
+            let _ = Server::builder().add_service(svc).serve(addr).await;
+        });
         Ok(())
     }
 
@@ -100,6 +105,11 @@ impl MockWarden {
             None => (),
             Some(sender) => sender.send(Ok(warden_update)).await.unwrap(),
         }
+    }
+
+    pub async fn is_connected(&self, host: &String) -> bool {
+        let connections = self.state.rs_connections.read().await;
+        connections.get(host).is_some()
     }
 }
 
