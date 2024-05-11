@@ -146,7 +146,8 @@ impl WardenHandler {
                         let maybe_update = maybe_update.unwrap();
                         match maybe_update {
                             None => {
-                                return Err("connection closed with warden!".into());
+                                println!("connection closed with warden!");
+                                break;
                             }
                             Some(update) => {
                                 let mut assigned_ranges_lock = state.assigned_ranges.write().await;

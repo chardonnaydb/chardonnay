@@ -545,9 +545,15 @@ pub mod tests {
         let ch = Server::start(context.server.clone(), cancellation_token.clone())
             .await
             .unwrap();
-        // Give some delay so the server connects.
-        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
-        assert!(context.mock_warden.is_connected(&context.identity).await);
+        while !context.mock_warden.is_connected(&context.identity).await {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+        // Disconnect from warden -- should reconnect automatically.
+        context.mock_warden.disconnect(&context.identity).await;
+        assert!(!context.mock_warden.is_connected(&context.identity).await);
+        while !context.mock_warden.is_connected(&context.identity).await {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
         cancellation_token.cancel();
         ch.await.unwrap().unwrap()
     }
