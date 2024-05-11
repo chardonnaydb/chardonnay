@@ -116,6 +116,11 @@ impl MockWarden {
         let connections = self.state.rs_connections.read().await;
         connections.get(host).is_some()
     }
+
+    pub async fn disconnect(&self, host: &String) {
+        let mut connections = self.state.rs_connections.write().await;
+        connections.remove(host);
+    }
 }
 
 #[tonic::async_trait]
