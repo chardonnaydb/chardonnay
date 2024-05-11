@@ -100,7 +100,7 @@ where
 
         let rm = {
             let mut range_table = self.loaded_ranges.write().await;
-            match (*range_table).get(&id.range_id) {
+            match (range_table).get(&id.range_id) {
                 Some(r) => r.clone(),
                 None => {
                     let rm = RangeManager::new(
@@ -110,7 +110,7 @@ where
                         self.epoch_provider.clone(),
                         InMemoryWal::new(),
                     );
-                    (*range_table).insert(id.range_id, rm.clone());
+                    (range_table).insert(id.range_id, rm.clone());
                     drop(range_table);
                     rm.load().await?;
                     rm.clone()
@@ -420,27 +420,37 @@ where
         cancellation_token: CancellationToken,
     ) -> Result<(), DynamicErr> {
         loop {
-            tokio::select! {
+            let () = tokio::select! {
                 () = cancellation_token.cancelled() => {
                     server.warden_handler.stop().await;
                     return Ok(())
                 }
                 maybe_update = receiver.recv() => {
                     match maybe_update {
-                        None => { return Err("connection closed with warden handler!".into()); }
+                        None => {
+                            return Err("connection closed with warden handler!".into());
+                        }
                         Some(update) => {
                             match &update {
                                 crate::warden_handler::WardenUpdate::LoadRange(id) => {
-                                    // TODO: handle errors here
-                                    let _ = server.maybe_load_and_get_range(id).await;
+
+                                    let id = id.clone();
+                                    let server = server.clone();
+                                    tokio::spawn (async move
+                                        {
+                                            // TODO: handle errors here
+                                            server.maybe_load_and_get_range(&id).await
+                                        });
                                 }
-                                crate::warden_handler::WardenUpdate::UnloadRange(id) => server.maybe_unload_range(id).await
+                                crate::warden_handler::WardenUpdate::UnloadRange(id) => {
+                                    server.maybe_unload_range(id).await
+                                }
                             }
                         }
                     }
                 }
 
-            }
+            };
         }
     }
 
@@ -450,9 +460,10 @@ where
     ) -> Result<oneshot::Receiver<Result<(), DynamicErr>>, DynamicErr> {
         let (s, r) = mpsc::unbounded_channel();
         let server_clone = server.clone();
-        tokio::spawn(
-            async move { Self::warden_update_loop(server_clone, r, cancellation_token).await },
-        );
+        tokio::spawn(async move {
+            let _ = Self::warden_update_loop(server_clone, r, cancellation_token).await;
+            println!("Warden update loop exited!")
+        });
         let res = server.warden_handler.start(s).await?;
         Ok(res)
     }
@@ -470,6 +481,13 @@ pub mod tests {
     use crate::for_testing::mock_warden::MockWarden;
     use crate::storage::cassandra::Cassandra;
     type Server = super::Server<Cassandra, EpochProvider>;
+
+    impl Server {
+        async fn is_assigned(&self, range_id: &FullRangeId) -> bool {
+            let range_table = self.loaded_ranges.read().await;
+            range_table.contains_key(&range_id.range_id)
+        }
+    }
 
     struct TestContext {
         server: Arc<Server>,
@@ -510,6 +528,8 @@ pub mod tests {
         let server = Server::new(config, host_info, cassandra, epoch_provider);
         let mock_warden = MockWarden::new();
         mock_warden.start().await.unwrap();
+        // Give some delay so the mock warden starts.
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         TestContext {
             server,
             identity,
@@ -519,17 +539,78 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn range_server_connects() {
+    async fn range_server_connects_to_warden() {
         let context = init().await;
-        // Give some delay so the mock warden starts.
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         let cancellation_token = CancellationToken::new();
         let ch = Server::start(context.server.clone(), cancellation_token.clone())
             .await
             .unwrap();
         // Give some delay so the server connects.
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
         assert!(context.mock_warden.is_connected(&context.identity).await);
+        cancellation_token.cancel();
+        ch.await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn incremental_load_unload() {
+        let context = init().await;
+        let cancellation_token = CancellationToken::new();
+        let range_id = FullRangeId {
+            keyspace_id: context.storage_context.keyspace_id,
+            range_id: context.storage_context.range_id,
+        };
+        let ch = Server::start(context.server.clone(), cancellation_token.clone())
+            .await
+            .unwrap();
+        while !context.mock_warden.is_connected(&context.identity).await {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+        assert!(!(context.server.warden_handler.is_assigned(&range_id).await));
+        assert!(!context.server.is_assigned(&range_id).await);
+        context
+            .mock_warden
+            .assign(&range_id, &context.identity)
+            .await;
+        // Yield so server can process the update.
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        assert!((context.server.warden_handler.is_assigned(&range_id).await));
+        assert!(context.server.is_assigned(&range_id).await);
+        context.mock_warden.unassign(&range_id).await;
+        // // Yield so server can process the update.
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        assert!(!(context.server.warden_handler.is_assigned(&range_id).await));
+        assert!(!context.server.is_assigned(&range_id).await);
+        cancellation_token.cancel();
+        ch.await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn initial_warden_update() {
+        let context = init().await;
+        let cancellation_token = CancellationToken::new();
+        let range_id = FullRangeId {
+            keyspace_id: context.storage_context.keyspace_id,
+            range_id: context.storage_context.range_id,
+        };
+        context
+            .mock_warden
+            .assign(&range_id, &context.identity)
+            .await;
+        let ch = Server::start(context.server.clone(), cancellation_token.clone())
+            .await
+            .unwrap();
+        while !context.mock_warden.is_connected(&context.identity).await {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        assert!((context.server.warden_handler.is_assigned(&range_id).await));
+        assert!(context.server.is_assigned(&range_id).await);
+        context.mock_warden.unassign(&range_id).await;
+        // // Yield so server can process the update.
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        assert!(!(context.server.warden_handler.is_assigned(&range_id).await));
+        assert!(!context.server.is_assigned(&range_id).await);
         cancellation_token.cancel();
         ch.await.unwrap().unwrap()
     }
