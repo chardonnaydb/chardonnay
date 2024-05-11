@@ -135,16 +135,19 @@ impl WardenHandler {
 
             let mut stream = client
                 .register_range_server(Request::new(registration_request))
-                .await?
+                .await
+                .unwrap()
                 .into_inner();
 
             loop {
                 tokio::select! {
                     () = state.stopper.cancelled() => return Ok(()),
                     maybe_update = stream.message() => {
-                        let maybe_update = maybe_update?;
+                        let maybe_update = maybe_update.unwrap();
                         match maybe_update {
-                            None => { return Err("connection closed with warden!".into()); }
+                            None => {
+                                return Err("connection closed with warden!".into());
+                            }
                             Some(update) => {
                                 let mut assigned_ranges_lock = state.assigned_ranges.write().await;
                                 Self::process_warden_update(&update, &updates_sender, assigned_ranges_lock.deref_mut())

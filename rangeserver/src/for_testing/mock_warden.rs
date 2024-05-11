@@ -89,10 +89,15 @@ impl MockWarden {
         self.unassign(range).await;
         let range_id = &range.range_id;
         let range_proto = range_id_proto(range);
-        let mut range_to_host = self.state.range_to_host.write().await;
-        let mut host_ranges = self.state.host_ranges.write().await;
-        (*range_to_host).insert(*range_id, host.clone());
-        (*host_ranges).get_mut(host).unwrap().insert(*range);
+        {
+            let mut range_to_host = self.state.range_to_host.write().await;
+            let mut host_ranges = self.state.host_ranges.write().await;
+            (*range_to_host).insert(*range_id, host.clone());
+            if !host_ranges.contains_key(host) {
+                host_ranges.insert(host.clone(), HashSet::new());
+            }
+            (*host_ranges).get_mut(host).unwrap().insert(*range);
+        }
         let incremental = proto::warden::IncrementalAssignment {
             load: vec![range_proto],
             unload: vec![],
@@ -122,7 +127,7 @@ impl Warden for WardenState {
         request: Request<RegisterRangeServerRequest>,
     ) -> Result<Response<Self::RegisterRangeServerStream>, Status> {
         let host = request.get_ref().range_server.clone().unwrap().identity;
-        let (tx, rx) = mpsc::channel(4);
+        let (tx, rx) = mpsc::channel(40);
         let host_ranges = self.host_ranges.read().await;
         let mut connections = self.rs_connections.write().await;
         (*connections).insert(host.clone(), tx.clone());
