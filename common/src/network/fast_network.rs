@@ -8,6 +8,7 @@ pub trait FastNetwork: Send + Sync + 'static {
     // Listen for messages sent from a specific SocketAddr.
     fn register(&self, from: SocketAddr) -> mpsc::UnboundedReceiver<Bytes>;
     // Reads one message from the network (if any) and delivers it to all the
-    // relevant listeners.
-    fn poll(&self);
+    // relevant listeners. Returns true if something was read from the network,
+    // and false otherwise.
+    fn poll(&self) -> bool;
 }
