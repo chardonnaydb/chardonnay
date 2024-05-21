@@ -278,6 +278,7 @@ dependencies = [
  "bytes",
  "flatbuf",
  "flatbuffers",
+ "tokio",
  "uuid",
 ]
 
