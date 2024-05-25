@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::runtime::Builder;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use common::util;
@@ -28,6 +29,7 @@ where
     storage: Arc<S>,
     epoch_provider: Arc<E>,
     warden_handler: WardenHandler,
+    bg_runtime: tokio::runtime::Runtime,
     // TODO: parameterize the WAL implementation too.
     loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, E, InMemoryWal>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
@@ -47,11 +49,14 @@ where
         epoch_provider: Arc<E>,
     ) -> Arc<Self> {
         let warden_handler = WardenHandler::new(&config, &host_info);
+        // TODO: set number of threads and pin to cores.
+        let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
         Arc::new(Server {
             config,
             storage,
             epoch_provider,
             warden_handler,
+            bg_runtime,
             loaded_ranges: RwLock::new(HashMap::new()),
             transaction_table: RwLock::new(HashMap::new()),
         })
@@ -460,11 +465,15 @@ where
     ) -> Result<oneshot::Receiver<Result<(), DynamicErr>>, DynamicErr> {
         let (s, r) = mpsc::unbounded_channel();
         let server_clone = server.clone();
-        tokio::spawn(async move {
+        server.bg_runtime.spawn(async move {
             let _ = Self::warden_update_loop(server_clone, r, cancellation_token).await;
             println!("Warden update loop exited!")
         });
-        let res = server.warden_handler.start(s).await?;
+        let server_ref = server.clone();
+        let res = server
+            .bg_runtime
+            .spawn(async move { server_ref.warden_handler.start(s).await })
+            .await??;
         Ok(res)
     }
 }
