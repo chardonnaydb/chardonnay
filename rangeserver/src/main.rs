@@ -29,7 +29,15 @@ fn main() {
             Arc::new(rangeserver::for_testing::epoch_provider::EpochProvider::new());
         let config = get_config();
         let host_info = get_host_info();
-        let server = Server::new(config, host_info, storage, epoch_provider);
+        // TODO: set number of threads and pin to cores.
+        let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+        let server = Server::new(
+            config,
+            host_info,
+            storage,
+            epoch_provider,
+            bg_runtime.handle().clone(),
+        );
         let res = Server::start(server, CancellationToken::new())
             .await
             .unwrap();

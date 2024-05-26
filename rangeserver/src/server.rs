@@ -29,7 +29,7 @@ where
     storage: Arc<S>,
     epoch_provider: Arc<E>,
     warden_handler: WardenHandler,
-    bg_runtime: tokio::runtime::Runtime,
+    bg_runtime: tokio::runtime::Handle,
     // TODO: parameterize the WAL implementation too.
     loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, E, InMemoryWal>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
@@ -47,10 +47,9 @@ where
         host_info: HostInfo,
         storage: Arc<S>,
         epoch_provider: Arc<E>,
+        bg_runtime: tokio::runtime::Handle,
     ) -> Arc<Self> {
         let warden_handler = WardenHandler::new(&config, &host_info);
-        // TODO: set number of threads and pin to cores.
-        let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
         Arc::new(Server {
             config,
             storage,
@@ -534,7 +533,13 @@ pub mod tests {
             address: "127.0.0.1:10001".parse().unwrap(),
             zone,
         };
-        let server = Server::new(config, host_info, cassandra, epoch_provider);
+        let server = Server::new(
+            config,
+            host_info,
+            cassandra,
+            epoch_provider,
+            tokio::runtime::Handle::current().clone(),
+        );
         let mock_warden = MockWarden::new();
         mock_warden.start().await.unwrap();
         // Give some delay so the mock warden starts.
