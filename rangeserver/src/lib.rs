@@ -1,10 +1,10 @@
 pub mod epoch_provider;
 mod error;
-mod for_testing;
+pub mod for_testing;
 mod key_version;
 mod range_manager;
 pub mod server;
-mod storage;
+pub mod storage;
 mod transaction_abort_reason;
 mod transaction_info;
 mod wal;

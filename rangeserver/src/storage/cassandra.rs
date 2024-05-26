@@ -8,6 +8,7 @@ use scylla::macros::FromUserType;
 use scylla::macros::IntoUserType;
 use scylla::transport::errors::DbError;
 use scylla::transport::errors::QueryError;
+use scylla::SessionBuilder;
 use scylla::{FromRow, Session, ValueList};
 use uuid::Uuid;
 
@@ -99,6 +100,15 @@ fn scylla_query_error_to_persistence_error(qe: QueryError) -> Error {
 }
 
 impl Cassandra {
+    pub async fn new(known_node: String) -> Cassandra {
+        let session = SessionBuilder::new()
+            .known_node(known_node)
+            .build()
+            .await
+            .unwrap();
+        Cassandra { session }
+    }
+
     async fn get_range_lease(&self, range_id: FullRangeId) -> Result<CqlRangeLease, Error> {
         let rows = self
             .session
@@ -276,16 +286,10 @@ impl Storage for Cassandra {
 pub mod tests {
     use super::*;
     use common::keyspace_id::KeyspaceId;
-    use scylla::SessionBuilder;
 
     impl Cassandra {
         async fn create_test() -> Cassandra {
-            let session = SessionBuilder::new()
-                .known_node("127.0.0.1:9042".to_string())
-                .build()
-                .await
-                .unwrap();
-            Cassandra { session }
+            Cassandra::new("127.0.0.1:9042".to_string()).await
         }
     }
 
