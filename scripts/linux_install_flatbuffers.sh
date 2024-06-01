@@ -5,7 +5,7 @@ set -euo pipefail
 cd /tmp
 git clone https://github.com/google/flatbuffers.git
 cd flatbuffers
-git checkout v23.5.26
+git checkout v24.3.25
 cmake -G "Unix Makefiles"
 make -j$(nproc) #compile
 sudo make install #install

@@ -14,7 +14,7 @@ bytes = "1"
 flatbuf = {path = "../flatbuf"}
 proto = {path = "../proto"}
 chrono = "0.4.34"
-flatbuffers = "*"
+flatbuffers = "24.3.25"
 thiserror = "1.0.57"
 strum = {version ="0.26.1", features = ["std", "derive"]}
 machnet = "0.1.9"
