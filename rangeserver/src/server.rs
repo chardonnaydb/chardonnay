@@ -35,7 +35,7 @@ pub struct RSPreFetch {}
 
 #[tonic::async_trait]
 impl PreFetch for RSPreFetch {
-    async fn say_hello(
+    async fn pre_fetch_key(
         &self,
         request: Request<HelloRequest>, // Accept request of type HelloRequest
     ) -> Result<Response<HelloReply>, TStatus> {
