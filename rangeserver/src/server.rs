@@ -27,7 +27,7 @@ use proto::prefetch::{HelloReply, HelloRequest};
 
 pub mod prefetch {
     // tonic::include_proto!("prefetch");
-    include!("../../proto/target/warden/prefetch.rs");
+    include!("../../proto/target/prefetch/prefetch.rs");
 }
 
 #[derive(Debug, Default)]
