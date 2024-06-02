@@ -1,8 +1,10 @@
 use bytes::Bytes;
 use std::collections::HashMap;
+use std::path::Prefix;
 use std::sync::Arc;
 use tokio::runtime::Builder;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
 use common::util;
 use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
@@ -20,6 +22,34 @@ use crate::{
 };
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 
+use proto::prefetch::pre_fetch_server::{PreFetch, PreFetchServer};
+use proto::prefetch::{HelloReply, HelloRequest};
+
+pub mod prefetch {
+    // tonic::include_proto!("prefetch");
+    include!("../../proto/target/warden/prefetch.rs");
+}
+
+#[derive(Debug, Default)]
+pub struct RSPreFetch {}
+
+#[tonic::async_trait]
+impl PreFetch for RSPreFetch {
+    async fn say_hello(
+        &self,
+        request: Request<HelloRequest>, // Accept request of type HelloRequest
+    ) -> Result<Response<HelloReply>, TStatus> {
+        // Return an instance of type HelloReply
+        println!("Got a request: {:?}", request);
+
+        let reply = HelloReply {
+            message: format!("Hello {}!", request.into_inner().name), // We must use .into_inner() as the fields of gRPC requests and responses are private
+        };
+
+        Ok(Response::new(reply)) // Send back our formatted greeting
+    }
+}
+
 pub struct Server<S, E>
 where
     S: Storage,
@@ -30,6 +60,7 @@ where
     epoch_provider: Arc<E>,
     warden_handler: WardenHandler,
     bg_runtime: tokio::runtime::Handle,
+    prefetch_handler: PreFetchServer<RSPreFetch>,
     // TODO: parameterize the WAL implementation too.
     loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, E, InMemoryWal>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
@@ -50,12 +81,14 @@ where
         bg_runtime: tokio::runtime::Handle,
     ) -> Arc<Self> {
         let warden_handler = WardenHandler::new(&config, &host_info);
+        let prefetch = RSPreFetch::default();
         Arc::new(Server {
             config,
             storage,
             epoch_provider,
             warden_handler,
             bg_runtime,
+            prefetch_handler: PreFetchServer::new(prefetch),
             loaded_ranges: RwLock::new(HashMap::new()),
             transaction_table: RwLock::new(HashMap::new()),
         })
@@ -468,12 +501,42 @@ where
             let _ = Self::warden_update_loop(server_clone, r, cancellation_token).await;
             println!("Warden update loop exited!")
         });
+
+        // Define the gRPC server address and service
+        let addr = "[::1]:50051".parse().unwrap();
+        let prefetch = RSPreFetch::default();
+
+        // Spawn the gRPC server as a separate task
+        server.bg_runtime.spawn(async move {
+            if let Err(e) = TServer::builder()
+                .add_service(PreFetchServer::new(prefetch))
+                .serve(addr)
+                .await
+            {
+                eprintln!("Server error: {}", e);
+            }
+        });
+
         let server_ref = server.clone();
         let res = server
             .bg_runtime
             .spawn(async move { server_ref.warden_handler.start(s).await })
             .await??;
+
         Ok(res)
+    }
+
+    #[tokio::main]
+    pub async fn start_prefetch() -> Result<(), Box<dyn std::error::Error>> {
+        let addr = "[::1]:50051".parse()?;
+        let prefetch = RSPreFetch::default();
+
+        TServer::builder()
+            .add_service(PreFetchServer::new(prefetch))
+            .serve(addr)
+            .await?;
+
+        Ok(())
     }
 }
 
