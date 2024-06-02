@@ -104,4 +104,16 @@ table LogEntry {
   bytes:[ubyte];
 }
 
+enum MessageType:byte { Get = 0, Prepare, Commit, Abort = 3 }
+
+table RequestEnvelope {
+  type:MessageType;
+  bytes:[ubyte];
+}
+
+table ResponseEnvelope {
+  type:MessageType;
+  bytes:[ubyte];
+}
+
 root_type LogEntry;

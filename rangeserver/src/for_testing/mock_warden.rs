@@ -14,7 +14,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
 
-type RangeServerStream = ReceiverStream<Result<WardenUpdate, Status>>;
 struct WardenState {
     range_to_host: RwLock<HashMap<Uuid, String>>,
     host_ranges: RwLock<HashMap<String, HashSet<FullRangeId>>>,

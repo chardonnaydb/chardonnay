@@ -224,6 +224,99 @@ impl<'a> flatbuffers::Verifiable for Entry {
 }
 
 impl flatbuffers::SimpleToVerifyInSlice for Entry {}
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+pub const ENUM_MIN_MESSAGE_TYPE: i8 = 0;
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+pub const ENUM_MAX_MESSAGE_TYPE: i8 = 3;
+#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
+#[allow(non_camel_case_types)]
+pub const ENUM_VALUES_MESSAGE_TYPE: [MessageType; 4] = [
+  MessageType::Get,
+  MessageType::Prepare,
+  MessageType::Commit,
+  MessageType::Abort,
+];
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(transparent)]
+pub struct MessageType(pub i8);
+#[allow(non_upper_case_globals)]
+impl MessageType {
+  pub const Get: Self = Self(0);
+  pub const Prepare: Self = Self(1);
+  pub const Commit: Self = Self(2);
+  pub const Abort: Self = Self(3);
+
+  pub const ENUM_MIN: i8 = 0;
+  pub const ENUM_MAX: i8 = 3;
+  pub const ENUM_VALUES: &'static [Self] = &[
+    Self::Get,
+    Self::Prepare,
+    Self::Commit,
+    Self::Abort,
+  ];
+  /// Returns the variant's name or "" if unknown.
+  pub fn variant_name(self) -> Option<&'static str> {
+    match self {
+      Self::Get => Some("Get"),
+      Self::Prepare => Some("Prepare"),
+      Self::Commit => Some("Commit"),
+      Self::Abort => Some("Abort"),
+      _ => None,
+    }
+  }
+}
+impl core::fmt::Debug for MessageType {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    if let Some(name) = self.variant_name() {
+      f.write_str(name)
+    } else {
+      f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+    }
+  }
+}
+impl<'a> flatbuffers::Follow<'a> for MessageType {
+  type Inner = Self;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    let b = flatbuffers::read_scalar_at::<i8>(buf, loc);
+    Self(b)
+  }
+}
+
+impl flatbuffers::Push for MessageType {
+    type Output = MessageType;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        flatbuffers::emplace_scalar::<i8>(dst, self.0);
+    }
+}
+
+impl flatbuffers::EndianScalar for MessageType {
+  type Scalar = i8;
+  #[inline]
+  fn to_little_endian(self) -> i8 {
+    self.0.to_le()
+  }
+  #[inline]
+  #[allow(clippy::wrong_self_convention)]
+  fn from_little_endian(v: i8) -> Self {
+    let b = i8::from_le(v);
+    Self(b)
+  }
+}
+
+impl<'a> flatbuffers::Verifiable for MessageType {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    i8::run_verifier(v, pos)
+  }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for MessageType {}
 pub enum Uuidu128Offset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -2151,6 +2244,234 @@ impl core::fmt::Debug for LogEntry<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("LogEntry");
       ds.field("entry", &self.entry());
+      ds.field("bytes", &self.bytes());
+      ds.finish()
+  }
+}
+pub enum RequestEnvelopeOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct RequestEnvelope<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for RequestEnvelope<'a> {
+  type Inner = RequestEnvelope<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> RequestEnvelope<'a> {
+  pub const VT_TYPE_: flatbuffers::VOffsetT = 4;
+  pub const VT_BYTES: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    RequestEnvelope { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args RequestEnvelopeArgs<'args>
+  ) -> flatbuffers::WIPOffset<RequestEnvelope<'bldr>> {
+    let mut builder = RequestEnvelopeBuilder::new(_fbb);
+    if let Some(x) = args.bytes { builder.add_bytes(x); }
+    builder.add_type_(args.type_);
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn type_(&self) -> MessageType {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<MessageType>(RequestEnvelope::VT_TYPE_, Some(MessageType::Get)).unwrap()}
+  }
+  #[inline]
+  pub fn bytes(&self) -> Option<flatbuffers::Vector<'a, u8>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u8>>>(RequestEnvelope::VT_BYTES, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for RequestEnvelope<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<MessageType>("type_", Self::VT_TYPE_, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>("bytes", Self::VT_BYTES, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct RequestEnvelopeArgs<'a> {
+    pub type_: MessageType,
+    pub bytes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
+}
+impl<'a> Default for RequestEnvelopeArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    RequestEnvelopeArgs {
+      type_: MessageType::Get,
+      bytes: None,
+    }
+  }
+}
+
+pub struct RequestEnvelopeBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> RequestEnvelopeBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_type_(&mut self, type_: MessageType) {
+    self.fbb_.push_slot::<MessageType>(RequestEnvelope::VT_TYPE_, type_, MessageType::Get);
+  }
+  #[inline]
+  pub fn add_bytes(&mut self, bytes: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u8>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(RequestEnvelope::VT_BYTES, bytes);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> RequestEnvelopeBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    RequestEnvelopeBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<RequestEnvelope<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for RequestEnvelope<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("RequestEnvelope");
+      ds.field("type_", &self.type_());
+      ds.field("bytes", &self.bytes());
+      ds.finish()
+  }
+}
+pub enum ResponseEnvelopeOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct ResponseEnvelope<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for ResponseEnvelope<'a> {
+  type Inner = ResponseEnvelope<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> ResponseEnvelope<'a> {
+  pub const VT_TYPE_: flatbuffers::VOffsetT = 4;
+  pub const VT_BYTES: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    ResponseEnvelope { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args ResponseEnvelopeArgs<'args>
+  ) -> flatbuffers::WIPOffset<ResponseEnvelope<'bldr>> {
+    let mut builder = ResponseEnvelopeBuilder::new(_fbb);
+    if let Some(x) = args.bytes { builder.add_bytes(x); }
+    builder.add_type_(args.type_);
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn type_(&self) -> MessageType {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<MessageType>(ResponseEnvelope::VT_TYPE_, Some(MessageType::Get)).unwrap()}
+  }
+  #[inline]
+  pub fn bytes(&self) -> Option<flatbuffers::Vector<'a, u8>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u8>>>(ResponseEnvelope::VT_BYTES, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for ResponseEnvelope<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<MessageType>("type_", Self::VT_TYPE_, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>("bytes", Self::VT_BYTES, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct ResponseEnvelopeArgs<'a> {
+    pub type_: MessageType,
+    pub bytes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
+}
+impl<'a> Default for ResponseEnvelopeArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    ResponseEnvelopeArgs {
+      type_: MessageType::Get,
+      bytes: None,
+    }
+  }
+}
+
+pub struct ResponseEnvelopeBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> ResponseEnvelopeBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_type_(&mut self, type_: MessageType) {
+    self.fbb_.push_slot::<MessageType>(ResponseEnvelope::VT_TYPE_, type_, MessageType::Get);
+  }
+  #[inline]
+  pub fn add_bytes(&mut self, bytes: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u8>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(ResponseEnvelope::VT_BYTES, bytes);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> ResponseEnvelopeBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    ResponseEnvelopeBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<ResponseEnvelope<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for ResponseEnvelope<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("ResponseEnvelope");
+      ds.field("type_", &self.type_());
       ds.field("bytes", &self.bytes());
       ds.finish()
   }

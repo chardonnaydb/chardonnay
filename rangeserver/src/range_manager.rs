@@ -1,13 +1,13 @@
 use crate::{
     epoch_provider::EpochProvider, error::Error, key_version::KeyVersion, storage::RangeInfo,
     storage::Storage, transaction_abort_reason::TransactionAbortReason,
-    transaction_info::TransactionInfo, wal::Iterator, wal::Wal,
+    transaction_info::TransactionInfo, wal::Wal,
 };
 use bytes::Bytes;
 use chrono::DateTime;
 use common::config::Config;
 use common::full_range_id::FullRangeId;
-use common::util;
+
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -506,30 +506,13 @@ where
                     // Find the corresponding prepare entry in the WAL to get the writes.
                     // This is quite inefficient, we should cache a copy in memory instead, but for now
                     // it's convenient to also test WAL iteration.
-                    let mut wal_iterator = wal.iterator();
-                    let prepare_record = {
-                        loop {
-                            let next = wal_iterator.next().await;
-                            match next {
-                                None => break None,
-                                Some(entry) => match entry.entry() {
-                                    Entry::Prepare => {
-                                        let bytes = entry.bytes().unwrap().bytes();
-                                        let flatbuf =
-                                            flatbuffers::root::<PrepareRequest>(bytes).unwrap();
-                                        let tid = util::flatbuf::deserialize_uuid(
-                                            flatbuf.transaction_id().unwrap(),
-                                        );
-                                        if tid == tx.id {
-                                            break (Some(flatbuf));
-                                        }
-                                    }
-                                    _ => (),
-                                },
-                            }
-                        }
-                    }
-                    .unwrap();
+                    let prepare_record_bytes = wal
+                        .find_prepare_record(tx.id.clone())
+                        .await
+                        .map_err(Error::from_wal_error)?
+                        .unwrap();
+                    let prepare_record =
+                        flatbuffers::root::<PrepareRequest>(&prepare_record_bytes).unwrap();
                     let version = KeyVersion {
                         epoch: commit.epoch() as u64,
                         // TODO: version counter should be an internal counter per range.
@@ -579,6 +562,7 @@ where
 mod tests {
 
     use common::config::RangeServerConfig;
+    use common::util;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
     use uuid::Uuid;
