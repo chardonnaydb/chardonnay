@@ -14,10 +14,13 @@ use tokio_util::sync::CancellationToken;
 
 fn main() {
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
-    let fast_network = UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:10001").unwrap());
+    let fast_network = Arc::new(UdpFastNetwork::new(
+        UdpSocket::bind("127.0.0.1:10001").unwrap(),
+    ));
+    let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
         loop {
-            fast_network.poll();
+            fast_network_clone.poll();
             tokio::task::yield_now().await
         }
     });
@@ -38,7 +41,7 @@ fn main() {
             epoch_provider,
             bg_runtime.handle().clone(),
         );
-        let res = Server::start(server, CancellationToken::new())
+        let res = Server::start(server, fast_network, CancellationToken::new())
             .await
             .unwrap();
         res.await.unwrap()
