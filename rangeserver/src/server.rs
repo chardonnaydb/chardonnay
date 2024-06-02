@@ -500,7 +500,7 @@ where
         });
 
         // Define the gRPC server address and service
-        let addr = "[::1]:50051".parse().unwrap();
+        let addr = "127.0.0.1:50051".parse().unwrap();
         let prefetch = RSPreFetch::default();
 
         // Spawn the gRPC server as a separate task
@@ -510,7 +510,7 @@ where
                 .serve(addr)
                 .await
             {
-                eprintln!("Server error: {}", e);
+                println!("Server error: {}", e);
             }
         });
 
