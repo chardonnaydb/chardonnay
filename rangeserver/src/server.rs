@@ -525,19 +525,6 @@ where
 
         Ok(res)
     }
-
-    #[tokio::main]
-    pub async fn start_prefetch() -> Result<(), Box<dyn std::error::Error>> {
-        let addr = "[::1]:50051".parse()?;
-        let prefetch = RSPreFetch::default();
-
-        TServer::builder()
-            .add_service(PreFetchServer::new(prefetch))
-            .serve(addr)
-            .await?;
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
