@@ -60,7 +60,6 @@ where
     epoch_provider: Arc<E>,
     warden_handler: WardenHandler,
     bg_runtime: tokio::runtime::Handle,
-    prefetch_handler: PreFetchServer<RSPreFetch>,
     // TODO: parameterize the WAL implementation too.
     loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, E, InMemoryWal>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
@@ -81,14 +80,12 @@ where
         bg_runtime: tokio::runtime::Handle,
     ) -> Arc<Self> {
         let warden_handler = WardenHandler::new(&config, &host_info);
-        let prefetch = RSPreFetch::default();
         Arc::new(Server {
             config,
             storage,
             epoch_provider,
             warden_handler,
             bg_runtime,
-            prefetch_handler: PreFetchServer::new(prefetch),
             loaded_ranges: RwLock::new(HashMap::new()),
             transaction_table: RwLock::new(HashMap::new()),
         })
