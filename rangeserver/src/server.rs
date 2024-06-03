@@ -22,19 +22,18 @@ use crate::{
 };
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 
-use proto::prefetch::pre_fetch_server::{PreFetch, PreFetchServer};
-use proto::prefetch::{HelloReply, HelloRequest};
+use proto::rangeserver::range_server_server::{RangeServer, RangeServerServer};
+use proto::rangeserver::{HelloReply, HelloRequest};
 
-pub mod prefetch {
-    // tonic::include_proto!("prefetch");
-    include!("../../proto/target/prefetch/prefetch.rs");
+pub mod rangeserver {
+    include!("../../proto/target/rangeserver/rangeserver.rs");
 }
 
 #[derive(Debug, Default)]
 pub struct RSPreFetch {}
 
 #[tonic::async_trait]
-impl PreFetch for RSPreFetch {
+impl RangeServer for RSPreFetch {
     async fn pre_fetch_key(
         &self,
         request: Request<HelloRequest>, // Accept request of type HelloRequest
@@ -506,7 +505,7 @@ where
         // Spawn the gRPC server as a separate task
         server.bg_runtime.spawn(async move {
             if let Err(e) = TServer::builder()
-                .add_service(PreFetchServer::new(prefetch))
+                .add_service(RangeServerServer::new(prefetch))
                 .serve(addr)
                 .await
             {

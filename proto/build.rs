@@ -10,9 +10,9 @@ fn main() {
 
     tonic_build::configure()
         .build_server(true)
-        .out_dir("target/prefetch")
+        .out_dir("target/rangeserver")
         .compile(
-            &["src/prefetch.proto"],
+            &["src/rangeserver.proto"],
             &["src"], // specify the root location to search proto dependencies
         )
         .unwrap();
