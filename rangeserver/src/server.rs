@@ -34,7 +34,7 @@ pub struct RSPreFetch {}
 
 #[tonic::async_trait]
 impl RangeServer for RSPreFetch {
-    async fn pre_fetch_key(
+    async fn pre_fetch(
         &self,
         request: Request<HelloRequest>, // Accept request of type HelloRequest
     ) -> Result<Response<HelloReply>, TStatus> {

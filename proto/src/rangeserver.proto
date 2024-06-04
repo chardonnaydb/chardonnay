@@ -3,7 +3,7 @@ package rangeserver;
 
 service RangeServer {
     // Our PreFetchKey rpc accepts HelloRequests and returns HelloReplies
-    rpc PreFetchKey (HelloRequest) returns (HelloReply);
+    rpc PreFetch (HelloRequest) returns (HelloReply);
 }
 
 message HelloRequest {
