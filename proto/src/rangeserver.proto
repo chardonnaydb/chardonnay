@@ -1,14 +1,20 @@
 syntax = "proto3";
 package rangeserver;
 
-service RangeServer {
-    // Our PreFetchKey rpc accepts HelloRequests and returns HelloReplies
-    rpc PreFetch (HelloRequest) returns (HelloReply);
+message RangeId {
+    string keyspace_id = 1;
+    string range_id = 2;
 }
 
-message HelloRequest {
-    // Request message contains the name to be greeted
-    string name = 1;
+service RangeServer {
+    // Our PreFetchKey rpc accepts HelloRequests and returns HelloReplies
+    rpc PreFetch (PreFetchRequest) returns (HelloReply);
+}
+
+message PreFetchRequest {
+    // Request message contains the range and they key to prefetch
+    repeated RangeId range = 1;
+    repeated bytes key = 2;
 }
 
 message HelloReply {

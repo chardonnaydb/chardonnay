@@ -23,7 +23,7 @@ use crate::{
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 
 use proto::rangeserver::range_server_server::{RangeServer, RangeServerServer};
-use proto::rangeserver::{HelloReply, HelloRequest};
+use proto::rangeserver::{HelloReply, PreFetchRequest};
 
 pub mod rangeserver {
     include!("../../proto/target/rangeserver/rangeserver.rs");
@@ -36,13 +36,13 @@ pub struct RSPreFetch {}
 impl RangeServer for RSPreFetch {
     async fn pre_fetch(
         &self,
-        request: Request<HelloRequest>, // Accept request of type HelloRequest
+        request: Request<PreFetchRequest>, // Accept request of type PreFetchRequest
     ) -> Result<Response<HelloReply>, TStatus> {
         // Return an instance of type HelloReply
         println!("Got a request: {:?}", request);
 
         let reply = HelloReply {
-            message: format!("Hello {}!", request.into_inner().name), // We must use .into_inner() as the fields of gRPC requests and responses are private
+            message: format!("Hello! The request is {:?}!", request.into_inner()), // We must use .into_inner() as the fields of gRPC requests and responses are private
         };
 
         Ok(Response::new(reply)) // Send back our formatted greeting
