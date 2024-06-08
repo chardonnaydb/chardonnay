@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    net::SocketAddr,
     sync::Arc,
 };
 
@@ -9,7 +10,10 @@ use proto::warden::{
     warden_update::Update::{FullAssignment, IncrementalAssignment},
     RegisterRangeServerRequest, WardenUpdate,
 };
-use tokio::sync::{mpsc, RwLock};
+use tokio::{
+    net::TcpListener,
+    sync::{mpsc, RwLock},
+};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
 use uuid::Uuid;
@@ -30,8 +34,6 @@ fn range_id_proto(range: &FullRangeId) -> proto::warden::RangeId {
     }
 }
 
-pub const SERVER_ADDR: &str = "[::1]:10010";
-
 impl MockWarden {
     pub fn new() -> MockWarden {
         let warden_state = Arc::new(WardenState {
@@ -45,14 +47,18 @@ impl MockWarden {
         }
     }
 
-    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start(&self) -> Result<SocketAddr, Box<dyn std::error::Error>> {
         let state = self.state.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
         tokio::spawn(async {
-            let addr = SERVER_ADDR.parse().unwrap();
             let svc = WardenServer::from_arc(state);
-            let _ = Server::builder().add_service(svc).serve(addr).await;
+            let _ = Server::builder()
+                .add_service(svc)
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await;
         });
-        Ok(())
+        Ok(addr)
     }
 
     pub async fn unassign(&self, range: &FullRangeId) {

@@ -644,6 +644,8 @@ pub mod tests {
         let storage_context: crate::storage::cassandra::tests::TestContext =
             crate::storage::cassandra::tests::init().await;
         let cassandra = storage_context.cassandra.clone();
+        let mock_warden = MockWarden::new();
+        let warden_address = mock_warden.start().await.unwrap();
         let region = Region {
             cloud: None,
             name: "test-region".into(),
@@ -653,7 +655,7 @@ pub mod tests {
             name: "a".into(),
         };
         let region_config = RegionConfig {
-            warden_address: crate::for_testing::mock_warden::SERVER_ADDR.into(),
+            warden_address: warden_address.to_string(),
         };
         let mut config = Config {
             range_server: RangeServerConfig {
@@ -675,8 +677,7 @@ pub mod tests {
             epoch_provider,
             tokio::runtime::Handle::current().clone(),
         );
-        let mock_warden = MockWarden::new();
-        mock_warden.start().await.unwrap();
+
         // Give some delay so the mock warden starts.
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         TestContext {
