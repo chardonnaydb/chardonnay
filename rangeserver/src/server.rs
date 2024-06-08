@@ -618,9 +618,7 @@ pub mod tests {
     }
 
     async fn init() -> TestContext {
-        let fast_network = Arc::new(UdpFastNetwork::new(
-            UdpSocket::bind("127.0.0.1:10001").unwrap(),
-        ));
+        let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
         let epoch_provider = Arc::new(EpochProvider::new());
         let storage_context: crate::storage::cassandra::tests::TestContext =
             crate::storage::cassandra::tests::init().await;
