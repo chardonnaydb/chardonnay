@@ -19,6 +19,7 @@ use crate::{
     epoch_provider::EpochProvider, error::Error, for_testing::in_memory_wal::InMemoryWal,
     range_manager::RangeManager, storage::Storage,
 };
+use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 
 pub struct Server<S, E>
@@ -60,6 +61,25 @@ where
             loaded_ranges: RwLock::new(HashMap::new()),
             transaction_table: RwLock::new(HashMap::new()),
         })
+    }
+
+    async fn maybe_start_transaction(&self, id: Uuid, info: Option<FlatbufTransactionInfo<'_>>) {
+        let info = match info {
+            None => return (),
+            Some(info) => info,
+        };
+        let mut tx_table = self.transaction_table.write().await;
+        match (*tx_table).get(&id) {
+            Some(_) => return (),
+            None => (),
+        };
+        let overall_timeout = core::time::Duration::from_micros(info.overall_timeout_us() as u64);
+        let tx_info = Arc::new(TransactionInfo {
+            id,
+            started: chrono::Utc::now(), // TODO: Should be set by the client instead.
+            overall_timeout,
+        });
+        tx_table.insert(id, tx_info);
     }
 
     async fn get_transaction_info(&self, id: Uuid) -> Result<Arc<TransactionInfo>, Error> {
@@ -167,6 +187,8 @@ where
             None => return Err(Error::InvalidRequestFormat),
             Some(_) => (),
         }
+        self.maybe_start_transaction(transaction_id, request.transaction_info())
+            .await;
         let rm = self.maybe_load_and_get_range(&range_id).await?;
         let tx = self.get_transaction_info(transaction_id).await?;
         let mut leader_sequence_number: i64 = 0;
@@ -217,7 +239,6 @@ where
                 },
             ),
             Some(req_id) => {
-                // TODO: add to transaction table if this is the first req of the transaction.
                 let request_id = util::flatbuf::deserialize_uuid(req_id);
                 let read_result = self.get_inner(request).await;
 
