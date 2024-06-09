@@ -7,7 +7,7 @@ message RangeId {
 }
 
 service RangeServer {
-    // Our PreFetchKey rpc accepts HelloRequests and returns HelloReplies
+    // Our PreFetch rpc accepts a PreFetchRequest and returns HelloReplies
     rpc PreFetch (PreFetchRequest) returns (HelloReply);
 }
 
