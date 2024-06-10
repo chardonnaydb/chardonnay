@@ -8,16 +8,16 @@ message RangeId {
 
 service RangeServer {
     // Our PreFetch rpc accepts a PreFetchRequest and returns HelloReplies
-    rpc PreFetch (PreFetchRequest) returns (HelloReply);
+    rpc PreFetch (PrefetchRequest) returns (PrefetchResponse);
 }
 
-message PreFetchRequest {
-    // Request message contains the range and they key to prefetch
+message PrefetchRequest {
+    // Request message contains the range and the key to prefetch
     repeated RangeId range = 1;
     repeated bytes key = 2;
 }
 
-message HelloReply {
+message PrefetchResponse {
     // Reply contains the greeting message
-    string message = 1;
+    string status = 1;
 }

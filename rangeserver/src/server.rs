@@ -23,26 +23,26 @@ use crate::{
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 
 use proto::rangeserver::range_server_server::{RangeServer, RangeServerServer};
-use proto::rangeserver::{HelloReply, PreFetchRequest};
+use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
 
 pub mod rangeserver {
     include!("../../proto/target/rangeserver/rangeserver.rs");
 }
 
 #[derive(Debug, Default)]
-pub struct RSPreFetch {}
+pub struct RSPrefetch {}
 
 #[tonic::async_trait]
-impl RangeServer for RSPreFetch {
+impl RangeServer for RSPrefetch {
     async fn pre_fetch(
         &self,
-        request: Request<PreFetchRequest>, // Accept request of type PreFetchRequest
-    ) -> Result<Response<HelloReply>, TStatus> {
+        request: Request<PrefetchRequest>, // Accept request of type PreFetchRequest
+    ) -> Result<Response<PrefetchResponse>, TStatus> {
         // Return an instance of type HelloReply
         println!("Got a request: {:?}", request);
 
-        let reply = HelloReply {
-            message: format!("Hello! The request is {:?}!", request.into_inner()), // We must use .into_inner() as the fields of gRPC requests and responses are private
+        let reply = PrefetchResponse {
+            status: format!("Prefetch request received"), // We must use .into_inner() as the fields of gRPC requests and responses are private
         };
 
         Ok(Response::new(reply)) // Send back our formatted greeting
@@ -500,7 +500,7 @@ where
 
         // Define the gRPC server address and service
         let addr = "127.0.0.1:50051".parse().unwrap();
-        let prefetch = RSPreFetch::default();
+        let prefetch = RSPrefetch::default();
 
         // Spawn the gRPC server as a separate task
         server.bg_runtime.spawn(async move {
