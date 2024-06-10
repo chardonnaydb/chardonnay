@@ -6,15 +6,19 @@ message RangeId {
     string range_id = 2;
 }
 
+message RangeKey {
+    RangeId range = 1;
+    bytes key = 2;
+}
+
 service RangeServer {
     // Our PreFetch rpc accepts a PreFetchRequest and returns HelloReplies
     rpc PreFetch (PrefetchRequest) returns (PrefetchResponse);
 }
 
 message PrefetchRequest {
-    // Request message contains the range and the key to prefetch
-    repeated RangeId range = 1;
-    repeated bytes key = 2;
+    // Request message contains a range_key, which is a tuple containing a range and key to prefetch
+    repeated RangeKey range_key = 1;
 }
 
 message PrefetchResponse {
