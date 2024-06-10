@@ -2,8 +2,10 @@ use crate::wal::*;
 
 use std::collections::VecDeque;
 
+use common::util;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use flatbuffers::FlatBufferBuilder;
+use uuid::Uuid;
 
 pub struct InMemoryWal {
     first_offset: u64,
@@ -11,7 +13,7 @@ pub struct InMemoryWal {
     flatbuf_builder: FlatBufferBuilder<'static>,
 }
 
-struct InMemIterator<'a> {
+pub struct InMemIterator<'a> {
     index: u64,
     wal: &'a InMemoryWal,
     current_entry: Option<LogEntry<'a>>,
@@ -23,7 +25,7 @@ impl<'a> Iterator<'a> for InMemIterator<'a> {
         Ok(offset)
     }
 
-    async fn next<'b>(&'b mut self) -> Option<&LogEntry<'b>> {
+    async fn next(&mut self) -> Option<&LogEntry<'_>> {
         let ind = (self.wal.first_offset + self.index) as usize;
         if ind >= self.wal.entries.len() {
             return None;
@@ -117,5 +119,30 @@ impl Wal for InMemoryWal {
             wal: self,
             current_entry: None,
         }
+    }
+
+    async fn find_prepare_record(&self, transaction_id: Uuid) -> Result<Option<Vec<u8>>, Error> {
+        let mut wal_iterator = self.iterator();
+        let prepare_record_bytes = {
+            loop {
+                let next = wal_iterator.next().await;
+                match next {
+                    None => break None,
+                    Some(entry) => match entry.entry() {
+                        Entry::Prepare => {
+                            let bytes = Vec::from(entry.bytes().unwrap().bytes());
+                            let flatbuf = flatbuffers::root::<PrepareRequest>(&bytes).unwrap();
+                            let tid =
+                                util::flatbuf::deserialize_uuid(flatbuf.transaction_id().unwrap());
+                            if tid == transaction_id {
+                                break (Some(bytes));
+                            }
+                        }
+                        _ => (),
+                    },
+                }
+            }
+        };
+        Ok(prepare_record_bytes)
     }
 }

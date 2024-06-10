@@ -1,6 +1,5 @@
 use crate::network::fast_network::FastNetwork as Trait;
 use std::{
-    cell::RefCell,
     collections::HashMap,
     net::{SocketAddr, UdpSocket},
     sync::RwLock,
@@ -28,6 +27,12 @@ impl Trait for UdpFastNetwork {
     fn send(&self, to: SocketAddr, payload: Bytes) -> Result<(), std::io::Error> {
         self.socket.send_to(payload.to_vec().as_slice(), to)?;
         Ok(())
+    }
+
+    fn listen_default(&self) -> mpsc::UnboundedReceiver<(SocketAddr, Bytes)> {
+        // TODO(tamer): properly implement.
+        let (_, r) = mpsc::unbounded_channel();
+        r
     }
 
     fn register(&self, from: SocketAddr) -> mpsc::UnboundedReceiver<Bytes> {

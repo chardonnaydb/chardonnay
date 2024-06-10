@@ -1,4 +1,8 @@
-use std::{net::UdpSocket, sync::Arc, time};
+use std::{
+    net::{SocketAddr, UdpSocket},
+    sync::Arc,
+    time,
+};
 
 use common::{
     config::{Config, RangeServerConfig, RegionConfig},
@@ -14,20 +18,23 @@ use tokio_util::sync::CancellationToken;
 
 fn main() {
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
-    let fast_network = UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:10001").unwrap());
+    let fast_network = Arc::new(UdpFastNetwork::new(
+        UdpSocket::bind("127.0.0.1:10001").unwrap(),
+    ));
+    let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
         loop {
-            fast_network.poll();
+            fast_network_clone.poll();
             tokio::task::yield_now().await
         }
     });
     let server_handle = runtime.spawn(async move {
         let mock_warden = MockWarden::new();
-        mock_warden.start().await.unwrap();
+        let warden_address = mock_warden.start().await.unwrap();
         let storage = Arc::new(Cassandra::new("127.0.0.1:9042".to_string()).await);
         let epoch_provider =
             Arc::new(rangeserver::for_testing::epoch_provider::EpochProvider::new());
-        let config = get_config();
+        let config = get_config(warden_address);
         let host_info = get_host_info();
         // TODO: set number of threads and pin to cores.
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
@@ -38,7 +45,7 @@ fn main() {
             epoch_provider,
             bg_runtime.handle().clone(),
         );
-        let res = Server::start(server, CancellationToken::new())
+        let res = Server::start(server, fast_network, CancellationToken::new())
             .await
             .unwrap();
         res.await.unwrap()
@@ -46,14 +53,14 @@ fn main() {
     runtime.block_on(server_handle).unwrap().unwrap();
 }
 
-fn get_config() -> Config {
+fn get_config(warden_address: SocketAddr) -> Config {
     // TODO: should be read from file!
     let region = Region {
         cloud: None,
         name: "test-region".into(),
     };
     let region_config = RegionConfig {
-        warden_address: rangeserver::for_testing::mock_warden::SERVER_ADDR.into(),
+        warden_address: warden_address.to_string(),
     };
     let mut config = Config {
         range_server: RangeServerConfig {
