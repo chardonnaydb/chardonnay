@@ -36,13 +36,13 @@ pub struct RSPrefetch {}
 impl RangeServer for RSPrefetch {
     async fn pre_fetch(
         &self,
-        request: Request<PrefetchRequest>, // Accept request of type PreFetchRequest
+        request: Request<PrefetchRequest>, // Accept request of type PrefetchRequest
     ) -> Result<Response<PrefetchResponse>, TStatus> {
-        // Return an instance of type HelloReply
+        // Return an instance of type PrefetchResponse
         println!("Got a request: {:?}", request);
 
         let reply = PrefetchResponse {
-            status: format!("Prefetch request received"), // We must use .into_inner() as the fields of gRPC requests and responses are private
+            status: format!("Prefetch request received"),
         };
 
         Ok(Response::new(reply)) // Send back our formatted greeting
