@@ -113,8 +113,8 @@ pub mod range_server_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /// Our PreFetch rpc accepts a PreFetchRequest and returns HelloReplies
-        pub async fn pre_fetch(
+        /// Our Prefetch rpc accepts a PrefetchRequest and returns PrefetchResponse
+        pub async fn prefetch(
             &mut self,
             request: impl tonic::IntoRequest<super::PrefetchRequest>,
         ) -> std::result::Result<
@@ -132,11 +132,11 @@ pub mod range_server_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/rangeserver.RangeServer/PreFetch",
+                "/rangeserver.RangeServer/Prefetch",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("rangeserver.RangeServer", "PreFetch"));
+                .insert(GrpcMethod::new("rangeserver.RangeServer", "Prefetch"));
             self.inner.unary(req, path, codec).await
         }
     }
@@ -148,8 +148,8 @@ pub mod range_server_server {
     /// Generated trait containing gRPC methods that should be implemented for use with RangeServerServer.
     #[async_trait]
     pub trait RangeServer: Send + Sync + 'static {
-        /// Our PreFetch rpc accepts a PreFetchRequest and returns HelloReplies
-        async fn pre_fetch(
+        /// Our Prefetch rpc accepts a PrefetchRequest and returns PrefetchResponse
+        async fn prefetch(
             &self,
             request: tonic::Request<super::PrefetchRequest>,
         ) -> std::result::Result<
@@ -236,13 +236,13 @@ pub mod range_server_server {
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
-                "/rangeserver.RangeServer/PreFetch" => {
+                "/rangeserver.RangeServer/Prefetch" => {
                     #[allow(non_camel_case_types)]
-                    struct PreFetchSvc<T: RangeServer>(pub Arc<T>);
+                    struct PrefetchSvc<T: RangeServer>(pub Arc<T>);
                     impl<
                         T: RangeServer,
                     > tonic::server::UnaryService<super::PrefetchRequest>
-                    for PreFetchSvc<T> {
+                    for PrefetchSvc<T> {
                         type Response = super::PrefetchResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
@@ -254,7 +254,7 @@ pub mod range_server_server {
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RangeServer>::pre_fetch(&inner, request).await
+                                <T as RangeServer>::prefetch(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -266,7 +266,7 @@ pub mod range_server_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = PreFetchSvc(inner);
+                        let method = PrefetchSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
