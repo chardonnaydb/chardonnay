@@ -12,7 +12,6 @@ message RangeKey {
 }
 
 service RangeServer {
-    // Our Prefetch rpc accepts a PrefetchRequest and returns PrefetchResponse
     rpc Prefetch (PrefetchRequest) returns (PrefetchResponse);
 }
 
@@ -22,6 +21,5 @@ message PrefetchRequest {
 }
 
 message PrefetchResponse {
-    // Reply contains the greeting message
     string status = 1;
 }

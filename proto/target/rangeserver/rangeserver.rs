@@ -24,7 +24,6 @@ pub struct PrefetchRequest {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct PrefetchResponse {
-    /// Reply contains the greeting message
     #[prost(string, tag = "1")]
     pub status: ::prost::alloc::string::String,
 }
@@ -113,7 +112,6 @@ pub mod range_server_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        /// Our Prefetch rpc accepts a PrefetchRequest and returns PrefetchResponse
         pub async fn prefetch(
             &mut self,
             request: impl tonic::IntoRequest<super::PrefetchRequest>,
@@ -148,7 +146,6 @@ pub mod range_server_server {
     /// Generated trait containing gRPC methods that should be implemented for use with RangeServerServer.
     #[async_trait]
     pub trait RangeServer: Send + Sync + 'static {
-        /// Our Prefetch rpc accepts a PrefetchRequest and returns PrefetchResponse
         async fn prefetch(
             &self,
             request: tonic::Request<super::PrefetchRequest>,

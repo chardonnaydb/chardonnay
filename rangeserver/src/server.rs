@@ -32,10 +32,10 @@ pub mod rangeserver {
 }
 
 #[derive(Debug, Default)]
-pub struct RSPrefetch {}
+struct ProtoServer {}
 
 #[tonic::async_trait]
-impl RangeServer for RSPrefetch {
+impl RangeServer for ProtoServer {
     async fn prefetch(
         &self,
         request: Request<PrefetchRequest>, // Accept request of type PrefetchRequest
@@ -625,9 +625,15 @@ where
             println!("Warden update loop exited!")
         });
 
-        // Define the gRPC server address and service
-        let addr = "127.0.0.1:50051".parse().unwrap();
-        let prefetch = RSPrefetch::default();
+        // Pull the gRPC server address and define the service
+        let addr = server
+            .config
+            .range_server
+            .proto_server_addr
+            .parse()
+            .unwrap();
+
+        let prefetch = ProtoServer::default();
 
         // Spawn the gRPC server as a separate task
         server.bg_runtime.spawn(async move {
@@ -706,6 +712,7 @@ pub mod tests {
         let mut config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
+                proto_server_addr: String::from("127.0.0.1:50051"),
             },
             regions: std::collections::HashMap::new(),
         };
