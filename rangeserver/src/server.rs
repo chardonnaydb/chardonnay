@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
 use std::path::Prefix;
 use std::sync::Arc;
@@ -26,6 +26,8 @@ use flatbuf::rangeserver_flatbuffers::range_server::*;
 
 use proto::rangeserver::range_server_server::{RangeServer, RangeServerServer};
 use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
+
+use crate::prefetching_buffer::PrefetchingBuffer;
 
 pub mod rangeserver {
     include!("../../proto/target/rangeserver/rangeserver.rs");
@@ -645,6 +647,21 @@ where
                 println!("Server error: {}", e);
             }
         });
+
+        // Begin prefetching_buffer test
+        let mut prefetching_buffer = PrefetchingBuffer {
+            prefetch_store: BTreeMap::new(),
+        };
+
+        let key = Bytes::from("123");
+        let value = Bytes::from("does this work?");
+
+        prefetching_buffer.prefetch_store.insert(key.clone(), value);
+
+        let result = prefetching_buffer.prefetch_store.get(&key);
+
+        println!("This worked. The key is {:?}", result);
+        // End prefetching buffer test
 
         let server_ref = server.clone();
         let res = server
