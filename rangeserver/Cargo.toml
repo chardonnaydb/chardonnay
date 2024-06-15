@@ -21,4 +21,7 @@ machnet = "0.1.9"
 tonic = "0.11.0"
 tokio-util = "0.7.10"
 tokio-stream = {version = "0.1.15", features = ["net"]}
+prost = "0.12"
 
+[build-dependencies]
+tonic-build = "0.11"

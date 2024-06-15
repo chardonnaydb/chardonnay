@@ -1,0 +1,25 @@
+syntax = "proto3";
+package rangeserver;
+
+message RangeId {
+    string keyspace_id = 1;
+    string range_id = 2;
+}
+
+message RangeKey {
+    RangeId range = 1;
+    bytes key = 2;
+}
+
+service RangeServer {
+    rpc Prefetch (PrefetchRequest) returns (PrefetchResponse);
+}
+
+message PrefetchRequest {
+    // Request message contains a range_key, which is a tuple containing a range and key to prefetch
+    repeated RangeKey range_key = 1;
+}
+
+message PrefetchResponse {
+    string status = 1;
+}

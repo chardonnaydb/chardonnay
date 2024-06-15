@@ -703,6 +703,7 @@ mod tests {
         let config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
+                proto_server_addr: String::from("127.0.0.1:50051"),
             },
             regions: std::collections::HashMap::new(),
         };

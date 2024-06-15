@@ -2,8 +2,10 @@ use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::Prefix;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
 use common::util;
 use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
@@ -21,6 +23,33 @@ use crate::{
 };
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
+
+use proto::rangeserver::range_server_server::{RangeServer, RangeServerServer};
+use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
+
+pub mod rangeserver {
+    include!("../../proto/target/rangeserver/rangeserver.rs");
+}
+
+#[derive(Debug, Default)]
+struct ProtoServer {}
+
+#[tonic::async_trait]
+impl RangeServer for ProtoServer {
+    async fn prefetch(
+        &self,
+        request: Request<PrefetchRequest>, // Accept request of type PrefetchRequest
+    ) -> Result<Response<PrefetchResponse>, TStatus> {
+        // Return an instance of type PrefetchResponse
+        println!("Got a request: {:?}", request);
+
+        let reply = PrefetchResponse {
+            status: format!("Prefetch request received"),
+        };
+
+        Ok(Response::new(reply)) // Send back our formatted greeting
+    }
+}
 
 pub struct Server<S, E>
 where
@@ -595,11 +624,34 @@ where
             .await;
             println!("Warden update loop exited!")
         });
+
+        // Pull the gRPC server address and define the service
+        let addr = server
+            .config
+            .range_server
+            .proto_server_addr
+            .parse()
+            .unwrap();
+
+        let prefetch = ProtoServer::default();
+
+        // Spawn the gRPC server as a separate task
+        server.bg_runtime.spawn(async move {
+            if let Err(e) = TServer::builder()
+                .add_service(RangeServerServer::new(prefetch))
+                .serve(addr)
+                .await
+            {
+                println!("Server error: {}", e);
+            }
+        });
+
         let server_ref = server.clone();
         let res = server
             .bg_runtime
             .spawn(async move { server_ref.warden_handler.start(warden_s).await })
             .await??;
+
         tokio::spawn(async move {
             let _ = Self::network_server_loop(server, fast_network, cancellation_token);
             println!("Network server loop exited!")
@@ -660,6 +712,7 @@ pub mod tests {
         let mut config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
+                proto_server_addr: String::from("127.0.0.1:50051"),
             },
             regions: std::collections::HashMap::new(),
         };
