@@ -651,6 +651,8 @@ where
         // Begin prefetching_buffer test
         let mut prefetching_buffer = PrefetchingBuffer {
             prefetch_store: BTreeMap::new(),
+            key_state: HashMap::new(),
+            transaction_keys: HashMap::new(),
         };
 
         let key = Bytes::from("123");
