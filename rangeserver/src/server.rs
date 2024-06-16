@@ -10,7 +10,7 @@ use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 use common::util;
 use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
 use flatbuffers::FlatBufferBuilder;
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use uuid::Uuid;
@@ -33,8 +33,10 @@ pub mod rangeserver {
     include!("../../proto/target/rangeserver/rangeserver.rs");
 }
 
-#[derive(Debug, Default)]
-struct ProtoServer {}
+#[derive(Clone, Debug, Default)]
+struct ProtoServer {
+    buffer: Arc<Mutex<PrefetchingBuffer>>,
+}
 
 #[tonic::async_trait]
 impl RangeServer for ProtoServer {
@@ -45,11 +47,26 @@ impl RangeServer for ProtoServer {
         // Return an instance of type PrefetchResponse
         println!("Got a request: {:?}", request);
 
-        let reply = PrefetchResponse {
-            status: format!("Prefetch request received"),
-        };
+        // TODO: Where do we get transaction_id from?
+        let transaction_id = Uuid::new_v4();
 
-        Ok(Response::new(reply)) // Send back our formatted greeting
+        // Extract requested key from the request
+        let key = Bytes::from(request.get_ref().range_key[0].key.clone());
+
+        // Call process_prefetch_request
+        // TODO: Don't lock the entire buffer. Use separate locks for separate parts
+        let mut buffer = self.buffer.lock().await;
+        match buffer.process_prefetch_request(transaction_id, key).await {
+            Ok(_) => {
+                let reply = PrefetchResponse {
+                    status: format!("Prefetch request processed successfully"),
+                };
+                Ok(Response::new(reply)) // Send back response
+            }
+            Err(_) => {
+                Err(TStatus::internal("Failed to process prefetch request")) // Handle error
+            }
+        }
     }
 }
 
@@ -635,7 +652,17 @@ where
             .parse()
             .unwrap();
 
-        let prefetch = ProtoServer::default();
+        // Create buffer to hold prefetch requests
+        let mut prefetching_buffer = PrefetchingBuffer {
+            prefetch_store: BTreeMap::new(),
+            key_state: HashMap::new(),
+            transaction_keys: HashMap::new(),
+            key_transactions: HashMap::new(),
+            key_state_watcher: HashMap::new(),
+            key_state_sender: HashMap::new(),
+        };
+        let buffer = Arc::new(Mutex::new(prefetching_buffer));
+        let prefetch = ProtoServer { buffer };
 
         // Spawn the gRPC server as a separate task
         server.bg_runtime.spawn(async move {
@@ -647,23 +674,6 @@ where
                 println!("Server error: {}", e);
             }
         });
-
-        // Begin prefetching_buffer test
-        let mut prefetching_buffer = PrefetchingBuffer {
-            prefetch_store: BTreeMap::new(),
-            key_state: HashMap::new(),
-            transaction_keys: HashMap::new(),
-        };
-
-        let key = Bytes::from("123");
-        let value = Bytes::from("does this work?");
-
-        prefetching_buffer.prefetch_store.insert(key.clone(), value);
-
-        let result = prefetching_buffer.prefetch_store.get(&key);
-
-        println!("This worked. The key is {:?}", result);
-        // End prefetching buffer test
 
         let server_ref = server.clone();
         let res = server
