@@ -2,7 +2,6 @@ use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::Prefix;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
