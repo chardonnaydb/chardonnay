@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
+use common::keyspace_id::KeyspaceId;
 use common::util;
 use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
 use flatbuffers::FlatBufferBuilder;
@@ -47,16 +48,25 @@ impl RangeServer for ProtoServer {
         // Return an instance of type PrefetchResponse
         println!("Got a request: {:?}", request);
 
-        // TODO: Where do we get transaction_id from?
+        // TODO: Get transaction_id from RPC
         let transaction_id = Uuid::new_v4();
 
-        // Extract requested key from the request
+        // Extract requested key, keyspace_id, and range_id from the request
+        // TODO: Error handling if the input range / keyspace is not in the proper format
         let key = Bytes::from(request.get_ref().range_key[0].key.clone());
+        let range = request.get_ref().range_key[0].range.as_ref().unwrap();
+        let keyspace_id = KeyspaceId::new(Uuid::parse_str(&range.keyspace_id).unwrap());
+        let range_id = Uuid::parse_str(&range.range_id).unwrap();
 
+        // TODO: Move puppetmaster logic to range_manager.rs
+        // Look at range Id, get range manager with maybe_load_and_get_range, and call function in range manager to start processing
         // Call process_prefetch_request
         // TODO: Don't lock the entire buffer. Use separate locks for separate parts
         let mut buffer = self.buffer.lock().await;
-        match buffer.process_prefetch_request(transaction_id, key).await {
+        match buffer
+            .process_prefetch_request(transaction_id, key, keyspace_id, range_id)
+            .await
+        {
             Ok(_) => {
                 let reply = PrefetchResponse {
                     status: format!("Prefetch request processed successfully"),
@@ -653,11 +663,12 @@ where
             .unwrap();
 
         // Create buffer to hold prefetch requests
+        // TODO: Refactor to create function inside the prefetching_buffer module
         let mut prefetching_buffer = PrefetchingBuffer {
             prefetch_store: BTreeMap::new(),
             key_state: HashMap::new(),
-            transaction_keys: HashMap::new(),
-            key_transactions: HashMap::new(),
+            transaction_keys: Arc::new(Mutex::new(HashMap::new())),
+            key_transactions: Arc::new(Mutex::new(HashMap::new())),
             key_state_watcher: HashMap::new(),
             key_state_sender: HashMap::new(),
         };
