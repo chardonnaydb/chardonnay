@@ -48,11 +48,9 @@ impl RangeServer for ProtoServer {
         // Return an instance of type PrefetchResponse
         println!("Got a request: {:?}", request);
 
-        // TODO: Get transaction_id from RPC
-        let transaction_id = Uuid::new_v4();
-
-        // Extract requested key, keyspace_id, and range_id from the request
+        // Extract transaction_id, requested key, keyspace_id, and range_id from the request
         // TODO: Error handling if the input range / keyspace is not in the proper format
+        let transaction_id = Uuid::parse_str(&request.get_ref().transaction_id).unwrap();
         let key = Bytes::from(request.get_ref().range_key[0].key.clone());
         let range = request.get_ref().range_key[0].range.as_ref().unwrap();
         let keyspace_id = KeyspaceId::new(Uuid::parse_str(&range.keyspace_id).unwrap());
@@ -664,14 +662,7 @@ where
 
         // Create buffer to hold prefetch requests
         // TODO: Refactor to create function inside the prefetching_buffer module
-        let mut prefetching_buffer = PrefetchingBuffer {
-            prefetch_store: BTreeMap::new(),
-            key_state: HashMap::new(),
-            transaction_keys: Arc::new(Mutex::new(HashMap::new())),
-            key_transactions: Arc::new(Mutex::new(HashMap::new())),
-            key_state_watcher: HashMap::new(),
-            key_state_sender: HashMap::new(),
-        };
+        let prefetching_buffer = PrefetchingBuffer::new();
         let buffer = Arc::new(Mutex::new(prefetching_buffer));
         let prefetch = ProtoServer { buffer };
 

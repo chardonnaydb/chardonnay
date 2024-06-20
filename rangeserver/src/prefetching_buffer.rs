@@ -28,6 +28,16 @@ pub struct PrefetchingBuffer {
 }
 
 impl PrefetchingBuffer {
+    pub fn new() -> Self {
+        PrefetchingBuffer {
+            prefetch_store: BTreeMap::new(),
+            key_state: HashMap::new(),
+            transaction_keys: Arc::new(Mutex::new(HashMap::new())),
+            key_transactions: Arc::new(Mutex::new(HashMap::new())),
+            key_state_watcher: HashMap::new(),
+            key_state_sender: HashMap::new(),
+        }
+    }
     // TODO: fix result type
     // TODO: fix clones
     // TODO: Error checking
