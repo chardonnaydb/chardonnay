@@ -8,8 +8,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
 use common::keyspace_id::KeyspaceId;
-use common::util;
 use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
+use common::{full_range_id, util};
 use flatbuffers::FlatBufferBuilder;
 use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -34,13 +34,22 @@ pub mod rangeserver {
     include!("../../proto/target/rangeserver/rangeserver.rs");
 }
 
-#[derive(Clone, Debug, Default)]
-struct ProtoServer {
+#[derive(Clone)]
+struct ProtoServer<S, E>
+where
+    S: Storage,
+    E: EpochProvider,
+{
     buffer: Arc<Mutex<PrefetchingBuffer>>,
+    parent_server: Arc<Server<S, E>>,
 }
 
 #[tonic::async_trait]
-impl RangeServer for ProtoServer {
+impl<S, E> RangeServer for ProtoServer<S, E>
+where
+    S: Storage,
+    E: EpochProvider,
+{
     async fn prefetch(
         &self,
         request: Request<PrefetchRequest>, // Accept request of type PrefetchRequest
@@ -55,6 +64,17 @@ impl RangeServer for ProtoServer {
         let range = request.get_ref().range_key[0].range.as_ref().unwrap();
         let keyspace_id = KeyspaceId::new(Uuid::parse_str(&range.keyspace_id).unwrap());
         let range_id = Uuid::parse_str(&range.range_id).unwrap();
+
+        let full_range_id = FullRangeId {
+            keyspace_id: keyspace_id,
+            range_id: range_id,
+        };
+
+        let range_manager = self
+            .parent_server
+            .maybe_load_and_get_range(&full_range_id)
+            .await
+            .map_err(|e| TStatus::internal(format!("Failed to load range: {:?}", e)));
 
         // TODO: Move puppetmaster logic to range_manager.rs
         // Look at range Id, get range manager with maybe_load_and_get_range, and call function in range manager to start processing
@@ -661,10 +681,12 @@ where
             .unwrap();
 
         // Create buffer to hold prefetch requests
-        // TODO: Refactor to create function inside the prefetching_buffer module
         let prefetching_buffer = PrefetchingBuffer::new();
         let buffer = Arc::new(Mutex::new(prefetching_buffer));
-        let prefetch = ProtoServer { buffer };
+        let prefetch = ProtoServer {
+            buffer,
+            parent_server: server.clone(),
+        };
 
         // Spawn the gRPC server as a separate task
         server.bg_runtime.spawn(async move {
