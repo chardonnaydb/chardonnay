@@ -47,7 +47,7 @@ impl PrefetchingBuffer {
         key: Bytes,
         keyspace_id: KeyspaceId,
         range_id: Uuid,
-    ) -> Result<(), ()> {
+    ) -> Option<KeyState> {
         {
             let mut transaction_keys = self.transaction_keys.lock().await;
             let mut key_transactions = self.key_transactions.lock().await;
@@ -67,10 +67,12 @@ impl PrefetchingBuffer {
                 Some(KeyState::Fetched) => {
                     println!("Returning");
                     self.print_buffer();
-                    return Ok(());
+                    // return Ok(());
+                    return Some(KeyState::Fetched);
                 } // return ok
                 Some(KeyState::Loading) => {
                     // wait for fetch to complete
+                    // This entire waiting process could be moved to range_server.rs
                     println!("Fetch is loading");
                     if let Some(receiver) = self.key_state_watcher.get(&key) {
                         let mut receiver = receiver.clone();
@@ -78,25 +80,21 @@ impl PrefetchingBuffer {
                             if *receiver.borrow() == KeyState::Fetched {
                                 println!("Fetch is done");
                                 self.print_buffer();
-                                return Ok(()); // return ok once complete
+                                return Some(KeyState::Fetched); // return ok once complete
                             }
                         }
                     }
+                    // TODO: Something is wrong if this happened
+                    return Some(KeyState::Loading);
                 }
                 Some(KeyState::Requested) => {
-                    // TODO Return need to fetch
                     println!("Requesting fetch");
-                    // Don't do fetch here. Allow range_manager.rs to do fetch
-                    // self.fetch(key, keyspace_id, range_id).await; // start fetch
-                    println!("Fetch complete");
                     self.print_buffer();
-                    return Ok(()); // return ok once complete
+                    return Some(KeyState::Requested); // return ok once complete
                 }
-                None => (),
+                None => None,
             }
         }
-
-        Err(()) // If we got to here, an error occured
     }
 
     /// Adds a transaction and its requested key to the transaction_key hashmap.

@@ -11,6 +11,7 @@ use common::keyspace_id::KeyspaceId;
 
 use uuid::Uuid;
 
+use crate::prefetching_buffer::KeyState;
 use crate::prefetching_buffer::PrefetchingBuffer;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
@@ -561,7 +562,18 @@ where
         }
     }
 
-    // Locktable
+    /// Get from database without acquiring any locks
+    /// This is a very basic copy of the 'get' function
+    pub async fn prefetch_get(&self, key: Bytes) -> Result<Option<Bytes>, Error> {
+        // TODO: The regular get function checks state - might needs to do this?
+        let val = self
+            .storage
+            .get(self.range_id, key.clone())
+            .await
+            .map_err(Error::from_storage_error)?;
+        Ok(val)
+    }
+
     pub async fn process_prefetch(
         &self,
         buffer: &Arc<PrefetchingBuffer>,
@@ -574,8 +586,12 @@ where
             .process_prefetch_request(transaction_id, key, keyspace_id, range_id)
             .await
         {
-            Ok(_) => Ok(()),
-            Err(_) => Err(()),
+            Some(keystate) => match keystate {
+                KeyState::Fetched => Ok(()),   // key have previously been fetched
+                KeyState::Loading => Ok(()), // key is loading TODO: Should not be returned with current implementation of prefetching_buffer
+                KeyState::Requested => Ok(()), // key has not been requested TODO: start fetch
+            },
+            None => Err(()),
         }
     }
 }
