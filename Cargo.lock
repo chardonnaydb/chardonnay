@@ -1186,6 +1186,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "rangeclient"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "common",
+ "flatbuf",
+ "flatbuffers",
+ "machnet",
+ "prost",
+ "rangeserver",
+ "strum",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "uuid",
+]
+
+[[package]]
 name = "rangeserver"
 version = "0.1.0"
 dependencies = [

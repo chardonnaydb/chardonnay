@@ -1,0 +1,22 @@
+[package]
+name = "rangeclient"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+common = {path = "../common"}
+rangeserver = {path = "../rangeserver"}
+tokio = { version = "1", features = ["full"] }
+uuid = {version = "0.8", features = ["v4"]}
+bytes = "1"
+flatbuf = {path = "../flatbuf"}
+chrono = "0.4.34"
+flatbuffers = "24.3.25"
+thiserror = "1.0.57"
+strum = {version ="0.26.1", features = ["std", "derive"]}
+machnet = "0.1.9"
+tokio-util = "0.7.10"
+tokio-stream = {version = "0.1.15", features = ["net"]}
+prost = "0.12"

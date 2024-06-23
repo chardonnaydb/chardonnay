@@ -55,4 +55,26 @@ impl Error {
             Self::InternalError(_) => Status::InternalError,
         }
     }
+
+    pub fn from_flatbuf_status(status: Status) -> Result<(), Self> {
+        match status {
+            Status::Ok => Ok(()),
+            Status::InvalidRequestFormat => Err(Self::InvalidRequestFormat),
+            Status::RangeDoesNotExist => Err(Self::RangeDoesNotExist),
+            Status::RangeIsNotLoaded => Err(Self::RangeIsNotLoaded),
+            Status::KeyIsOutOfRange => Err(Self::KeyIsOutOfRange),
+            Status::RangeOwnershipLost => Err(Self::RangeOwnershipLost),
+            Status::Timeout => Err(Self::Timeout),
+            Status::UnknownTransaction => Err(Self::UnknownTransaction),
+            Status::TransactionAborted => {
+                // TODO: get the reason from the message.
+                Err(Self::TransactionAborted(TransactionAbortReason::Other))
+            }
+            Status::InternalError => {
+                // TODO: get the error from the message.
+                Err(Self::InternalError(Arc::new(std::fmt::Error)))
+            }
+            _ => Err(Self::InternalError(Arc::new(std::fmt::Error))),
+        }
+    }
 }
