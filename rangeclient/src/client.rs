@@ -35,8 +35,8 @@ impl RangeClient {
 
         let rc_clone = rc.clone();
         tokio::spawn(async move {
-            let _ = Self::network_server_loop(rc_clone, cancellation_token);
-            println!("Network server loop exited!")
+            let _ = Self::network_loop(rc_clone, cancellation_token);
+            println!("Network loop exited!")
         });
         rc
     }
@@ -145,7 +145,7 @@ impl RangeClient {
         common::util::flatbuf::deserialize_uuid(req_id.unwrap())
     }
 
-    async fn network_server_loop(client: Arc<Self>, cancellation_token: CancellationToken) {
+    async fn network_loop(client: Arc<Self>, cancellation_token: CancellationToken) {
         let mut network_receiver = client
             .fast_network
             .register(client.range_server_info.address);
