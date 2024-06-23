@@ -7,7 +7,11 @@ use bytes::Bytes;
 use chrono::DateTime;
 use common::config::Config;
 use common::full_range_id::FullRangeId;
+use common::keyspace_id::KeyspaceId;
 
+use uuid::Uuid;
+
+use crate::prefetching_buffer::PrefetchingBuffer;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -554,6 +558,24 @@ where
                 lock_table.release();
                 Ok(())
             }
+        }
+    }
+
+    // Locktable
+    pub async fn process_prefetch(
+        &self,
+        buffer: &Arc<PrefetchingBuffer>,
+        transaction_id: Uuid,
+        key: Bytes,
+        keyspace_id: KeyspaceId,
+        range_id: Uuid,
+    ) -> Result<(), ()> {
+        match buffer
+            .process_prefetch_request(transaction_id, key, keyspace_id, range_id)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(_) => Err(()),
         }
     }
 }

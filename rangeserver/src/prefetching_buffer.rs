@@ -19,8 +19,8 @@ pub enum KeyState {
 
 #[derive(Default, Debug)]
 pub struct PrefetchingBuffer {
-    pub prefetch_store: BTreeMap<Bytes, Bytes>, // stores key / value
-    pub key_state: HashMap<Bytes, KeyState>,    // stores key -> current fetch state
+    pub prefetch_store: Arc<Mutex<BTreeMap<Bytes, Bytes>>>, // stores key / value
+    pub key_state: Arc<Mutex<HashMap<Bytes, KeyState>>>,    // stores key -> current fetch state
     pub transaction_keys: Arc<Mutex<HashMap<Uuid, BTreeSet<Bytes>>>>, // stores transaction_id -> set of requested keys
     pub key_transactions: Arc<Mutex<HashMap<Bytes, BTreeSet<Uuid>>>>, // stores key -> set of transaction_ids
     pub key_state_watcher: HashMap<Bytes, watch::Receiver<KeyState>>, // key -> receiver for state changes
@@ -30,8 +30,8 @@ pub struct PrefetchingBuffer {
 impl PrefetchingBuffer {
     pub fn new() -> Self {
         PrefetchingBuffer {
-            prefetch_store: BTreeMap::new(),
-            key_state: HashMap::new(),
+            prefetch_store: Arc::new(Mutex::new(BTreeMap::new())),
+            key_state: Arc::new(Mutex::new(HashMap::new())),
             transaction_keys: Arc::new(Mutex::new(HashMap::new())),
             key_transactions: Arc::new(Mutex::new(HashMap::new())),
             key_state_watcher: HashMap::new(),
@@ -42,7 +42,7 @@ impl PrefetchingBuffer {
     // TODO: fix clones
     // TODO: Error checking
     pub async fn process_prefetch_request(
-        &mut self,
+        &self,
         transaction_id: Uuid,
         key: Bytes,
         keyspace_id: KeyspaceId,
@@ -56,41 +56,44 @@ impl PrefetchingBuffer {
             // Log that this key is being requested by this transaction
             self.add_to_key_transactions(&mut key_transactions, transaction_id, key.clone());
         }
-        // Check if key has already been requested by another transaction
-        // If not, add to key_state with fetch state requested
-        self.key_state
-            .entry(key.clone())
-            .or_insert(KeyState::Requested);
 
-        match self.key_state.get(&key) {
-            Some(KeyState::Fetched) => {
-                println!("Returning");
-                self.print_buffer();
-                return Ok(());
-            } // return ok
-            Some(KeyState::Loading) => {
-                // wait for fetch to complete
-                println!("Fetch is loading");
-                if let Some(receiver) = self.key_state_watcher.get(&key) {
-                    let mut receiver = receiver.clone();
-                    while receiver.changed().await.is_ok() {
-                        if *receiver.borrow() == KeyState::Fetched {
-                            println!("Fetch is done");
-                            self.print_buffer();
-                            return Ok(()); // return ok once complete
+        {
+            let mut key_state = self.key_state.lock().await;
+            // Check if key has already been requested by another transaction
+            // If not, add to key_state with fetch state requested
+            key_state.entry(key.clone()).or_insert(KeyState::Requested);
+
+            match key_state.get(&key) {
+                Some(KeyState::Fetched) => {
+                    println!("Returning");
+                    self.print_buffer();
+                    return Ok(());
+                } // return ok
+                Some(KeyState::Loading) => {
+                    // wait for fetch to complete
+                    println!("Fetch is loading");
+                    if let Some(receiver) = self.key_state_watcher.get(&key) {
+                        let mut receiver = receiver.clone();
+                        while receiver.changed().await.is_ok() {
+                            if *receiver.borrow() == KeyState::Fetched {
+                                println!("Fetch is done");
+                                self.print_buffer();
+                                return Ok(()); // return ok once complete
+                            }
                         }
                     }
                 }
+                Some(KeyState::Requested) => {
+                    // TODO Return need to fetch
+                    println!("Requesting fetch");
+                    // Don't do fetch here. Allow range_manager.rs to do fetch
+                    // self.fetch(key, keyspace_id, range_id).await; // start fetch
+                    println!("Fetch complete");
+                    self.print_buffer();
+                    return Ok(()); // return ok once complete
+                }
+                None => (),
             }
-            Some(KeyState::Requested) => {
-                println!("Requesting fetch");
-                // Don't do fetch here. Allow range_manager.rs to do fetch
-                self.fetch(key, keyspace_id, range_id).await; // start fetch
-                println!("Fetch complete");
-                self.print_buffer();
-                return Ok(()); // return ok once complete
-            }
-            None => (),
         }
 
         Err(()) // If we got to here, an error occured
@@ -148,10 +151,15 @@ impl PrefetchingBuffer {
         }
     }
 
+    /// Don't do fetch here - do it in range_manager.rs
     /// Fetches the data from the database and adds it to the BTree
-    async fn fetch(&mut self, key: Bytes, keyspace_id: KeyspaceId, range_id: Uuid) {
-        // Update key_state to reflect beginning of fetch
-        self.key_state.insert(key.clone(), KeyState::Loading);
+    /// TODO: Return value and error checking
+    async fn initiate_fetch(&mut self, key: Bytes, keyspace_id: KeyspaceId, range_id: Uuid) {
+        {
+            let mut key_state = self.key_state.lock().await;
+            // Update key_state to reflect beginning of fetch
+            key_state.insert(key.clone(), KeyState::Loading);
+        }
         // Create a watch channel for this key if it does not exist
         if !self.key_state_watcher.contains_key(&key) {
             let (tx, rx) = watch::channel(KeyState::Loading);
@@ -159,15 +167,20 @@ impl PrefetchingBuffer {
             self.key_state_watcher.insert(key.clone(), rx);
         }
         // TODO: Read key from the database
-        let value = self
-            .get_from_database(key.clone(), keyspace_id, range_id)
-            .await
-            .unwrap()
-            .unwrap();
+        // let value = self
+        //     .get_from_database(key.clone(), keyspace_id, range_id)
+        //     .await
+        //     .unwrap()
+        //     .unwrap();
+    }
+
+    async fn fetch_complete(&mut self, key: Bytes, value: Bytes) {
+        let mut prefetch_store = self.prefetch_store.lock().await;
+        let mut key_state = self.key_state.lock().await;
         // Check if key is in BTree. If not, add it
-        self.prefetch_store.entry(key.clone()).or_insert(value);
+        prefetch_store.entry(key.clone()).or_insert(value);
         // Update key_state to reflect fetch completion
-        self.key_state.insert(key.clone(), KeyState::Fetched);
+        key_state.insert(key.clone(), KeyState::Fetched);
         // Notify all watchers of the state change
         if let Some(sender) = self.key_state_sender.get(&key) {
             let _ = sender.send(KeyState::Fetched);
@@ -202,13 +215,16 @@ impl PrefetchingBuffer {
             // Log that this key is no longer being requested by this transaction
             self.remove_from_key_transactions(&mut key_transactions, transaction_id, key.clone());
         }
+
+        let mut prefetch_store = self.prefetch_store.lock().await;
+        let mut key_state = self.key_state.lock().await;
         // If key is still being requested by a different transaction, update BTree with latest value
         if self.key_transactions.lock().await.contains_key(&key) {
-            let _ = self.prefetch_store.insert(key, value);
+            let _ = prefetch_store.insert(key, value);
         } else {
             // If key is not being requested by any transactions, remove from BTree
-            let _ = self.prefetch_store.remove(&key);
-            let _ = self.key_state.remove(&key);
+            let _ = prefetch_store.remove(&key);
+            let _ = key_state.remove(&key);
         }
         Ok(())
     }
@@ -286,14 +302,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_key() {
-        let mut prefetching_buffer = PrefetchingBuffer {
-            prefetch_store: BTreeMap::new(),
-            key_state: HashMap::new(),
-            transaction_keys: Arc::new(Mutex::new(HashMap::new())),
-            key_transactions: Arc::new(Mutex::new(HashMap::new())),
-            key_state_watcher: HashMap::new(),
-            key_state_sender: HashMap::new(),
-        };
+        let prefetching_buffer = PrefetchingBuffer::new();
 
         let fake_id = Uuid::new_v4();
         let fake_key = Bytes::from("testing!");

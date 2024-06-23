@@ -40,7 +40,7 @@ where
     S: Storage,
     E: EpochProvider,
 {
-    buffer: Arc<Mutex<PrefetchingBuffer>>,
+    buffer: Arc<PrefetchingBuffer>,
     parent_server: Arc<Server<S, E>>,
 }
 
@@ -74,15 +74,13 @@ where
             .parent_server
             .maybe_load_and_get_range(&full_range_id)
             .await
-            .map_err(|e| TStatus::internal(format!("Failed to load range: {:?}", e)));
+            .map_err(|e| TStatus::internal(format!("Failed to load range: {:?}", e)))
+            .unwrap();
 
-        // TODO: Move puppetmaster logic to range_manager.rs
         // Look at range Id, get range manager with maybe_load_and_get_range, and call function in range manager to start processing
-        // Call process_prefetch_request
-        // TODO: Don't lock the entire buffer. Use separate locks for separate parts
-        let mut buffer = self.buffer.lock().await;
-        match buffer
-            .process_prefetch_request(transaction_id, key, keyspace_id, range_id)
+        // Call process_prefetch_request in range_manager.rs
+        match range_manager
+            .process_prefetch(&self.buffer, transaction_id, key, keyspace_id, range_id)
             .await
         {
             Ok(_) => {
@@ -682,7 +680,7 @@ where
 
         // Create buffer to hold prefetch requests
         let prefetching_buffer = PrefetchingBuffer::new();
-        let buffer = Arc::new(Mutex::new(prefetching_buffer));
+        let buffer = Arc::new(prefetching_buffer);
         let prefetch = ProtoServer {
             buffer,
             parent_server: server.clone(),
