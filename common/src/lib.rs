@@ -5,5 +5,6 @@ pub mod key_range;
 pub mod keyspace_id;
 pub mod membership;
 pub mod network;
+pub mod record;
 pub mod region;
 pub mod util;
