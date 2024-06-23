@@ -13,7 +13,7 @@ message HostInfo {
 
 service Warden {
     // Called by a range server to register itself with its regional warden.
-    // Establishes a long-lived streamfor the range server to continuously receive
+    // Establishes a long-lived stream for the range server to continuously receive
     // assignment updates from the warden.
     rpc RegisterRangeServer(RegisterRangeServerRequest) returns (stream WardenUpdate) {}
 }
