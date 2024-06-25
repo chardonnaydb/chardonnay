@@ -590,6 +590,8 @@ where
             .await
             .map_err(Error::from_storage_error)?;
         Ok(val)
+        // FOR TESTING
+        // Ok(Some(Bytes::from("test value")))
     }
 
     pub async fn process_prefetch(
@@ -602,7 +604,7 @@ where
     ) -> Result<(), ()> {
         // Request prefetch from the prefetching buffer
         match buffer
-            .process_prefetch_request(transaction_id, key.clone(), keyspace_id, range_id)
+            .process_prefetch_request(transaction_id, key.clone())
             .await
         {
             Some(keystate) => match keystate {
@@ -629,10 +631,7 @@ where
                 // key has just been requested - start fetch
                 {
                     // Update key state to loading
-                    let _ = buffer
-                        .initiate_fetch(key.clone(), keyspace_id, range_id)
-                        .await
-                        .unwrap();
+                    let _ = buffer.initiate_fetch(key.clone()).await.unwrap();
                     // Watch channel setup for this key
                     {
                         let mut key_state_watcher =
@@ -648,8 +647,7 @@ where
                             key_state_watcher.insert(key.clone(), rx);
                         }
                     }
-                    // Fetch from database
-                    // TODO: update unwrap to manage potential error
+                    // Fetch from database TODO: update unwrap to manage potential error
                     if let Some(val) = self.prefetch_get(key.clone()).await.unwrap() {
                         // Successfully fetched from database -> add to buffer and update records
                         buffer.fetch_complete(key.clone(), val).await;

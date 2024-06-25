@@ -45,8 +45,6 @@ impl PrefetchingBuffer {
         &self,
         transaction_id: Uuid,
         key: Bytes,
-        keyspace_id: KeyspaceId,
-        range_id: Uuid,
     ) -> Option<KeyState> {
         {
             let mut transaction_keys = self.transaction_keys.lock().await;
@@ -149,18 +147,19 @@ impl PrefetchingBuffer {
         }
     }
 
-    /// Logs that a transaction is currently being fetched by the database
+    /// Logs that a key is currently being fetched from the database
+    /// The key has to have been requested (and marked as Requested) prior
+    /// to calling this function
     /// TODO: Return value and error checking
-    pub async fn initiate_fetch(
-        &self,
-        key: Bytes,
-        keyspace_id: KeyspaceId,
-        range_id: Uuid,
-    ) -> Result<(), ()> {
+    pub async fn initiate_fetch(&self, key: Bytes) -> Result<(), ()> {
         {
             let mut key_state = self.key_state.lock().await;
             // Update key_state to reflect beginning of fetch
-            key_state.insert(key.clone(), KeyState::Loading);
+            match key_state.insert(key.clone(), KeyState::Loading) {
+                Some(_) => return Ok(()),
+                // We shouldn't be initiating fetch if the key was never requested in the first place
+                None => return Err(()),
+            };
         }
         // This was moved to range_manager. TODO: Check with Tamer if this is appropriate design pattern
         // {
@@ -175,7 +174,7 @@ impl PrefetchingBuffer {
         //         key_state_watcher.insert(key.clone(), rx);
         //     }
         // }
-        Ok(())
+        // Ok(())
     }
 
     /// Once fetch from database is complete, adds they key value to the Btree
@@ -184,7 +183,7 @@ impl PrefetchingBuffer {
     pub async fn fetch_complete(&self, key: Bytes, value: Bytes) {
         let mut prefetch_store = self.prefetch_store.lock().await;
         let mut key_state = self.key_state.lock().await;
-        let key_state_sender = self.key_state_sender.lock().await;
+        // let key_state_sender = self.key_state_sender.lock().await;
         // Check if key is in BTree. If not, add it
         prefetch_store.entry(key.clone()).or_insert(value);
         // Update key_state to reflect fetch completion
@@ -298,10 +297,12 @@ impl PrefetchingBuffer {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     #[tokio::test]
-    async fn test_transaction_key() {
+    async fn test_add_to_transaction_keys() {
         let prefetching_buffer = PrefetchingBuffer::new();
 
         let fake_id = Uuid::new_v4();
@@ -318,5 +319,78 @@ mod tests {
             Some(s) => assert!(s.contains(&Bytes::from("testing!"))),
             None => panic!("Set did not contain a value it should have contained"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_add_to_key_transactions() {
+        let prefetching_buffer = PrefetchingBuffer::new();
+
+        let fake_id = Uuid::from_str("fae86b67-36dd-41fa-a201-f18d3051bca5").unwrap();
+        let fake_key = Bytes::from("testing!");
+
+        {
+            let mut key_transactions = prefetching_buffer.key_transactions.lock().await;
+            prefetching_buffer.add_to_key_transactions(
+                &mut key_transactions,
+                fake_id,
+                fake_key.clone(),
+            );
+        }
+
+        let key_transactions = prefetching_buffer.key_transactions.lock().await;
+        let other_transaction = key_transactions.get(&fake_key);
+        match other_transaction {
+            Some(s) => {
+                assert!(s.contains(&Uuid::from_str("fae86b67-36dd-41fa-a201-f18d3051bca5").unwrap()))
+            }
+            None => panic!("Set did not contain a value it should have contained"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_prefetch_request() {
+        let prefetching_buffer = PrefetchingBuffer::new();
+
+        let fake_id = Uuid::from_str("fae86b67-36dd-41fa-a201-f18d3051bca5").unwrap();
+        let fake_key = Bytes::from("testing!");
+
+        // Test return for a brand new key
+        assert_eq!(
+            prefetching_buffer
+                .process_prefetch_request(fake_id, fake_key.clone())
+                .await,
+            Some(KeyState::Requested)
+        );
+
+        // Test proper function of update key_state
+        assert_eq!(
+            prefetching_buffer.initiate_fetch(fake_key.clone()).await,
+            Ok(())
+        );
+
+        // Test transition to loading status for the key
+        assert_eq!(
+            prefetching_buffer
+                .process_prefetch_request(fake_id, fake_key.clone())
+                .await,
+            Some(KeyState::Loading)
+        );
+
+        let fake_value = Bytes::from("testing value");
+        prefetching_buffer
+            .fetch_complete(fake_key.clone(), fake_value.clone())
+            .await;
+
+        assert_eq!(
+            prefetching_buffer
+                .process_prefetch_request(fake_id.clone(), fake_key.clone())
+                .await,
+            Some(KeyState::Fetched)
+        );
+
+        let value = prefetching_buffer.prefetch_store.lock().await;
+        let bind = value.get(&fake_key.clone()).unwrap();
+
+        assert_eq!(*bind, fake_value);
     }
 }
