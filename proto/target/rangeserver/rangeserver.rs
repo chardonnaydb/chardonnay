@@ -32,8 +32,8 @@ pub struct PrefetchResponse {
 /// Generated client implementations.
 pub mod range_server_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     #[derive(Debug, Clone)]
     pub struct RangeServerClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -77,9 +77,8 @@ pub mod range_server_client {
                     <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
             >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::BoxBody>,
-            >>::Error: Into<StdError> + Send + Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
+                Into<StdError> + Send + Sync,
         {
             RangeServerClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -117,23 +116,15 @@ pub mod range_server_client {
         pub async fn prefetch(
             &mut self,
             request: impl tonic::IntoRequest<super::PrefetchRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::PrefetchResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::new(
-                        tonic::Code::Unknown,
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::PrefetchResponse>, tonic::Status> {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::new(
+                    tonic::Code::Unknown,
+                    format!("Service was not ready: {}", e.into()),
+                )
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/rangeserver.RangeServer/Prefetch",
-            );
+            let path = http::uri::PathAndQuery::from_static("/rangeserver.RangeServer/Prefetch");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("rangeserver.RangeServer", "Prefetch"));
@@ -151,10 +142,7 @@ pub mod range_server_server {
         async fn prefetch(
             &self,
             request: tonic::Request<super::PrefetchRequest>,
-        ) -> std::result::Result<
-            tonic::Response<super::PrefetchResponse>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::PrefetchResponse>, tonic::Status>;
     }
     #[derive(Debug)]
     pub struct RangeServerServer<T: RangeServer> {
@@ -179,10 +167,7 @@ pub mod range_server_server {
                 max_encoding_message_size: None,
             }
         }
-        pub fn with_interceptor<F>(
-            inner: T,
-            interceptor: F,
-        ) -> InterceptedService<Self, F>
+        pub fn with_interceptor<F>(inner: T, interceptor: F) -> InterceptedService<Self, F>
         where
             F: tonic::service::Interceptor,
         {
@@ -238,23 +223,16 @@ pub mod range_server_server {
                 "/rangeserver.RangeServer/Prefetch" => {
                     #[allow(non_camel_case_types)]
                     struct PrefetchSvc<T: RangeServer>(pub Arc<T>);
-                    impl<
-                        T: RangeServer,
-                    > tonic::server::UnaryService<super::PrefetchRequest>
-                    for PrefetchSvc<T> {
+                    impl<T: RangeServer> tonic::server::UnaryService<super::PrefetchRequest> for PrefetchSvc<T> {
                         type Response = super::PrefetchResponse;
-                        type Future = BoxFuture<
-                            tonic::Response<Self::Response>,
-                            tonic::Status,
-                        >;
+                        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
                         fn call(
                             &mut self,
                             request: tonic::Request<super::PrefetchRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
-                            let fut = async move {
-                                <T as RangeServer>::prefetch(&inner, request).await
-                            };
+                            let fut =
+                                async move { <T as RangeServer>::prefetch(&inner, request).await };
                             Box::pin(fut)
                         }
                     }
@@ -281,18 +259,14 @@ pub mod range_server_server {
                     };
                     Box::pin(fut)
                 }
-                _ => {
-                    Box::pin(async move {
-                        Ok(
-                            http::Response::builder()
-                                .status(200)
-                                .header("grpc-status", "12")
-                                .header("content-type", "application/grpc")
-                                .body(empty_body())
-                                .unwrap(),
-                        )
-                    })
-                }
+                _ => Box::pin(async move {
+                    Ok(http::Response::builder()
+                        .status(200)
+                        .header("grpc-status", "12")
+                        .header("content-type", "application/grpc")
+                        .body(empty_body())
+                        .unwrap())
+                }),
             }
         }
     }

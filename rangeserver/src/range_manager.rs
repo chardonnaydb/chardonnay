@@ -14,11 +14,13 @@ use uuid::Uuid;
 use crate::prefetching_buffer::KeyState;
 use crate::prefetching_buffer::PrefetchingBuffer;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
@@ -166,6 +168,7 @@ where
     epoch_provider: Arc<E>,
     wal: Mutex<W>,
     state: Arc<RwLock<State>>,
+    prefetch_watcher: PrefetchWatcher,
 }
 
 pub struct GetResult {
@@ -176,6 +179,20 @@ pub struct GetResult {
 pub struct PrepareResult {
     pub highest_known_epoch: u64,
     pub epoch_lease: (u64, u64),
+}
+
+struct PrefetchWatcher {
+    key_state_watcher: Arc<Mutex<HashMap<Bytes, watch::Receiver<KeyState>>>>, // key -> receiver for state changes
+    key_state_sender: Arc<Mutex<HashMap<Bytes, watch::Sender<KeyState>>>>, // key -> sender for state changes
+}
+
+impl PrefetchWatcher {
+    pub fn new() -> Self {
+        PrefetchWatcher {
+            key_state_watcher: Arc::new(Mutex::new(HashMap::new())),
+            key_state_sender: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
 }
 
 impl<S, E, W> RangeManager<S, E, W>
@@ -198,6 +215,7 @@ where
             epoch_provider,
             wal: Mutex::new(wal),
             state: Arc::new(RwLock::new(State::Unloaded)),
+            prefetch_watcher: PrefetchWatcher::new(),
         })
     }
 
@@ -582,14 +600,70 @@ where
         keyspace_id: KeyspaceId,
         range_id: Uuid,
     ) -> Result<(), ()> {
+        // Request prefetch from the prefetching buffer
         match buffer
-            .process_prefetch_request(transaction_id, key, keyspace_id, range_id)
+            .process_prefetch_request(transaction_id, key.clone(), keyspace_id, range_id)
             .await
         {
             Some(keystate) => match keystate {
-                KeyState::Fetched => Ok(()),   // key have previously been fetched
-                KeyState::Loading => Ok(()), // key is loading TODO: Should not be returned with current implementation of prefetching_buffer
-                KeyState::Requested => Ok(()), // key has not been requested TODO: start fetch
+                KeyState::Fetched => Ok(()), // key has previously been fetched
+                KeyState::Loading => {
+                    // Key has already been requested and is loading -> wait for fetch to complete
+                    if let Some(receiver) = self
+                        .prefetch_watcher
+                        .key_state_watcher
+                        .lock()
+                        .await
+                        .get(&key)
+                    {
+                        let mut receiver = receiver.clone();
+                        while receiver.changed().await.is_ok() {
+                            if *receiver.borrow() == KeyState::Fetched {
+                                return Ok(()); // return ok once complete
+                            }
+                        }
+                    }
+                    Err(()) // Something is wrong if we got here
+                }
+                KeyState::Requested =>
+                // key has just been requested - start fetch
+                {
+                    // Update key state to loading
+                    let _ = buffer
+                        .initiate_fetch(key.clone(), keyspace_id, range_id)
+                        .await
+                        .unwrap();
+                    // Watch channel setup for this key
+                    {
+                        let mut key_state_watcher =
+                            self.prefetch_watcher.key_state_watcher.lock().await;
+                        // Create a watch channel for this key if it does not exist
+                        if !key_state_watcher.contains_key(&key) {
+                            let (tx, rx) = watch::channel(KeyState::Loading);
+                            {
+                                let mut key_state_sender =
+                                    self.prefetch_watcher.key_state_sender.lock().await;
+                                key_state_sender.insert(key.clone(), tx);
+                            }
+                            key_state_watcher.insert(key.clone(), rx);
+                        }
+                    }
+                    // Fetch from database
+                    // TODO: update unwrap to manage potential error
+                    if let Some(val) = self.prefetch_get(key.clone()).await.unwrap() {
+                        // Successfully fetched from database -> add to buffer and update records
+                        buffer.fetch_complete(key.clone(), val).await;
+                        // Notify all watchers of the state change
+                        // TODO: Use a read write lock rather than a mutex?
+                        let key_state_sender = self.prefetch_watcher.key_state_sender.lock().await;
+                        if let Some(sender) = key_state_sender.get(&key.clone()) {
+                            let _ = sender.send(KeyState::Fetched);
+                        }
+                        Ok(())
+                    } else {
+                        Err(())
+                    }
+                }
             },
             None => Err(()),
         }
@@ -752,6 +826,7 @@ mod tests {
             wal,
             epoch_provider,
             state: Arc::new(RwLock::new(State::Unloaded)),
+            prefetch_watcher: PrefetchWatcher::new(),
         });
         let rm_copy = rm.clone();
         let init_handle = tokio::spawn(async move { rm_copy.load().await.unwrap() });

@@ -23,8 +23,8 @@ pub struct PrefetchingBuffer {
     pub key_state: Arc<Mutex<HashMap<Bytes, KeyState>>>,    // stores key -> current fetch state
     pub transaction_keys: Arc<Mutex<HashMap<Uuid, BTreeSet<Bytes>>>>, // stores transaction_id -> set of requested keys
     pub key_transactions: Arc<Mutex<HashMap<Bytes, BTreeSet<Uuid>>>>, // stores key -> set of transaction_ids
-    pub key_state_watcher: HashMap<Bytes, watch::Receiver<KeyState>>, // key -> receiver for state changes
-    pub key_state_sender: HashMap<Bytes, watch::Sender<KeyState>>, // key -> sender for state changes
+    pub key_state_watcher: Arc<Mutex<HashMap<Bytes, watch::Receiver<KeyState>>>>, // key -> receiver for state changes
+    pub key_state_sender: Arc<Mutex<HashMap<Bytes, watch::Sender<KeyState>>>>, // key -> sender for state changes
 }
 
 impl PrefetchingBuffer {
@@ -34,8 +34,8 @@ impl PrefetchingBuffer {
             key_state: Arc::new(Mutex::new(HashMap::new())),
             transaction_keys: Arc::new(Mutex::new(HashMap::new())),
             key_transactions: Arc::new(Mutex::new(HashMap::new())),
-            key_state_watcher: HashMap::new(),
-            key_state_sender: HashMap::new(),
+            key_state_watcher: Arc::new(Mutex::new(HashMap::new())),
+            key_state_sender: Arc::new(Mutex::new(HashMap::new())),
         }
     }
     // TODO: fix result type
@@ -63,6 +63,7 @@ impl PrefetchingBuffer {
             // If not, add to key_state with fetch state requested
             key_state.entry(key.clone()).or_insert(KeyState::Requested);
 
+            // TODO: This can be refactured to just return key_state.get(&key)
             match key_state.get(&key) {
                 Some(KeyState::Fetched) => {
                     println!("Returning");
@@ -72,19 +73,18 @@ impl PrefetchingBuffer {
                 } // return ok
                 Some(KeyState::Loading) => {
                     // wait for fetch to complete
-                    // This entire waiting process could be moved to range_server.rs
                     println!("Fetch is loading");
-                    if let Some(receiver) = self.key_state_watcher.get(&key) {
-                        let mut receiver = receiver.clone();
-                        while receiver.changed().await.is_ok() {
-                            if *receiver.borrow() == KeyState::Fetched {
-                                println!("Fetch is done");
-                                self.print_buffer();
-                                return Some(KeyState::Fetched); // return ok once complete
-                            }
-                        }
-                    }
-                    // TODO: Something is wrong if this happened
+                    // This was moved to range_manager. TODO: Check with Tamer if this is appropriate design pattern
+                    // if let Some(receiver) = self.key_state_watcher.lock().await.get(&key) {
+                    //     let mut receiver = receiver.clone();
+                    //     while receiver.changed().await.is_ok() {
+                    //         if *receiver.borrow() == KeyState::Fetched {
+                    //             println!("Fetch is done");
+                    //             self.print_buffer();
+                    //             return Some(KeyState::Fetched); // return ok once complete
+                    //         }
+                    //     }
+                    // }
                     return Some(KeyState::Loading);
                 }
                 Some(KeyState::Requested) => {
@@ -149,49 +149,51 @@ impl PrefetchingBuffer {
         }
     }
 
-    /// Don't do fetch here - do it in range_manager.rs
-    /// Fetches the data from the database and adds it to the BTree
+    /// Logs that a transaction is currently being fetched by the database
     /// TODO: Return value and error checking
-    async fn initiate_fetch(&mut self, key: Bytes, keyspace_id: KeyspaceId, range_id: Uuid) {
+    pub async fn initiate_fetch(
+        &self,
+        key: Bytes,
+        keyspace_id: KeyspaceId,
+        range_id: Uuid,
+    ) -> Result<(), ()> {
         {
             let mut key_state = self.key_state.lock().await;
             // Update key_state to reflect beginning of fetch
             key_state.insert(key.clone(), KeyState::Loading);
         }
-        // Create a watch channel for this key if it does not exist
-        if !self.key_state_watcher.contains_key(&key) {
-            let (tx, rx) = watch::channel(KeyState::Loading);
-            self.key_state_sender.insert(key.clone(), tx);
-            self.key_state_watcher.insert(key.clone(), rx);
-        }
-        // TODO: Read key from the database
-        // let value = self
-        //     .get_from_database(key.clone(), keyspace_id, range_id)
-        //     .await
-        //     .unwrap()
-        //     .unwrap();
+        // This was moved to range_manager. TODO: Check with Tamer if this is appropriate design pattern
+        // {
+        //     let mut key_state_watcher = self.key_state_watcher.lock().await;
+        //     // Create a watch channel for this key if it does not exist
+        //     if !key_state_watcher.contains_key(&key) {
+        //         let (tx, rx) = watch::channel(KeyState::Loading);
+        //         {
+        //             let mut key_state_sender = self.key_state_sender.lock().await;
+        //             key_state_sender.insert(key.clone(), tx);
+        //         }
+        //         key_state_watcher.insert(key.clone(), rx);
+        //     }
+        // }
+        Ok(())
     }
 
-    async fn fetch_complete(&mut self, key: Bytes, value: Bytes) {
+    /// Once fetch from database is complete, adds they key value to the Btree
+    /// and updates the key state to Fetched. Notifies any waiting requesters
+    /// that the fetch is complete
+    pub async fn fetch_complete(&self, key: Bytes, value: Bytes) {
         let mut prefetch_store = self.prefetch_store.lock().await;
         let mut key_state = self.key_state.lock().await;
+        let key_state_sender = self.key_state_sender.lock().await;
         // Check if key is in BTree. If not, add it
         prefetch_store.entry(key.clone()).or_insert(value);
         // Update key_state to reflect fetch completion
         key_state.insert(key.clone(), KeyState::Fetched);
         // Notify all watchers of the state change
-        if let Some(sender) = self.key_state_sender.get(&key) {
-            let _ = sender.send(KeyState::Fetched);
-        }
-    }
-
-    async fn get_from_database(
-        &self,
-        key: Bytes,
-        keyspace_id: KeyspaceId,
-        range_id: Uuid,
-    ) -> Result<Option<Bytes>, Error> {
-        Ok(Some(Bytes::from("dummy value for now")))
+        // This was moved to range_manager. TODO: Check with Tamer if this is appropriate design pattern
+        // if let Some(sender) = key_state_sender.get(&key) {
+        //     let _ = sender.send(KeyState::Fetched);
+        // }
     }
 
     /// Once transaction is complete, transaction calls this function to undo prefetch
