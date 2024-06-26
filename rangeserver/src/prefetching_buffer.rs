@@ -61,7 +61,7 @@ impl PrefetchingBuffer {
             // If not, add to key_state with fetch state requested
             key_state.entry(key.clone()).or_insert(KeyState::Requested);
 
-            // TODO: This can be refactured to just return key_state.get(&key)
+            // TODO: This can be refactored to just return key_state.get(&key)
             match key_state.get(&key) {
                 Some(KeyState::Fetched) => {
                     println!("Returning");

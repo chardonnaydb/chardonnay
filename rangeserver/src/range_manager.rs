@@ -599,10 +599,9 @@ where
         buffer: &Arc<PrefetchingBuffer>,
         transaction_id: Uuid,
         key: Bytes,
-        keyspace_id: KeyspaceId,
-        range_id: Uuid,
     ) -> Result<(), ()> {
         // Request prefetch from the prefetching buffer
+        // TODO: Spawn a new tokio thread here? Not necessary because this is already on a new thread right?
         match buffer
             .process_prefetch_request(transaction_id, key.clone())
             .await

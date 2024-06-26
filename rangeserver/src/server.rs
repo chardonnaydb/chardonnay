@@ -58,12 +58,21 @@ where
         println!("Got a request: {:?}", request);
 
         // Extract transaction_id, requested key, keyspace_id, and range_id from the request
-        // TODO: Error handling if the input range / keyspace is not in the proper format
-        let transaction_id = Uuid::parse_str(&request.get_ref().transaction_id).unwrap();
+        let transaction_id = Uuid::parse_str(&request.get_ref().transaction_id).map_err(|e| {
+            TStatus::internal(format!(
+                "Transaction id is not in the correct format: {:?}",
+                e
+            ))
+        })?;
+
         let key = Bytes::from(request.get_ref().range_key[0].key.clone());
         let range = request.get_ref().range_key[0].range.as_ref().unwrap();
-        let keyspace_id = KeyspaceId::new(Uuid::parse_str(&range.keyspace_id).unwrap());
-        let range_id = Uuid::parse_str(&range.range_id).unwrap();
+        let keyspace_id = KeyspaceId::new(Uuid::parse_str(&range.keyspace_id).map_err(|e| {
+            TStatus::internal(format!("Keyspace id is not in the correct format: {:?}", e))
+        })?);
+        let range_id = Uuid::parse_str(&range.range_id).map_err(|e| {
+            TStatus::internal(format!("Range id is not in the correct format: {:?}", e))
+        })?;
 
         let full_range_id = FullRangeId {
             keyspace_id: keyspace_id,
@@ -74,25 +83,31 @@ where
             .parent_server
             .maybe_load_and_get_range(&full_range_id)
             .await
-            .map_err(|e| TStatus::internal(format!("Failed to load range: {:?}", e)))
-            .unwrap();
+            .map_err(|e| TStatus::internal(format!("Failed to load range: {:?}", e)))?;
 
-        // Look at range Id, get range manager with maybe_load_and_get_range, and call function in range manager to start processing
+        // Clone buffer reference to pass into new Tokio thread
+        let buffer = Arc::clone(&self.buffer);
+
         // Call process_prefetch_request in range_manager.rs
-        match range_manager
-            .process_prefetch(&self.buffer, transaction_id, key, keyspace_id, range_id)
-            .await
-        {
-            Ok(_) => {
-                let reply = PrefetchResponse {
-                    status: format!("Prefetch request processed successfully"),
-                };
-                Ok(Response::new(reply)) // Send back response
+        // Spawn new thread
+        let handle = tokio::spawn(async move {
+            match range_manager
+                .process_prefetch(&buffer, transaction_id, key)
+                .await
+            {
+                Ok(_) => {
+                    let reply = PrefetchResponse {
+                        status: format!("Prefetch request processed successfully"),
+                    };
+                    Ok(Response::new(reply)) // Send back response
+                }
+                Err(_) => {
+                    Err(TStatus::internal("Failed to process prefetch request"))
+                    // Handle error
+                }
             }
-            Err(_) => {
-                Err(TStatus::internal("Failed to process prefetch request")) // Handle error
-            }
-        }
+        });
+        handle.await.unwrap()
     }
 }
 
