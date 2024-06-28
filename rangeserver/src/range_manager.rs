@@ -607,47 +607,14 @@ where
             .await
         {
             Some(keystate) => match keystate {
-                KeyState::Fetched => Ok(()), // key has previously been fetched
-                KeyState::Loading => {
-                    // Key has already been requested and is loading -> wait for fetch to complete
-                    if let Some(receiver) = self
-                        .prefetch_watcher
-                        .key_state_watcher
-                        .lock()
-                        .await
-                        .get(&key)
-                    {
-                        let mut receiver = receiver.clone();
-                        while receiver.changed().await.is_ok() {
-                            if *receiver.borrow() == KeyState::Fetched {
-                                return Ok(()); // return ok once complete
-                            }
-                        }
-                    }
-                    Err(()) // Something is wrong if we got here
-                }
+                KeyState::Fetched => Ok(()),  // key has previously been fetched
+                KeyState::Loading => Err(()), // Something is wrong if loading was returned
                 KeyState::Requested =>
                 // key has just been requested - start fetch
                 {
-                    // Update key state to loading
-                    let _ = buffer.initiate_fetch(key.clone()).await.unwrap();
-                    // Watch channel setup for this key
-                    {
-                        let mut key_state_watcher =
-                            self.prefetch_watcher.key_state_watcher.lock().await;
-                        // Create a watch channel for this key if it does not exist
-                        if !key_state_watcher.contains_key(&key) {
-                            let (tx, rx) = watch::channel(KeyState::Loading);
-                            {
-                                let mut key_state_sender =
-                                    self.prefetch_watcher.key_state_sender.lock().await;
-                                key_state_sender.insert(key.clone(), tx);
-                            }
-                            key_state_watcher.insert(key.clone(), rx);
-                        }
-                    }
                     // Fetch from database TODO: update unwrap to manage potential error
                     if let Some(val) = self.prefetch_get(key.clone()).await.unwrap() {
+                        // TODO: If prefetch_get fails, need to unblock any watchers
                         // Successfully fetched from database -> add to buffer and update records
                         buffer.fetch_complete(key.clone(), val).await;
                         // Notify all watchers of the state change

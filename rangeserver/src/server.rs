@@ -85,29 +85,22 @@ where
             .await
             .map_err(|e| TStatus::internal(format!("Failed to load range: {:?}", e)))?;
 
-        // Clone buffer reference to pass into new Tokio thread
-        let buffer = Arc::clone(&self.buffer);
-
         // Call process_prefetch_request in range_manager.rs
-        // Spawn new thread
-        let handle = tokio::spawn(async move {
-            match range_manager
-                .process_prefetch(&buffer, transaction_id, key)
-                .await
-            {
-                Ok(_) => {
-                    let reply = PrefetchResponse {
-                        status: format!("Prefetch request processed successfully"),
-                    };
-                    Ok(Response::new(reply)) // Send back response
-                }
-                Err(_) => {
-                    Err(TStatus::internal("Failed to process prefetch request"))
-                    // Handle error
-                }
+        match range_manager
+            .process_prefetch(&self.buffer, transaction_id, key)
+            .await
+        {
+            Ok(_) => {
+                let reply = PrefetchResponse {
+                    status: format!("Prefetch request processed successfully"),
+                };
+                Ok(Response::new(reply)) // Send back response
             }
-        });
-        handle.await.unwrap()
+            Err(_) => {
+                Err(TStatus::internal("Failed to process prefetch request"))
+                // Handle error
+            }
+        }
     }
 }
 

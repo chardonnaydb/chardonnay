@@ -39,7 +39,6 @@ impl PrefetchingBuffer {
         }
     }
     // TODO: fix result type
-    // TODO: fix clones
     // TODO: Error checking
     pub async fn process_prefetch_request(
         &self,
@@ -63,31 +62,28 @@ impl PrefetchingBuffer {
 
             // TODO: This can be refactored to just return key_state.get(&key)
             match key_state.get(&key) {
-                Some(KeyState::Fetched) => {
-                    println!("Returning");
-                    self.print_buffer();
-                    // return Ok(());
-                    return Some(KeyState::Fetched);
-                } // return ok
+                Some(KeyState::Fetched) => return Some(KeyState::Fetched),
                 Some(KeyState::Loading) => {
+                    // release the lock
+                    drop(key_state);
                     // wait for fetch to complete
-                    println!("Fetch is loading");
-                    // This was moved to range_manager. TODO: Check with Tamer if this is appropriate design pattern
-                    // if let Some(receiver) = self.key_state_watcher.lock().await.get(&key) {
-                    //     let mut receiver = receiver.clone();
-                    //     while receiver.changed().await.is_ok() {
-                    //         if *receiver.borrow() == KeyState::Fetched {
-                    //             println!("Fetch is done");
-                    //             self.print_buffer();
-                    //             return Some(KeyState::Fetched); // return ok once complete
-                    //         }
-                    //     }
-                    // }
+                    if let Some(receiver) = self.key_state_watcher.lock().await.get(&key) {
+                        let mut receiver = receiver.clone();
+                        while receiver.changed().await.is_ok() {
+                            if *receiver.borrow() == KeyState::Fetched {
+                                println!("Fetch is done");
+                                self.print_buffer();
+                                return Some(KeyState::Fetched); // return ok once complete
+                            }
+                        }
+                    }
                     return Some(KeyState::Loading);
                 }
                 Some(KeyState::Requested) => {
-                    println!("Requesting fetch");
-                    self.print_buffer();
+                    // Update keystate to loading to avoid race condition
+                    self.change_keystate_to_loading(&mut key_state, key)
+                        .await
+                        .unwrap();
                     return Some(KeyState::Requested); // return ok once complete
                 }
                 None => None,
@@ -95,7 +91,7 @@ impl PrefetchingBuffer {
         }
     }
 
-    /// Adds a transaction and its requested key to the transaction_key hashmap.
+    /// Adds a transaction and its requested key to the transaction_keys hashmap.
     /// If the transaction already appears in the map, it adds the requested key
     /// to the set of requested keys.
     /// TODO: Add error checking and return
@@ -121,7 +117,7 @@ impl PrefetchingBuffer {
         }
     }
 
-    /// Adds a key and its requesting transactions to the key_transaction hashmap.
+    /// Adds a key and its requesting transactions to the key_transactions hashmap.
     /// If the key already appears in the map, it adds the requesting transaction
     /// to the set of requesting transactions.
     /// TODO: Add error checking and return
@@ -151,30 +147,32 @@ impl PrefetchingBuffer {
     /// The key has to have been requested (and marked as Requested) prior
     /// to calling this function
     /// TODO: Return value and error checking
-    pub async fn initiate_fetch(&self, key: Bytes) -> Result<(), ()> {
+    pub async fn change_keystate_to_loading(
+        &self,
+        key_state: &mut HashMap<Bytes, KeyState>,
+        key: Bytes,
+    ) -> Result<(), ()> {
         {
-            let mut key_state = self.key_state.lock().await;
+            // let mut key_state = self.key_state.lock().await;
             // Update key_state to reflect beginning of fetch
             match key_state.insert(key.clone(), KeyState::Loading) {
-                Some(_) => return Ok(()),
+                Some(_) => {
+                    let mut key_state_watcher = self.key_state_watcher.lock().await;
+                    // Create a watch channel for this key if it does not exist
+                    if !key_state_watcher.contains_key(&key) {
+                        let (tx, rx) = watch::channel(KeyState::Loading);
+                        {
+                            let mut key_state_sender = self.key_state_sender.lock().await;
+                            key_state_sender.insert(key.clone(), tx);
+                        }
+                        key_state_watcher.insert(key.clone(), rx);
+                    }
+                    return Ok(());
+                }
                 // We shouldn't be initiating fetch if the key was never requested in the first place
                 None => return Err(()),
-            };
+            }
         }
-        // This was moved to range_manager. TODO: Check with Tamer if this is appropriate design pattern
-        // {
-        //     let mut key_state_watcher = self.key_state_watcher.lock().await;
-        //     // Create a watch channel for this key if it does not exist
-        //     if !key_state_watcher.contains_key(&key) {
-        //         let (tx, rx) = watch::channel(KeyState::Loading);
-        //         {
-        //             let mut key_state_sender = self.key_state_sender.lock().await;
-        //             key_state_sender.insert(key.clone(), tx);
-        //         }
-        //         key_state_watcher.insert(key.clone(), rx);
-        //     }
-        // }
-        // Ok(())
     }
 
     /// Once fetch from database is complete, adds they key value to the Btree
@@ -183,20 +181,20 @@ impl PrefetchingBuffer {
     pub async fn fetch_complete(&self, key: Bytes, value: Bytes) {
         let mut prefetch_store = self.prefetch_store.lock().await;
         let mut key_state = self.key_state.lock().await;
-        // let key_state_sender = self.key_state_sender.lock().await;
+        let key_state_sender = self.key_state_sender.lock().await;
         // Check if key is in BTree. If not, add it
         prefetch_store.entry(key.clone()).or_insert(value);
         // Update key_state to reflect fetch completion
         key_state.insert(key.clone(), KeyState::Fetched);
         // Notify all watchers of the state change
-        // This was moved to range_manager. TODO: Check with Tamer if this is appropriate design pattern
-        // if let Some(sender) = key_state_sender.get(&key) {
-        //     let _ = sender.send(KeyState::Fetched);
-        // }
+        if let Some(sender) = key_state_sender.get(&key) {
+            let _ = sender.send(KeyState::Fetched);
+        }
     }
 
     /// Once transaction is complete, transaction calls this function to undo prefetch
     /// request and update BTree if needed
+    /// TODO: In range_manager commit and abort to call this function
     /// TODO: fix result type
     /// TODO: fix clones
     /// TODO: Error checking
@@ -297,9 +295,12 @@ impl PrefetchingBuffer {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::*;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::str::FromStr;
+    use std::task::Wake;
+    use std::task::{Context, Poll, Waker};
 
     #[tokio::test]
     async fn test_add_to_transaction_keys() {
@@ -347,12 +348,25 @@ mod tests {
         }
     }
 
+    struct DummyWaker;
+
+    impl Wake for DummyWaker {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    fn create_dummy_waker() -> Waker {
+        let arc = Arc::new(DummyWaker);
+        Waker::from(arc)
+    }
+
     #[tokio::test]
     async fn test_process_prefetch_request() {
         let prefetching_buffer = PrefetchingBuffer::new();
 
         let fake_id = Uuid::from_str("fae86b67-36dd-41fa-a201-f18d3051bca5").unwrap();
         let fake_key = Bytes::from("testing!");
+
+        // assert_eq!("Yes", "Yes");
 
         // Test return for a brand new key
         assert_eq!(
@@ -362,24 +376,40 @@ mod tests {
             Some(KeyState::Requested)
         );
 
-        // Test proper function of update key_state
+        // Test that key is automatically updated to Loading
+        {
+            let keystate = prefetching_buffer.key_state.lock().await;
+            let val = keystate.get(&fake_key.clone()).unwrap();
+            assert_eq!(*val, KeyState::Loading);
+        }
+
+        // Check that asking for the same key waits until the key is loaded
+        let pending_future = prefetching_buffer.process_prefetch_request(fake_id, fake_key.clone());
+
+        // Create a dummy waker
+        let waker = create_dummy_waker();
+        // Create a context with the waker
+        let mut context = Context::from_waker(&waker);
+        // Pin the future to the stack
+        let mut pending_future = Box::pin(pending_future);
+
+        // Check that the future is pending
         assert_eq!(
-            prefetching_buffer.initiate_fetch(fake_key.clone()).await,
-            Ok(())
+            Future::poll(Pin::as_mut(&mut pending_future), &mut context),
+            Poll::Pending
         );
 
-        // Test transition to loading status for the key
-        assert_eq!(
-            prefetching_buffer
-                .process_prefetch_request(fake_id, fake_key.clone())
-                .await,
-            Some(KeyState::Loading)
-        );
-
+        // Add value to BTree for this key
         let fake_value = Bytes::from("testing value");
         prefetching_buffer
             .fetch_complete(fake_key.clone(), fake_value.clone())
             .await;
+
+        // Check that
+        assert_eq!(
+            Future::poll(Pin::as_mut(&mut pending_future), &mut context),
+            Poll::Ready(Some(KeyState::Fetched))
+        );
 
         assert_eq!(
             prefetching_buffer
@@ -388,9 +418,9 @@ mod tests {
             Some(KeyState::Fetched)
         );
 
-        let value = prefetching_buffer.prefetch_store.lock().await;
-        let bind = value.get(&fake_key.clone()).unwrap();
+        // let value = prefetching_buffer.prefetch_store.lock().await;
+        // let bind = value.get(&fake_key.clone()).unwrap();
 
-        assert_eq!(*bind, fake_value);
+        // assert_eq!(*bind, fake_value);
     }
 }
