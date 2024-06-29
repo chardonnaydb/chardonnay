@@ -26,10 +26,6 @@ use flatbuf::rangeserver_flatbuffers::range_server::*;
 use proto::rangeserver::range_server_server::{RangeServer, RangeServerServer};
 use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
 
-pub mod rangeserver {
-    include!("../../proto/target/rangeserver/rangeserver.rs");
-}
-
 #[derive(Debug, Default)]
 struct ProtoServer {}
 
@@ -652,7 +648,7 @@ where
             .await??;
 
         tokio::spawn(async move {
-            let _ = Self::network_server_loop(server, fast_network, cancellation_token);
+            let _ = Self::network_server_loop(server, fast_network, cancellation_token).await;
             println!("Network server loop exited!")
         });
         Ok(res)
