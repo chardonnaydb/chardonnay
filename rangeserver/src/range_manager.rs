@@ -1,3 +1,4 @@
+use crate::prefetching_buffer;
 use crate::{
     epoch_provider::EpochProvider, error::Error, key_version::KeyVersion, storage::RangeInfo,
     storage::Storage, transaction_abort_reason::TransactionAbortReason,
@@ -168,7 +169,7 @@ where
     epoch_provider: Arc<E>,
     wal: Mutex<W>,
     state: Arc<RwLock<State>>,
-    prefetch_watcher: PrefetchWatcher,
+    prefetching_buffer: Arc<PrefetchingBuffer>,
 }
 
 pub struct GetResult {
@@ -179,20 +180,6 @@ pub struct GetResult {
 pub struct PrepareResult {
     pub highest_known_epoch: u64,
     pub epoch_lease: (u64, u64),
-}
-
-struct PrefetchWatcher {
-    key_state_watcher: Arc<Mutex<HashMap<Bytes, watch::Receiver<KeyState>>>>, // key -> receiver for state changes
-    key_state_sender: Arc<Mutex<HashMap<Bytes, watch::Sender<KeyState>>>>, // key -> sender for state changes
-}
-
-impl PrefetchWatcher {
-    pub fn new() -> Self {
-        PrefetchWatcher {
-            key_state_watcher: Arc::new(Mutex::new(HashMap::new())),
-            key_state_sender: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
 }
 
 impl<S, E, W> RangeManager<S, E, W>
@@ -207,6 +194,7 @@ where
         storage: Arc<S>,
         epoch_provider: Arc<E>,
         wal: W,
+        prefetching_buffer: Arc<PrefetchingBuffer>,
     ) -> Arc<Self> {
         Arc::new(RangeManager {
             range_id,
@@ -215,7 +203,7 @@ where
             epoch_provider,
             wal: Mutex::new(wal),
             state: Arc::new(RwLock::new(State::Unloaded)),
-            prefetch_watcher: PrefetchWatcher::new(),
+            prefetching_buffer,
         })
     }
 
@@ -555,9 +543,14 @@ where
                             let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
 
                             self.storage
-                                .upsert(self.range_id, key, val, version)
+                                .upsert(self.range_id, key.clone(), val.clone(), version)
                                 .await
                                 .map_err(Error::from_storage_error)?;
+
+                            // Before releasing the lock, update the prefetch buffer if this key has been requested
+                            // by a prefetch call
+                            // let buffer = self.prefetching_buffer.clone();
+                            // buffer.process_transaction_complete(tx.id, key, val);
                         }
                     }
                     for del in prepare_record.deletes().iter() {
@@ -614,15 +607,9 @@ where
                 {
                     // Fetch from database TODO: update unwrap to manage potential error
                     if let Some(val) = self.prefetch_get(key.clone()).await.unwrap() {
-                        // TODO: If prefetch_get fails, need to unblock any watchers
                         // Successfully fetched from database -> add to buffer and update records
                         buffer.fetch_complete(key.clone(), val).await;
-                        // Notify all watchers of the state change
                         // TODO: Use a read write lock rather than a mutex?
-                        let key_state_sender = self.prefetch_watcher.key_state_sender.lock().await;
-                        if let Some(sender) = key_state_sender.get(&key.clone()) {
-                            let _ = sender.send(KeyState::Fetched);
-                        }
                         Ok(())
                     } else {
                         Err(())
@@ -772,6 +759,7 @@ mod tests {
         let storage_context: crate::storage::cassandra::tests::TestContext =
             crate::storage::cassandra::tests::init().await;
         let cassandra = storage_context.cassandra.clone();
+        let prefetching_buffer = Arc::new(PrefetchingBuffer::new());
         let range_id = FullRangeId {
             keyspace_id: storage_context.keyspace_id,
             range_id: storage_context.range_id,
@@ -790,7 +778,7 @@ mod tests {
             wal,
             epoch_provider,
             state: Arc::new(RwLock::new(State::Unloaded)),
-            prefetch_watcher: PrefetchWatcher::new(),
+            prefetching_buffer,
         });
         let rm_copy = rm.clone();
         let init_handle = tokio::spawn(async move { rm_copy.load().await.unwrap() });

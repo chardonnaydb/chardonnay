@@ -117,6 +117,7 @@ where
     // TODO: parameterize the WAL implementation too.
     loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, E, InMemoryWal>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
+    prefetching_buffer: Arc<PrefetchingBuffer>,
 }
 
 type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
@@ -142,6 +143,7 @@ where
             bg_runtime,
             loaded_ranges: RwLock::new(HashMap::new()),
             transaction_table: RwLock::new(HashMap::new()),
+            prefetching_buffer: Arc::new(PrefetchingBuffer::new()),
         })
     }
 
@@ -216,6 +218,7 @@ where
                         self.storage.clone(),
                         self.epoch_provider.clone(),
                         InMemoryWal::new(),
+                        self.prefetching_buffer.clone(),
                     );
                     (range_table).insert(id.range_id, rm.clone());
                     drop(range_table);
@@ -687,10 +690,10 @@ where
             .unwrap();
 
         // Create buffer to hold prefetch requests
-        let prefetching_buffer = PrefetchingBuffer::new();
-        let buffer = Arc::new(prefetching_buffer);
+        // let prefetching_buffer = PrefetchingBuffer::new();
+        let buffer = &server.prefetching_buffer;
         let prefetch = ProtoServer {
-            buffer,
+            buffer: buffer.clone(),
             parent_server: server.clone(),
         };
 

@@ -405,12 +405,13 @@ mod tests {
             .fetch_complete(fake_key.clone(), fake_value.clone())
             .await;
 
-        // Check that
+        // Check that the future is now marked as ready
         assert_eq!(
             Future::poll(Pin::as_mut(&mut pending_future), &mut context),
             Poll::Ready(Some(KeyState::Fetched))
         );
 
+        // Check that processing a new request for the same key returns it as fetched
         assert_eq!(
             prefetching_buffer
                 .process_prefetch_request(fake_id.clone(), fake_key.clone())
@@ -418,9 +419,10 @@ mod tests {
             Some(KeyState::Fetched)
         );
 
-        // let value = prefetching_buffer.prefetch_store.lock().await;
-        // let bind = value.get(&fake_key.clone()).unwrap();
+        // Check that the value in the BTree for that key is correct
+        let value = prefetching_buffer.prefetch_store.lock().await;
+        let bind = value.get(&fake_key.clone()).unwrap();
 
-        // assert_eq!(*bind, fake_value);
+        assert_eq!(*bind, fake_value);
     }
 }

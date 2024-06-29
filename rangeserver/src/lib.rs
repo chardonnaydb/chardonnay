@@ -2,7 +2,7 @@ pub mod epoch_provider;
 mod error;
 pub mod for_testing;
 mod key_version;
-mod prefetching_buffer;
+pub mod prefetching_buffer;
 mod range_manager;
 pub mod server;
 pub mod storage;
