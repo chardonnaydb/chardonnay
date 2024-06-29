@@ -137,7 +137,7 @@ pub mod warden_client {
             self
         }
         /// Called by a range server to register itself with its regional warden.
-        /// Establishes a long-lived streamfor the range server to continuously receive
+        /// Establishes a long-lived stream for the range server to continuously receive
         /// assignment updates from the warden.
         pub async fn register_range_server(
             &mut self,
@@ -180,7 +180,7 @@ pub mod warden_server {
             + Send
             + 'static;
         /// Called by a range server to register itself with its regional warden.
-        /// Establishes a long-lived streamfor the range server to continuously receive
+        /// Establishes a long-lived stream for the range server to continuously receive
         /// assignment updates from the warden.
         async fn register_range_server(
             &self,

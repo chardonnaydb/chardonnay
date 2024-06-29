@@ -1,7 +1,10 @@
 use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
 use common::util;
-use common::{full_range_id::FullRangeId, host_info::HostInfo, record::Record};
+use common::{
+    epoch_lease::EpochLease, full_range_id::FullRangeId, host_info::HostInfo, record::Record,
+};
+use flatbuf::rangeserver_flatbuffers::range_server::Record as FlatbufRecord;
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use flatbuffers::FlatBufferBuilder;
@@ -12,6 +15,11 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+pub struct PrepareOk {
+    pub highest_known_epoch: u64,
+    pub epoch_lease: EpochLease,
+}
 
 // Provides an async rpc interface to a specific range server.
 pub struct RangeClient {
@@ -90,9 +98,9 @@ impl RangeClient {
             let mut outstanding_requests = self.outstanding_requests.lock().await;
             outstanding_requests.insert(req_id, tx);
         }
-        let get_record_bytes = Bytes::copy_from_slice(fbb.finished_data());
+        let get_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
         self.fast_network
-            .send(self.range_server_info.address, get_record_bytes)
+            .send(self.range_server_info.address, get_request_bytes)
             .unwrap();
         let response = rx.await.unwrap();
         let msg = response.to_vec();
@@ -111,6 +119,195 @@ impl RangeClient {
                     }
                 }
                 return Ok(result);
+            }
+            _ => return Err(RangeServerError::InvalidRequestFormat),
+        }
+    }
+
+    pub async fn prepare_transaction(
+        self,
+        tx: Arc<TransactionInfo>,
+        range_id: &FullRangeId,
+        has_reads: bool,
+        writes: &Vec<Record>,
+        deletes: &Vec<Bytes>,
+    ) -> Result<PrepareOk, RangeServerError> {
+        // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
+        // TODO: too much copying :(
+        let req_id = Uuid::new_v4();
+        let mut fbb = FlatBufferBuilder::new();
+        let transaction_id = Some(Uuidu128::create(
+            &mut fbb,
+            &util::flatbuf::serialize_uuid(tx.id),
+        ));
+        let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &range_id));
+        let request_id = Some(Uuidu128::create(
+            &mut fbb,
+            &util::flatbuf::serialize_uuid(req_id),
+        ));
+        let mut deletes_vector = Vec::new();
+        for key in deletes {
+            let k = Some(fbb.create_vector(key.to_vec().as_slice()));
+            let key = Key::create(&mut fbb, &KeyArgs { k });
+            deletes_vector.push(key)
+        }
+        let deletes = Some(fbb.create_vector(&deletes_vector));
+        let mut puts_vector = Vec::new();
+        for record in writes {
+            let k = Some(fbb.create_vector(record.key.to_vec().as_slice()));
+            let key = Key::create(&mut fbb, &KeyArgs { k });
+            let value = fbb.create_vector(record.val.to_vec().as_slice());
+            puts_vector.push(FlatbufRecord::create(
+                &mut fbb,
+                &RecordArgs {
+                    key: Some(key),
+                    value: Some(value),
+                },
+            ));
+        }
+        let puts = Some(fbb.create_vector(&puts_vector));
+        let fbb_root = PrepareRequest::create(
+            &mut fbb,
+            &PrepareRequestArgs {
+                request_id,
+                transaction_id,
+                range_id,
+                has_reads,
+                puts,
+                deletes,
+            },
+        );
+        fbb.finish(fbb_root, None);
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut outstanding_requests = self.outstanding_requests.lock().await;
+            outstanding_requests.insert(req_id, tx);
+        }
+        let prepare_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
+        self.fast_network
+            .send(self.range_server_info.address, prepare_request_bytes)
+            .unwrap();
+        let response = rx.await.unwrap();
+        let msg = response.to_vec();
+        let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
+        match envelope.type_() {
+            MessageType::Prepare => {
+                let response_msg =
+                    flatbuffers::root::<PrepareResponse>(envelope.bytes().unwrap().bytes())
+                        .unwrap();
+                let () = rangeserver::error::Error::from_flatbuf_status(response_msg.status())?;
+                let epoch_lease = response_msg.epoch_lease().unwrap();
+                return Ok(PrepareOk {
+                    highest_known_epoch: response_msg.highest_known_epoch(),
+                    epoch_lease: EpochLease {
+                        lower_bound_inclusive: epoch_lease.lower_bound_inclusive(),
+                        upper_bound_inclusive: epoch_lease.upper_bound_inclusive(),
+                    },
+                });
+            }
+            _ => return Err(RangeServerError::InvalidRequestFormat),
+        }
+    }
+
+    pub async fn abort_transaction(
+        self,
+        tx: Arc<TransactionInfo>,
+        range_id: &FullRangeId,
+    ) -> Result<(), RangeServerError> {
+        // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
+        // TODO: too much copying :(
+        let req_id = Uuid::new_v4();
+        let mut fbb = FlatBufferBuilder::new();
+        let transaction_id = Some(Uuidu128::create(
+            &mut fbb,
+            &util::flatbuf::serialize_uuid(tx.id),
+        ));
+        let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &range_id));
+        let request_id = Some(Uuidu128::create(
+            &mut fbb,
+            &util::flatbuf::serialize_uuid(req_id),
+        ));
+        let fbb_root = AbortRequest::create(
+            &mut fbb,
+            &AbortRequestArgs {
+                request_id,
+                transaction_id,
+                range_id,
+            },
+        );
+        fbb.finish(fbb_root, None);
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut outstanding_requests = self.outstanding_requests.lock().await;
+            outstanding_requests.insert(req_id, tx);
+        }
+        let abort_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
+        self.fast_network
+            .send(self.range_server_info.address, abort_request_bytes)
+            .unwrap();
+        let response = rx.await.unwrap();
+        let msg = response.to_vec();
+        let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
+        match envelope.type_() {
+            MessageType::Abort => {
+                let response_msg =
+                    flatbuffers::root::<AbortResponse>(envelope.bytes().unwrap().bytes()).unwrap();
+                let () = rangeserver::error::Error::from_flatbuf_status(response_msg.status())?;
+
+                return Ok(());
+            }
+            _ => return Err(RangeServerError::InvalidRequestFormat),
+        }
+    }
+
+    pub async fn commit_transaction(
+        self,
+        tx: Arc<TransactionInfo>,
+        range_id: &FullRangeId,
+        epoch: u64,
+    ) -> Result<(), RangeServerError> {
+        // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
+        // TODO: too much copying :(
+        let req_id = Uuid::new_v4();
+        let mut fbb = FlatBufferBuilder::new();
+        let transaction_id = Some(Uuidu128::create(
+            &mut fbb,
+            &util::flatbuf::serialize_uuid(tx.id),
+        ));
+        let range_id = Some(util::flatbuf::serialize_range_id(&mut fbb, &range_id));
+        let request_id = Some(Uuidu128::create(
+            &mut fbb,
+            &util::flatbuf::serialize_uuid(req_id),
+        ));
+        let fbb_root = CommitRequest::create(
+            &mut fbb,
+            &CommitRequestArgs {
+                request_id,
+                transaction_id,
+                range_id,
+                epoch,
+                vid: 0,
+            },
+        );
+        fbb.finish(fbb_root, None);
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut outstanding_requests = self.outstanding_requests.lock().await;
+            outstanding_requests.insert(req_id, tx);
+        }
+        let commit_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
+        self.fast_network
+            .send(self.range_server_info.address, commit_request_bytes)
+            .unwrap();
+        let response = rx.await.unwrap();
+        let msg = response.to_vec();
+        let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
+        match envelope.type_() {
+            MessageType::Commit => {
+                let response_msg =
+                    flatbuffers::root::<CommitResponse>(envelope.bytes().unwrap().bytes()).unwrap();
+                let () = rangeserver::error::Error::from_flatbuf_status(response_msg.status())?;
+                return Ok(());
             }
             _ => return Err(RangeServerError::InvalidRequestFormat),
         }
