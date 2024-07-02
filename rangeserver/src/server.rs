@@ -194,7 +194,7 @@ where
     async fn get_inner(
         &self,
         request: GetRequest<'_>,
-    ) -> Result<(i64, HashMap<Bytes, Bytes>), Error> {
+    ) -> Result<(i64, HashMap<Bytes, Option<Bytes>>), Error> {
         let range_id = match request.range_id() {
             None => return Err(Error::InvalidRequestFormat),
             Some(id) => id,
@@ -216,7 +216,7 @@ where
         let rm = self.maybe_load_and_get_range(&range_id).await?;
         let tx = self.get_transaction_info(transaction_id).await?;
         let mut leader_sequence_number: i64 = 0;
-        let mut reads: HashMap<Bytes, Bytes> = HashMap::new();
+        let mut reads: HashMap<Bytes, Option<Bytes>> = HashMap::new();
 
         // Execute the reads
         // TODO: consider providing a batch API on the RM.
@@ -226,9 +226,12 @@ where
                 let key = Bytes::copy_from_slice(key.k().unwrap().bytes());
                 let get_result = rm.get(tx.clone(), key.clone()).await?;
                 match get_result.val {
-                    None => (),
+                    None => {
+                        reads.insert(key, None);
+                        ()
+                    }
                     Some(val) => {
-                        reads.insert(key, val);
+                        reads.insert(key, Some(val));
                         ()
                     }
                 };
@@ -274,12 +277,15 @@ where
                         for (k, v) in reads {
                             let k = Some(fbb.create_vector(k.to_vec().as_slice()));
                             let key = Key::create(&mut fbb, &KeyArgs { k });
-                            let value = fbb.create_vector(v.to_vec().as_slice());
+                            let value = match v {
+                                None => None,
+                                Some(v) => Some(fbb.create_vector(v.to_vec().as_slice())),
+                            };
                             records_vector.push(Record::create(
                                 &mut fbb,
                                 &RecordArgs {
                                     key: Some(key),
-                                    value: Some(value),
+                                    value: value,
                                 },
                             ));
                         }
@@ -580,26 +586,30 @@ where
         cancellation_token: CancellationToken,
     ) {
         let mut network_receiver = fast_network.listen_default();
-        let () = tokio::select! {
-            () = cancellation_token.cancelled() => {
-                return ()
-            }
-            maybe_message = network_receiver.recv() => {
-                match maybe_message {
-                    None => {
-                        println!("fast network closed unexpectedly!");
-                        cancellation_token.cancel()
-                    }
-                    Some((sender, msg)) => {
-                        tokio::spawn(async move{
-                            let _ = Self::handle_message(server, fast_network, sender, msg).await;
-                            // TODO log any error here.
-                        });
+        loop {
+            let () = tokio::select! {
+                () = cancellation_token.cancelled() => {
+                    return ()
+                }
+                maybe_message = network_receiver.recv() => {
+                    match maybe_message {
+                        None => {
+                            println!("fast network closed unexpectedly!");
+                            cancellation_token.cancel()
+                        }
+                        Some((sender, msg)) => {
+                            let server = server.clone();
+                            let fast_network = fast_network.clone();
+                            tokio::spawn(async move{
+                                let _ = Self::handle_message(server, fast_network, sender, msg).await;
+                                // TODO log any error here.
+                            });
 
+                        }
                     }
                 }
-            }
-        };
+            };
+        }
     }
 
     pub async fn start(
@@ -682,14 +692,14 @@ pub mod tests {
         fast_network: Arc<dyn FastNetwork>,
         identity: String,
         mock_warden: MockWarden,
-        storage_context: crate::storage::cassandra::tests::TestContext,
+        storage_context: crate::storage::cassandra::for_testing::TestContext,
     }
 
     async fn init() -> TestContext {
         let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
         let epoch_provider = Arc::new(EpochProvider::new());
-        let storage_context: crate::storage::cassandra::tests::TestContext =
-            crate::storage::cassandra::tests::init().await;
+        let storage_context: crate::storage::cassandra::for_testing::TestContext =
+            crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
         let mock_warden = MockWarden::new();
         let warden_address = mock_warden.start().await.unwrap();

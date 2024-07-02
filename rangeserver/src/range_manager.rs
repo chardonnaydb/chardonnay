@@ -333,7 +333,6 @@ where
                 State::Loading => todo!(),
                 State::Unloaded => {
                     *state = State::Loading;
-                    true
                 }
             }
         };
@@ -687,14 +686,14 @@ mod tests {
 
     struct TestContext {
         rm: Arc<RM>,
-        storage_context: crate::storage::cassandra::tests::TestContext,
+        storage_context: crate::storage::cassandra::for_testing::TestContext,
     }
 
     async fn init() -> TestContext {
         let epoch_provider = Arc::new(EpochProvider::new());
         let wal = Mutex::new(InMemoryWal::new());
-        let storage_context: crate::storage::cassandra::tests::TestContext =
-            crate::storage::cassandra::tests::init().await;
+        let storage_context: crate::storage::cassandra::for_testing::TestContext =
+            crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
         let range_id = FullRangeId {
             keyspace_id: storage_context.keyspace_id,
