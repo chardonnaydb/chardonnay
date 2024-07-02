@@ -25,7 +25,6 @@ use uuid::Uuid;
 
 struct TestContext {
     client: Arc<RangeClient>,
-    mock_warden: MockWarden,
     cancellation_token: CancellationToken,
     server_runtime: tokio::runtime::Runtime,
     client_runtime: tokio::runtime::Runtime,
@@ -163,7 +162,6 @@ async fn setup() -> TestContext {
     // Wait for range to be loaded.
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     TestContext {
-        mock_warden,
         client,
         cancellation_token,
         server_runtime,
