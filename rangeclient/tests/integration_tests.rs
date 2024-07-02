@@ -52,7 +52,7 @@ fn get_config(warden_address: SocketAddr) -> Config {
     config
 }
 
-fn get_server_host_info() -> HostInfo {
+fn get_server_host_info(address: SocketAddr) -> HostInfo {
     // TODO: should be read from enviroment!
     let identity: String = "test_server".into();
     let region = Region {
@@ -65,21 +65,21 @@ fn get_server_host_info() -> HostInfo {
     };
     HostInfo {
         identity: identity.clone(),
-        address: "127.0.0.1:10001".parse().unwrap(),
+        address,
         zone,
     }
 }
 
 async fn setup_server(
+    server_socket: UdpSocket,
     cancellation_token: CancellationToken,
     warden_address: SocketAddr,
     epoch_provider: Arc<EpochProvider>,
     storage_context: &rangeserver::storage::cassandra::for_testing::TestContext,
 ) -> tokio::runtime::Runtime {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-    let fast_network = Arc::new(UdpFastNetwork::new(
-        UdpSocket::bind("127.0.0.1:10001").unwrap(),
-    ));
+    let server_address = server_socket.local_addr().unwrap();
+    let fast_network = Arc::new(UdpFastNetwork::new(server_socket));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
         loop {
@@ -91,7 +91,7 @@ async fn setup_server(
 
     runtime.spawn(async move {
         let config = get_config(warden_address);
-        let host_info = get_server_host_info();
+        let host_info = get_server_host_info(server_address);
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
         let server = Server::new(
             config,
@@ -110,11 +110,10 @@ async fn setup_server(
 
 async fn setup_client(
     cancellation_token: CancellationToken,
+    server_address: SocketAddr,
 ) -> (Arc<RangeClient>, tokio::runtime::Runtime) {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-    let fast_network = Arc::new(UdpFastNetwork::new(
-        UdpSocket::bind("127.0.0.1:10002").unwrap(),
-    ));
+    let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
         loop {
@@ -125,13 +124,15 @@ async fn setup_client(
     let client = RangeClient::new(
         fast_network,
         runtime.handle().clone(),
-        get_server_host_info(),
+        get_server_host_info(server_address),
         cancellation_token.clone(),
     );
     return (client, runtime);
 }
 
 async fn setup() -> TestContext {
+    let server_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let server_address = server_socket.local_addr().unwrap();
     let epoch_provider = Arc::new(rangeserver::for_testing::epoch_provider::EpochProvider::new());
     let mock_warden = MockWarden::new();
     let warden_address = mock_warden.start().await.unwrap();
@@ -139,13 +140,14 @@ async fn setup() -> TestContext {
     let storage_context: rangeserver::storage::cassandra::for_testing::TestContext =
         rangeserver::storage::cassandra::for_testing::init().await;
     let server_runtime = setup_server(
+        server_socket,
         cancellation_token.clone(),
         warden_address,
         epoch_provider.clone(),
         &storage_context,
     )
     .await;
-    let (client, client_runtime) = setup_client(cancellation_token.clone()).await;
+    let (client, client_runtime) = setup_client(cancellation_token.clone(), server_address).await;
     let range_id = FullRangeId {
         keyspace_id: storage_context.keyspace_id,
         range_id: storage_context.range_id,
