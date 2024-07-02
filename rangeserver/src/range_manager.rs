@@ -549,17 +549,30 @@ where
 
                             // Before releasing the lock, update the prefetch buffer if this key has been requested
                             // by a prefetch call
-                            // let buffer = self.prefetching_buffer.clone();
-                            // buffer.process_transaction_complete(tx.id, key, val);
+                            // TODO: Error Checking
+                            let _ = self
+                                .prefetching_buffer
+                                .process_transaction_complete(tx.id, key, val)
+                                .await
+                                .unwrap();
                         }
                     }
                     for del in prepare_record.deletes().iter() {
                         for del in del.iter() {
                             let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
                             self.storage
-                                .delete(self.range_id, key, version)
+                                .delete(self.range_id, key.clone(), version)
                                 .await
                                 .map_err(Error::from_storage_error)?;
+
+                            // Before releasing the lock, delete the key from the prefetch buffer if this
+                            // key has been requested by a prefetch call
+                            // TODO: Error Checking
+                            let _ = self
+                                .prefetching_buffer
+                                .process_transaction_delete(tx.id, key)
+                                .await
+                                .unwrap();
                         }
                     }
                 }
