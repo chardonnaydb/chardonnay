@@ -32,6 +32,7 @@ pub struct RangeClient {
 impl RangeClient {
     pub fn new(
         fast_network: Arc<dyn FastNetwork>,
+        runtime: tokio::runtime::Handle,
         host_info: HostInfo,
         cancellation_token: CancellationToken,
     ) -> Arc<RangeClient> {
@@ -42,19 +43,19 @@ impl RangeClient {
         });
 
         let rc_clone = rc.clone();
-        tokio::spawn(async move {
-            let _ = Self::network_loop(rc_clone, cancellation_token);
+        runtime.spawn(async move {
+            let _ = Self::network_loop(rc_clone, cancellation_token).await;
             println!("Network loop exited!")
         });
         rc
     }
 
     pub async fn get(
-        self,
+        &self,
         tx: Arc<TransactionInfo>,
         range_id: &FullRangeId,
         keys: Vec<Bytes>,
-    ) -> Result<Vec<Record>, RangeServerError> {
+    ) -> Result<Vec<Option<Bytes>>, RangeServerError> {
         // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
         // TODO: too much copying :(
         let req_id = Uuid::new_v4();
@@ -99,8 +100,14 @@ impl RangeClient {
             outstanding_requests.insert(req_id, tx);
         }
         let get_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
+        let mut envelope_fbb = FlatBufferBuilder::new();
+        let request_bytes =
+            self.create_msg_envelope(&mut envelope_fbb, MessageType::Get, get_request_bytes);
         self.fast_network
-            .send(self.range_server_info.address, get_request_bytes)
+            .send(
+                self.range_server_info.address,
+                Bytes::copy_from_slice(request_bytes),
+            )
             .unwrap();
         let response = rx.await.unwrap();
         let msg = response.to_vec();
@@ -113,9 +120,11 @@ impl RangeClient {
                 let mut result = Vec::new();
                 for record in response_msg.records().iter() {
                     for rec in record.iter() {
-                        let key = Bytes::copy_from_slice(rec.key().unwrap().k().unwrap().bytes());
-                        let val = Bytes::copy_from_slice(rec.value().unwrap().bytes());
-                        result.push(Record { key, val });
+                        let val = match rec.value() {
+                            None => None,
+                            Some(val) => Some(Bytes::copy_from_slice(val.bytes())),
+                        };
+                        result.push(val);
                     }
                 }
                 return Ok(result);
@@ -125,7 +134,7 @@ impl RangeClient {
     }
 
     pub async fn prepare_transaction(
-        self,
+        &self,
         tx: Arc<TransactionInfo>,
         range_id: &FullRangeId,
         has_reads: bool,
@@ -184,8 +193,17 @@ impl RangeClient {
             outstanding_requests.insert(req_id, tx);
         }
         let prepare_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
+        let mut envelope_fbb = FlatBufferBuilder::new();
+        let request_bytes = self.create_msg_envelope(
+            &mut envelope_fbb,
+            MessageType::Prepare,
+            prepare_request_bytes,
+        );
         self.fast_network
-            .send(self.range_server_info.address, prepare_request_bytes)
+            .send(
+                self.range_server_info.address,
+                Bytes::copy_from_slice(request_bytes),
+            )
             .unwrap();
         let response = rx.await.unwrap();
         let msg = response.to_vec();
@@ -210,7 +228,7 @@ impl RangeClient {
     }
 
     pub async fn abort_transaction(
-        self,
+        &self,
         tx: Arc<TransactionInfo>,
         range_id: &FullRangeId,
     ) -> Result<(), RangeServerError> {
@@ -242,8 +260,14 @@ impl RangeClient {
             outstanding_requests.insert(req_id, tx);
         }
         let abort_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
+        let mut envelope_fbb = FlatBufferBuilder::new();
+        let request_bytes =
+            self.create_msg_envelope(&mut envelope_fbb, MessageType::Abort, abort_request_bytes);
         self.fast_network
-            .send(self.range_server_info.address, abort_request_bytes)
+            .send(
+                self.range_server_info.address,
+                Bytes::copy_from_slice(request_bytes),
+            )
             .unwrap();
         let response = rx.await.unwrap();
         let msg = response.to_vec();
@@ -261,7 +285,7 @@ impl RangeClient {
     }
 
     pub async fn commit_transaction(
-        self,
+        &self,
         tx: Arc<TransactionInfo>,
         range_id: &FullRangeId,
         epoch: u64,
@@ -296,8 +320,14 @@ impl RangeClient {
             outstanding_requests.insert(req_id, tx);
         }
         let commit_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
+        let mut envelope_fbb = FlatBufferBuilder::new();
+        let request_bytes =
+            self.create_msg_envelope(&mut envelope_fbb, MessageType::Commit, commit_request_bytes);
         self.fast_network
-            .send(self.range_server_info.address, commit_request_bytes)
+            .send(
+                self.range_server_info.address,
+                Bytes::copy_from_slice(request_bytes),
+            )
             .unwrap();
         let response = rx.await.unwrap();
         let msg = response.to_vec();
@@ -346,24 +376,44 @@ impl RangeClient {
         let mut network_receiver = client
             .fast_network
             .register(client.range_server_info.address);
-        let () = tokio::select! {
-            () = cancellation_token.cancelled() => {
-                return ()
-            }
-            maybe_message = network_receiver.recv() => {
-                match maybe_message {
-                    None => {
-                        println!("fast network closed unexpectedly!");
-                        cancellation_token.cancel()
-                    }
-                    Some(msg) => {
-                        let req_id = Self::get_request_id_from_response(msg.clone());
-                        let mut outstanding_requests = client.outstanding_requests.lock().await;
-                        let sender = outstanding_requests.remove(&req_id).unwrap();
-                        sender.send(msg).unwrap()
+        loop {
+            let () = tokio::select! {
+                () = cancellation_token.cancelled() => {
+                    return ()
+                }
+                maybe_message = network_receiver.recv() => {
+                    match maybe_message {
+                        None => {
+                            println!("fast network closed unexpectedly!");
+                            cancellation_token.cancel()
+                        }
+                        Some(msg) => {
+                            let req_id = Self::get_request_id_from_response(msg.clone());
+                            let mut outstanding_requests = client.outstanding_requests.lock().await;
+                            let sender = outstanding_requests.remove(&req_id).unwrap();
+                            sender.send(msg).unwrap()
+                        }
                     }
                 }
-            }
-        };
+            };
+        }
+    }
+
+    fn create_msg_envelope<'a>(
+        &self,
+        fbb: &'a mut FlatBufferBuilder<'a>,
+        msg_type: MessageType,
+        bytes: Bytes,
+    ) -> &'a [u8] {
+        let bytes = fbb.create_vector(bytes.to_vec().as_slice());
+        let fbb_root = RequestEnvelope::create(
+            fbb,
+            &RequestEnvelopeArgs {
+                type_: msg_type,
+                bytes: Some(bytes),
+            },
+        );
+        fbb.finish(fbb_root, None);
+        fbb.finished_data()
     }
 }

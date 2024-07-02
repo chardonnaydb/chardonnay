@@ -282,8 +282,7 @@ impl Storage for Cassandra {
     }
 }
 
-#[cfg(test)]
-pub mod tests {
+pub mod for_testing {
     use super::*;
     use common::keyspace_id::KeyspaceId;
 
@@ -351,6 +350,12 @@ pub mod tests {
             cassandra,
         }
     }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use for_testing::*;
 
     #[tokio::test]
     async fn basic_take_ownership_and_renew_lease() {
