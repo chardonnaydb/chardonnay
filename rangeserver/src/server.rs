@@ -800,9 +800,9 @@ pub mod tests {
         assert!((context.server.warden_handler.is_assigned(&range_id).await));
         assert!(context.server.is_assigned(&range_id).await);
         context.mock_warden.unassign(&range_id).await;
-        // Yield so server can process the update.
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        assert!(!(context.server.warden_handler.is_assigned(&range_id).await));
+        while context.server.warden_handler.is_assigned(&range_id).await {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
         assert!(!context.server.is_assigned(&range_id).await);
         cancellation_token.cancel();
         ch.await.unwrap().unwrap()
