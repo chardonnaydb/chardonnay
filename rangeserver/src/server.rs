@@ -194,7 +194,7 @@ where
     async fn get_inner(
         &self,
         request: GetRequest<'_>,
-    ) -> Result<(i64, HashMap<Bytes, Option<Bytes>>), Error> {
+    ) -> Result<(i64, Vec<(Bytes, Option<Bytes>)>), Error> {
         let range_id = match request.range_id() {
             None => return Err(Error::InvalidRequestFormat),
             Some(id) => id,
@@ -216,7 +216,7 @@ where
         let rm = self.maybe_load_and_get_range(&range_id).await?;
         let tx = self.get_transaction_info(transaction_id).await?;
         let mut leader_sequence_number: i64 = 0;
-        let mut reads: HashMap<Bytes, Option<Bytes>> = HashMap::new();
+        let mut reads = Vec::new();
 
         // Execute the reads
         // TODO: consider providing a batch API on the RM.
@@ -227,12 +227,10 @@ where
                 let get_result = rm.get(tx.clone(), key.clone()).await?;
                 match get_result.val {
                     None => {
-                        reads.insert(key, None);
-                        ()
+                        reads.push((key, None));
                     }
                     Some(val) => {
-                        reads.insert(key, Some(val));
-                        ()
+                        reads.push((key, Some(val)));
                     }
                 };
                 if leader_sequence_number == 0 {
@@ -442,7 +440,7 @@ where
             }
         };
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::Abort, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::Commit, fbb.finished_data())?;
         Ok(())
     }
 

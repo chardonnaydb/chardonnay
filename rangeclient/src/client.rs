@@ -138,8 +138,8 @@ impl RangeClient {
         tx: Arc<TransactionInfo>,
         range_id: &FullRangeId,
         has_reads: bool,
-        writes: &Vec<Record>,
-        deletes: &Vec<Bytes>,
+        writes: &[Record],
+        deletes: &[Bytes],
     ) -> Result<PrepareOk, RangeServerError> {
         // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
         // TODO: too much copying :(

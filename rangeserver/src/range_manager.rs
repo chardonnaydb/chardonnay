@@ -405,6 +405,7 @@ where
             State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 // Sanity check that the written keys are all within this range.
+                // TODO: check delete and write sets are non-overlapping.
                 for put in prepare.puts().iter() {
                     for put in put.iter() {
                         // TODO: too much copying :(
