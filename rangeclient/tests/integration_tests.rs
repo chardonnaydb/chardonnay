@@ -12,6 +12,7 @@ use common::{
     host_info::HostInfo,
     keyspace_id::KeyspaceId,
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
+    record::Record,
     region::{Region, Zone},
 };
 use rangeclient::client::RangeClient;
@@ -226,5 +227,88 @@ async fn read_initial() {
         .abort_transaction(tx, &range_id)
         .await
         .unwrap();
+    tear_down(context).await
+}
+
+#[tokio::test]
+async fn commit_no_writes() {
+    let context = setup().await;
+    let key = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+    let tx = start_transaction();
+    let range_id = FullRangeId {
+        keyspace_id: context.storage_context.keyspace_id,
+        range_id: context.storage_context.range_id,
+    };
+    let keys = vec![key];
+    let vals = context
+        .client
+        .get(tx.clone(), &range_id, keys)
+        .await
+        .unwrap();
+    let val = vals.get(0).unwrap();
+    assert!(val.is_none());
+    let writes = vec![];
+    let deletes = vec![];
+    let prepare_ok = context
+        .client
+        .prepare_transaction(tx.clone(), &range_id, true, &writes, &deletes)
+        .await
+        .unwrap();
+    context
+        .client
+        .commit_transaction(tx, &range_id, prepare_ok.highest_known_epoch)
+        .await
+        .unwrap();
+    tear_down(context).await
+}
+
+#[tokio::test]
+async fn read_modify_write() {
+    let context = setup().await;
+    let key1 = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+    let key2 = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+    let tx = start_transaction();
+    let range_id = FullRangeId {
+        keyspace_id: context.storage_context.keyspace_id,
+        range_id: context.storage_context.range_id,
+    };
+    let keys = vec![key1.clone(), key2.clone()];
+    let vals = context
+        .client
+        .get(tx.clone(), &range_id, keys)
+        .await
+        .unwrap();
+    assert!(vals.len() == 2);
+    assert!(vals.get(0).unwrap().is_none());
+    assert!(vals.get(1).unwrap().is_none());
+    let val1 = Bytes::from_static(b"I have a value!");
+    let record1 = Record {
+        key: key1.clone(),
+        val: val1.clone(),
+    };
+    let val2 = Bytes::from_static(b"I have a different value!");
+    let record2 = Record {
+        key: key2.clone(),
+        val: val2.clone(),
+    };
+    let writes = vec![record1, record2];
+    let deletes = vec![];
+    let prepare_ok = context
+        .client
+        .prepare_transaction(tx.clone(), &range_id, true, &writes, &deletes)
+        .await
+        .unwrap();
+    context
+        .client
+        .commit_transaction(tx, &range_id, prepare_ok.highest_known_epoch)
+        .await
+        .unwrap();
+    // Now read the values in a new transaction.
+    let tx2 = start_transaction();
+    let keys = vec![key1.clone(), key2.clone()];
+    let vals = context.client.get(tx2, &range_id, keys).await.unwrap();
+    assert!(vals.len() == 2);
+    assert!(vals.get(0).unwrap().as_ref().unwrap().eq(&val1));
+    assert!(vals.get(1).unwrap().as_ref().unwrap().eq(&val2));
     tear_down(context).await
 }
