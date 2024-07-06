@@ -162,7 +162,10 @@ where
         let rm = {
             let mut range_table = self.loaded_ranges.write().await;
             match (range_table).get(&id.range_id) {
-                Some(r) => r.clone(),
+                Some(r) => {
+                    self.load_range_in_bg_runtime(r.clone()).await?;
+                    r.clone()
+                }
                 None => {
                     let rm = RangeManager::new(
                         id.clone(),
