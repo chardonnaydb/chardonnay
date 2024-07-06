@@ -157,8 +157,8 @@ async fn setup() -> TestContext {
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
     mock_warden.assign(&range_id, &server_identity).await;
-    // Give some delay so the RM can see the epoch advancing.
-    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    // Give some delay so the RM can see the assignment and the epoch advancing.
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     epoch_provider.set_epoch(1).await;
     TestContext {
         client,
