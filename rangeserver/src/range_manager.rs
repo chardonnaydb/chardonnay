@@ -145,7 +145,7 @@ struct LoadedState {
 
 enum State {
     Unloaded,
-    Loading,
+    Loading(tokio::sync::broadcast::Sender<Result<(), Error>>),
     Loaded(LoadedState),
 }
 
@@ -326,25 +326,35 @@ where
     }
 
     pub async fn load(&self) -> Result<(), Error> {
-        {
+        let sender = {
             let mut state = self.state.write().await;
-            match *state {
+            match state.deref_mut() {
                 State::Loaded(_) => return Ok(()),
-                State::Loading => todo!(),
+                State::Loading(sender) => {
+                    let mut receiver = sender.subscribe();
+                    drop(state);
+                    return receiver.recv().await.unwrap();
+                }
                 State::Unloaded => {
-                    *state = State::Loading;
+                    let (sender, _) = tokio::sync::broadcast::channel(1);
+                    *state = State::Loading(sender.clone());
+                    sender
                 }
             }
         };
+
         let load_result: Result<LoadedState, Error> = self.load_inner().await;
         let mut state = self.state.write().await;
+
         match load_result {
             Err(e) => {
                 *state = State::Unloaded;
+                sender.send(Err(e.clone())).unwrap();
                 Err(e)
             }
             Ok(loaded_state) => {
                 *state = State::Loaded(loaded_state);
+                sender.send(Ok(())).unwrap();
                 Ok(())
             }
         }
@@ -352,7 +362,12 @@ where
 
     pub async fn unload(&self) {
         let mut state = self.state.write().await;
-        *state = State::Unloaded;
+        match state.deref() {
+            State::Loaded(_) | State::Unloaded => *state = State::Unloaded,
+            State::Loading(_) => {
+                todo!()
+            }
+        }
     }
 
     async fn acquire_range_lock(
@@ -370,7 +385,7 @@ where
     pub async fn get(&self, tx: Arc<TransactionInfo>, key: Bytes) -> Result<GetResult, Error> {
         let s = self.state.write().await;
         match s.deref() {
-            State::Unloaded | State::Loading => Err(Error::RangeIsNotLoaded),
+            State::Unloaded | State::Loading(_) => Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 if !state.range_info.key_range.includes(key.clone()) {
                     return Err(Error::KeyIsOutOfRange);
@@ -402,7 +417,7 @@ where
     ) -> Result<PrepareResult, Error> {
         let s = self.state.write().await;
         match s.deref() {
-            State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
+            State::Unloaded | State::Loading(_) => return Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 // Sanity check that the written keys are all within this range.
                 // TODO: check delete and write sets are non-overlapping.
@@ -456,7 +471,7 @@ where
     ) -> Result<(), Error> {
         let s = self.state.write().await;
         match s.deref() {
-            State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
+            State::Unloaded | State::Loading(_) => return Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 let mut lock_table = state.lock_table.lock().await;
                 if !lock_table.is_currently_holding(tx.clone()) {
@@ -488,7 +503,7 @@ where
     ) -> Result<(), Error> {
         let mut s = self.state.write().await;
         match s.deref_mut() {
-            State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
+            State::Unloaded | State::Loading(_) => return Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 let mut lock_table = state.lock_table.lock().await;
                 if !lock_table.is_currently_holding(tx.clone()) {
