@@ -160,8 +160,6 @@ async fn setup() -> TestContext {
     // Give some delay so the RM can see the epoch advancing.
     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     epoch_provider.set_epoch(1).await;
-    // Wait for range to be loaded.
-    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     TestContext {
         client,
         cancellation_token,
