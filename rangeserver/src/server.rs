@@ -130,6 +130,15 @@ where
         }
     }
 
+    async fn load_range_in_bg_runtime(
+        &self,
+        rm: Arc<RangeManager<S, E, InMemoryWal>>,
+    ) -> Result<(), Error> {
+        self.bg_runtime
+            .spawn(async move { rm.load().await })
+            .await
+            .unwrap()
+    }
     async fn maybe_load_and_get_range(
         &self,
         id: &FullRangeId,
@@ -138,7 +147,10 @@ where
             // Fast path when range has already been loaded.
             let range_table = self.loaded_ranges.read().await;
             match (*range_table).get(&id.range_id) {
-                Some(r) => return Ok(r.clone()),
+                Some(r) => {
+                    self.load_range_in_bg_runtime(r.clone()).await?;
+                    return Ok(r.clone());
+                }
                 None => (),
             }
         };
@@ -150,7 +162,10 @@ where
         let rm = {
             let mut range_table = self.loaded_ranges.write().await;
             match (range_table).get(&id.range_id) {
-                Some(r) => r.clone(),
+                Some(r) => {
+                    self.load_range_in_bg_runtime(r.clone()).await?;
+                    r.clone()
+                }
                 None => {
                     let rm = RangeManager::new(
                         id.clone(),
@@ -161,7 +176,7 @@ where
                     );
                     (range_table).insert(id.range_id, rm.clone());
                     drop(range_table);
-                    rm.load().await?;
+                    self.load_range_in_bg_runtime(rm.clone()).await?;
                     rm.clone()
                 }
             }
