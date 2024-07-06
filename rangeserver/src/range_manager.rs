@@ -345,7 +345,8 @@ where
 
         let load_result: Result<LoadedState, Error> = self.load_inner().await;
         let mut state = self.state.write().await;
-
+        // TODO: we must avoid loading the range after it's been unloaded.
+        // Consider making RM's only loadable once instead?
         match load_result {
             Err(e) => {
                 *state = State::Unloaded;
@@ -354,7 +355,8 @@ where
             }
             Ok(loaded_state) => {
                 *state = State::Loaded(loaded_state);
-                sender.send(Ok(())).unwrap();
+                // TODO(tamer): Ignoring the error here seems kind of sketchy.
+                let _ = sender.send(Ok(()));
                 Ok(())
             }
         }
@@ -362,12 +364,7 @@ where
 
     pub async fn unload(&self) {
         let mut state = self.state.write().await;
-        match state.deref() {
-            State::Loaded(_) | State::Unloaded => *state = State::Unloaded,
-            State::Loading(_) => {
-                todo!()
-            }
-        }
+        *state = State::Unloaded;
     }
 
     async fn acquire_range_lock(
