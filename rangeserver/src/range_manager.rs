@@ -483,6 +483,7 @@ where
                         .map_err(Error::from_wal_error)?;
                 }
                 lock_table.release();
+                // Call 2) transaction_completed for prebuffer
                 Ok(())
             }
         }
@@ -547,12 +548,12 @@ where
                                 .await
                                 .map_err(Error::from_storage_error)?;
 
-                            // Before releasing the lock, update the prefetch buffer if this key has been requested
+                            // 1) Before releasing the lock, update the prefetch buffer if this key has been requested
                             // by a prefetch call
                             // TODO: Error Checking
                             let _ = self
                                 .prefetching_buffer
-                                .process_transaction_complete(tx.id, key, val)
+                                .process_buffer_update(key, val)
                                 .await
                                 .unwrap();
                         }
@@ -570,7 +571,8 @@ where
                             // TODO: Error Checking
                             let _ = self
                                 .prefetching_buffer
-                                .process_transaction_delete(tx.id, key)
+                                .process_transaction_delete(key)
+                                // Only take the transaction id. Delete all keys
                                 .await
                                 .unwrap();
                         }
@@ -581,6 +583,11 @@ where
                 // gets to storage directly. We should implement a memtable to allow us to release
                 // the lock sooner.
                 lock_table.release();
+                // Process transaction complete and remove the requests from the logs
+                let _ = self
+                    .prefetching_buffer
+                    .process_transaction_complete(tx.id)
+                    .await;
                 Ok(())
             }
         }
@@ -613,20 +620,19 @@ where
             .await
         {
             Some(keystate) => match keystate {
-                KeyState::Fetched => Ok(()),  // key has previously been fetched
-                KeyState::Loading => Err(()), // Something is wrong if loading was returned
-                KeyState::Requested =>
+                KeyState::Fetched => Ok(()),     // key has previously been fetched
+                KeyState::Loading(_) => Err(()), // Something is wrong if loading was returned
+                KeyState::Requested(fetch_sequence_number) =>
                 // key has just been requested - start fetch
                 {
                     // Fetch from database TODO: update unwrap to manage potential error
-                    if let Some(val) = self.prefetch_get(key.clone()).await.unwrap() {
-                        // Successfully fetched from database -> add to buffer and update records
-                        buffer.fetch_complete(key.clone(), val).await;
-                        // TODO: Use a read write lock rather than a mutex?
-                        Ok(())
-                    } else {
-                        Err(())
-                    }
+                    let val = self.prefetch_get(key.clone()).await.unwrap();
+                    // Successfully fetched from database -> add to buffer and update records
+                    buffer
+                        .fetch_complete(key.clone(), val, fetch_sequence_number)
+                        .await?;
+                    // TODO: Use a read write lock rather than a mutex?
+                    Ok(())
                 }
             },
             None => Err(()),
