@@ -483,7 +483,11 @@ where
                         .map_err(Error::from_wal_error)?;
                 }
                 lock_table.release();
-                // Call 2) transaction_completed for prebuffer
+                // Call transaction_completed for prebuffer
+                let _ = self
+                    .prefetching_buffer
+                    .process_transaction_complete(tx.id)
+                    .await;
                 Ok(())
             }
         }
@@ -548,8 +552,7 @@ where
                                 .await
                                 .map_err(Error::from_storage_error)?;
 
-                            // 1) Before releasing the lock, update the prefetch buffer if this key has been requested
-                            // by a prefetch call
+                            // Update the prefetch buffer if this key has been requested by a prefetch call
                             // TODO: Error Checking
                             let _ = self
                                 .prefetching_buffer
@@ -566,8 +569,7 @@ where
                                 .await
                                 .map_err(Error::from_storage_error)?;
 
-                            // Before releasing the lock, delete the key from the prefetch buffer if this
-                            // key has been requested by a prefetch call
+                            // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
                             // TODO: Error Checking
                             let _ = self
                                 .prefetching_buffer
@@ -614,7 +616,6 @@ where
         key: Bytes,
     ) -> Result<(), ()> {
         // Request prefetch from the prefetching buffer
-        // TODO: Spawn a new tokio thread here? Not necessary because this is already on a new thread right?
         match buffer
             .process_prefetch_request(transaction_id, key.clone())
             .await
@@ -625,8 +626,11 @@ where
                 KeyState::Requested(fetch_sequence_number) =>
                 // key has just been requested - start fetch
                 {
-                    // Fetch from database TODO: update unwrap to manage potential error
-                    let val = self.prefetch_get(key.clone()).await.unwrap();
+                    // Fetch from database
+                    let val = match self.prefetch_get(key.clone()).await {
+                        Ok(value) => value,
+                        Err(_) => return Err(()),
+                    };
                     // Successfully fetched from database -> add to buffer and update records
                     buffer
                         .fetch_complete(key.clone(), val, fetch_sequence_number)
