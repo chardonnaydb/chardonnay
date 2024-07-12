@@ -8,9 +8,14 @@ use std::{
 use bytes::Bytes;
 use tokio::sync::mpsc;
 
+enum DefaultHandler {
+    NotRegistered,
+    Registered(mpsc::UnboundedSender<(SocketAddr, Bytes)>),
+}
 pub struct UdpFastNetwork {
     socket: UdpSocket,
     listeners: RwLock<HashMap<SocketAddr, mpsc::UnboundedSender<Bytes>>>,
+    default_handler: RwLock<DefaultHandler>,
 }
 
 impl UdpFastNetwork {
@@ -19,6 +24,7 @@ impl UdpFastNetwork {
         UdpFastNetwork {
             socket,
             listeners: RwLock::new(HashMap::new()),
+            default_handler: RwLock::new(DefaultHandler::NotRegistered),
         }
     }
 }
@@ -30,8 +36,9 @@ impl Trait for UdpFastNetwork {
     }
 
     fn listen_default(&self) -> mpsc::UnboundedReceiver<(SocketAddr, Bytes)> {
-        // TODO(tamer): properly implement.
-        let (_, r) = mpsc::unbounded_channel();
+        let (s, r) = mpsc::unbounded_channel();
+        let mut default_handler = self.default_handler.write().unwrap();
+        *default_handler = DefaultHandler::Registered(s);
         r
     }
 
@@ -48,8 +55,14 @@ impl Trait for UdpFastNetwork {
             Ok((len, sender_addr)) => {
                 let bytes = Bytes::copy_from_slice(&buf[0..len]);
                 let listeners = self.listeners.read().unwrap();
+                let default_listener = self.default_handler.read().unwrap();
                 match listeners.get(&sender_addr) {
-                    None => (), // TODO: provide default listener
+                    None => {
+                        match &*default_listener {
+                            DefaultHandler::NotRegistered => (), // perhaps log something here?
+                            DefaultHandler::Registered(s) => s.send((sender_addr, bytes)).unwrap(),
+                        }
+                    }
                     Some(s) => s.send(bytes).unwrap(),
                 };
                 return true;

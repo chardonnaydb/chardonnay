@@ -150,7 +150,7 @@ struct LoadedState {
 
 enum State {
     Unloaded,
-    Loading,
+    Loading(tokio::sync::broadcast::Sender<Result<(), Error>>),
     Loaded(LoadedState),
 }
 
@@ -334,26 +334,37 @@ where
     }
 
     pub async fn load(&self) -> Result<(), Error> {
-        {
+        let sender = {
             let mut state = self.state.write().await;
-            match *state {
+            match state.deref_mut() {
                 State::Loaded(_) => return Ok(()),
-                State::Loading => todo!(),
+                State::Loading(sender) => {
+                    let mut receiver = sender.subscribe();
+                    drop(state);
+                    return receiver.recv().await.unwrap();
+                }
                 State::Unloaded => {
-                    *state = State::Loading;
-                    true
+                    let (sender, _) = tokio::sync::broadcast::channel(1);
+                    *state = State::Loading(sender.clone());
+                    sender
                 }
             }
         };
+
         let load_result: Result<LoadedState, Error> = self.load_inner().await;
         let mut state = self.state.write().await;
+        // TODO: we must avoid loading the range after it's been unloaded.
+        // Consider making RM's only loadable once instead?
         match load_result {
             Err(e) => {
                 *state = State::Unloaded;
+                sender.send(Err(e.clone())).unwrap();
                 Err(e)
             }
             Ok(loaded_state) => {
                 *state = State::Loaded(loaded_state);
+                // TODO(tamer): Ignoring the error here seems kind of sketchy.
+                let _ = sender.send(Ok(()));
                 Ok(())
             }
         }
@@ -379,7 +390,7 @@ where
     pub async fn get(&self, tx: Arc<TransactionInfo>, key: Bytes) -> Result<GetResult, Error> {
         let s = self.state.write().await;
         match s.deref() {
-            State::Unloaded | State::Loading => Err(Error::RangeIsNotLoaded),
+            State::Unloaded | State::Loading(_) => Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 if !state.range_info.key_range.includes(key.clone()) {
                     return Err(Error::KeyIsOutOfRange);
@@ -411,9 +422,10 @@ where
     ) -> Result<PrepareResult, Error> {
         let s = self.state.write().await;
         match s.deref() {
-            State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
+            State::Unloaded | State::Loading(_) => return Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 // Sanity check that the written keys are all within this range.
+                // TODO: check delete and write sets are non-overlapping.
                 for put in prepare.puts().iter() {
                     for put in put.iter() {
                         // TODO: too much copying :(
@@ -464,7 +476,7 @@ where
     ) -> Result<(), Error> {
         let s = self.state.write().await;
         match s.deref() {
-            State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
+            State::Unloaded | State::Loading(_) => return Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 let mut lock_table = state.lock_table.lock().await;
                 if !lock_table.is_currently_holding(tx.clone()) {
@@ -501,7 +513,7 @@ where
     ) -> Result<(), Error> {
         let mut s = self.state.write().await;
         match s.deref_mut() {
-            State::Unloaded | State::Loading => return Err(Error::RangeIsNotLoaded),
+            State::Unloaded | State::Loading(_) => return Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 let mut lock_table = state.lock_table.lock().await;
                 if !lock_table.is_currently_holding(tx.clone()) {
@@ -764,14 +776,14 @@ mod tests {
 
     struct TestContext {
         rm: Arc<RM>,
-        storage_context: crate::storage::cassandra::tests::TestContext,
+        storage_context: crate::storage::cassandra::for_testing::TestContext,
     }
 
     async fn init() -> TestContext {
         let epoch_provider = Arc::new(EpochProvider::new());
         let wal = Mutex::new(InMemoryWal::new());
-        let storage_context: crate::storage::cassandra::tests::TestContext =
-            crate::storage::cassandra::tests::init().await;
+        let storage_context: crate::storage::cassandra::for_testing::TestContext =
+            crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
         let prefetching_buffer = Arc::new(PrefetchingBuffer::new());
         let range_id = FullRangeId {

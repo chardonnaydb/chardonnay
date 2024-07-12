@@ -187,6 +187,15 @@ where
         }
     }
 
+    async fn load_range_in_bg_runtime(
+        &self,
+        rm: Arc<RangeManager<S, E, InMemoryWal>>,
+    ) -> Result<(), Error> {
+        self.bg_runtime
+            .spawn(async move { rm.load().await })
+            .await
+            .unwrap()
+    }
     async fn maybe_load_and_get_range(
         &self,
         id: &FullRangeId,
@@ -195,7 +204,10 @@ where
             // Fast path when range has already been loaded.
             let range_table = self.loaded_ranges.read().await;
             match (*range_table).get(&id.range_id) {
-                Some(r) => return Ok(r.clone()),
+                Some(r) => {
+                    self.load_range_in_bg_runtime(r.clone()).await?;
+                    return Ok(r.clone());
+                }
                 None => (),
             }
         };
@@ -207,7 +219,10 @@ where
         let rm = {
             let mut range_table = self.loaded_ranges.write().await;
             match (range_table).get(&id.range_id) {
-                Some(r) => r.clone(),
+                Some(r) => {
+                    self.load_range_in_bg_runtime(r.clone()).await?;
+                    r.clone()
+                }
                 None => {
                     let rm = RangeManager::new(
                         id.clone(),
@@ -219,7 +234,7 @@ where
                     );
                     (range_table).insert(id.range_id, rm.clone());
                     drop(range_table);
-                    rm.load().await?;
+                    self.load_range_in_bg_runtime(rm.clone()).await?;
                     rm.clone()
                 }
             }
@@ -252,7 +267,7 @@ where
     async fn get_inner(
         &self,
         request: GetRequest<'_>,
-    ) -> Result<(i64, HashMap<Bytes, Bytes>), Error> {
+    ) -> Result<(i64, Vec<(Bytes, Option<Bytes>)>), Error> {
         let range_id = match request.range_id() {
             None => return Err(Error::InvalidRequestFormat),
             Some(id) => id,
@@ -274,7 +289,7 @@ where
         let rm = self.maybe_load_and_get_range(&range_id).await?;
         let tx = self.get_transaction_info(transaction_id).await?;
         let mut leader_sequence_number: i64 = 0;
-        let mut reads: HashMap<Bytes, Bytes> = HashMap::new();
+        let mut reads = Vec::new();
 
         // Execute the reads
         // TODO: consider providing a batch API on the RM.
@@ -284,10 +299,11 @@ where
                 let key = Bytes::copy_from_slice(key.k().unwrap().bytes());
                 let get_result = rm.get(tx.clone(), key.clone()).await?;
                 match get_result.val {
-                    None => (),
+                    None => {
+                        reads.push((key, None));
+                    }
                     Some(val) => {
-                        reads.insert(key, val);
-                        ()
+                        reads.push((key, Some(val)));
                     }
                 };
                 if leader_sequence_number == 0 {
@@ -332,12 +348,15 @@ where
                         for (k, v) in reads {
                             let k = Some(fbb.create_vector(k.to_vec().as_slice()));
                             let key = Key::create(&mut fbb, &KeyArgs { k });
-                            let value = fbb.create_vector(v.to_vec().as_slice());
+                            let value = match v {
+                                None => None,
+                                Some(v) => Some(fbb.create_vector(v.to_vec().as_slice())),
+                            };
                             records_vector.push(Record::create(
                                 &mut fbb,
                                 &RecordArgs {
                                     key: Some(key),
-                                    value: Some(value),
+                                    value: value,
                                 },
                             ));
                         }
@@ -494,7 +513,7 @@ where
             }
         };
         fbb.finish(fbb_root, None);
-        self.send_response(network, sender, MessageType::Abort, fbb.finished_data())?;
+        self.send_response(network, sender, MessageType::Commit, fbb.finished_data())?;
         Ok(())
     }
 
@@ -638,26 +657,30 @@ where
         cancellation_token: CancellationToken,
     ) {
         let mut network_receiver = fast_network.listen_default();
-        let () = tokio::select! {
-            () = cancellation_token.cancelled() => {
-                return ()
-            }
-            maybe_message = network_receiver.recv() => {
-                match maybe_message {
-                    None => {
-                        println!("fast network closed unexpectedly!");
-                        cancellation_token.cancel()
-                    }
-                    Some((sender, msg)) => {
-                        tokio::spawn(async move{
-                            let _ = Self::handle_message(server, fast_network, sender, msg).await;
-                            // TODO log any error here.
-                        });
+        loop {
+            let () = tokio::select! {
+                () = cancellation_token.cancelled() => {
+                    return ()
+                }
+                maybe_message = network_receiver.recv() => {
+                    match maybe_message {
+                        None => {
+                            println!("fast network closed unexpectedly!");
+                            cancellation_token.cancel()
+                        }
+                        Some((sender, msg)) => {
+                            let server = server.clone();
+                            let fast_network = fast_network.clone();
+                            tokio::spawn(async move{
+                                let _ = Self::handle_message(server, fast_network, sender, msg).await;
+                                // TODO log any error here.
+                            });
 
+                        }
                     }
                 }
-            }
-        };
+            };
+        }
     }
 
     pub async fn start(
@@ -712,7 +735,7 @@ where
             .await??;
 
         tokio::spawn(async move {
-            let _ = Self::network_server_loop(server, fast_network, cancellation_token);
+            let _ = Self::network_server_loop(server, fast_network, cancellation_token).await;
             println!("Network server loop exited!")
         });
         Ok(res)
@@ -746,14 +769,14 @@ pub mod tests {
         fast_network: Arc<dyn FastNetwork>,
         identity: String,
         mock_warden: MockWarden,
-        storage_context: crate::storage::cassandra::tests::TestContext,
+        storage_context: crate::storage::cassandra::for_testing::TestContext,
     }
 
     async fn init() -> TestContext {
         let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
         let epoch_provider = Arc::new(EpochProvider::new());
-        let storage_context: crate::storage::cassandra::tests::TestContext =
-            crate::storage::cassandra::tests::init().await;
+        let storage_context: crate::storage::cassandra::for_testing::TestContext =
+            crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
         let mock_warden = MockWarden::new();
         let warden_address = mock_warden.start().await.unwrap();
@@ -771,6 +794,7 @@ pub mod tests {
         let mut config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
+                proto_server_addr: String::from("127.0.0.1:50051"),
                 proto_server_addr: String::from("127.0.0.1:50051"),
             },
             regions: std::collections::HashMap::new(),
@@ -854,9 +878,9 @@ pub mod tests {
         assert!((context.server.warden_handler.is_assigned(&range_id).await));
         assert!(context.server.is_assigned(&range_id).await);
         context.mock_warden.unassign(&range_id).await;
-        // Yield so server can process the update.
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        assert!(!(context.server.warden_handler.is_assigned(&range_id).await));
+        while context.server.warden_handler.is_assigned(&range_id).await {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
         assert!(!context.server.is_assigned(&range_id).await);
         cancellation_token.cancel();
         ch.await.unwrap().unwrap()
