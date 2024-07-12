@@ -21,10 +21,10 @@ pub mod range_server {
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_STATUS: i8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_STATUS: i8 = 9;
+pub const ENUM_MAX_STATUS: i8 = 10;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_STATUS: [Status; 10] = [
+pub const ENUM_VALUES_STATUS: [Status; 11] = [
   Status::Ok,
   Status::InvalidRequestFormat,
   Status::RangeDoesNotExist,
@@ -35,6 +35,7 @@ pub const ENUM_VALUES_STATUS: [Status; 10] = [
   Status::InternalError,
   Status::TransactionAborted,
   Status::UnknownTransaction,
+  Status::PrefetchError,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -52,9 +53,10 @@ impl Status {
   pub const InternalError: Self = Self(7);
   pub const TransactionAborted: Self = Self(8);
   pub const UnknownTransaction: Self = Self(9);
+  pub const PrefetchError: Self = Self(10);
 
   pub const ENUM_MIN: i8 = 0;
-  pub const ENUM_MAX: i8 = 9;
+  pub const ENUM_MAX: i8 = 10;
   pub const ENUM_VALUES: &'static [Self] = &[
     Self::Ok,
     Self::InvalidRequestFormat,
@@ -66,6 +68,7 @@ impl Status {
     Self::InternalError,
     Self::TransactionAborted,
     Self::UnknownTransaction,
+    Self::PrefetchError,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
@@ -80,6 +83,7 @@ impl Status {
       Self::InternalError => Some("InternalError"),
       Self::TransactionAborted => Some("TransactionAborted"),
       Self::UnknownTransaction => Some("UnknownTransaction"),
+      Self::PrefetchError => Some("PrefetchError"),
       _ => None,
     }
   }

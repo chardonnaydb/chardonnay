@@ -554,11 +554,9 @@ where
 
                             // Update the prefetch buffer if this key has been requested by a prefetch call
                             // TODO: Error Checking
-                            let _ = self
-                                .prefetching_buffer
+                            self.prefetching_buffer
                                 .process_buffer_update(key, val)
-                                .await
-                                .unwrap();
+                                .await;
                         }
                     }
                     for del in prepare_record.deletes().iter() {
@@ -570,13 +568,9 @@ where
                                 .map_err(Error::from_storage_error)?;
 
                             // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
-                            // TODO: Error Checking
-                            let _ = self
-                                .prefetching_buffer
+                            self.prefetching_buffer
                                 .process_transaction_delete(key)
-                                // Only take the transaction id. Delete all keys
-                                .await
-                                .unwrap();
+                                .await;
                         }
                     }
                 }
@@ -598,15 +592,12 @@ where
     /// Get from database without acquiring any locks
     /// This is a very basic copy of the 'get' function
     pub async fn prefetch_get(&self, key: Bytes) -> Result<Option<Bytes>, Error> {
-        // TODO: The regular get function checks state - might needs to do this?
         let val = self
             .storage
             .get(self.range_id, key.clone())
             .await
             .map_err(Error::from_storage_error)?;
         Ok(val)
-        // FOR TESTING
-        // Ok(Some(Bytes::from("test value")))
     }
 
     pub async fn process_prefetch(
@@ -614,32 +605,37 @@ where
         buffer: &Arc<PrefetchingBuffer>,
         transaction_id: Uuid,
         key: Bytes,
-    ) -> Result<(), ()> {
+    ) -> Result<(), Error> {
         // Request prefetch from the prefetching buffer
-        match buffer
+        if let Some(keystate) = buffer
             .process_prefetch_request(transaction_id, key.clone())
             .await
         {
-            Some(keystate) => match keystate {
-                KeyState::Fetched => Ok(()),     // key has previously been fetched
-                KeyState::Loading(_) => Err(()), // Something is wrong if loading was returned
+            match keystate {
+                KeyState::Fetched => Ok(()), // key has previously been fetched
+                KeyState::Loading(_) => Err(Error::PrefetchError), // Something is wrong if loading was returned
                 KeyState::Requested(fetch_sequence_number) =>
                 // key has just been requested - start fetch
                 {
                     // Fetch from database
                     let val = match self.prefetch_get(key.clone()).await {
                         Ok(value) => value,
-                        Err(_) => return Err(()),
+                        Err(_) => {
+                            buffer
+                                .fetch_failed(key.clone(), fetch_sequence_number)
+                                .await;
+                            return Err(Error::PrefetchError);
+                        }
                     };
                     // Successfully fetched from database -> add to buffer and update records
                     buffer
                         .fetch_complete(key.clone(), val, fetch_sequence_number)
-                        .await?;
-                    // TODO: Use a read write lock rather than a mutex?
+                        .await;
                     Ok(())
                 }
-            },
-            None => Err(()),
+            }
+        } else {
+            Err(Error::PrefetchError)
         }
     }
 }

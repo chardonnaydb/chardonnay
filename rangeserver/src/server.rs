@@ -96,10 +96,7 @@ where
                 };
                 Ok(Response::new(reply)) // Send back response
             }
-            Err(_) => {
-                Err(TStatus::internal("Failed to process prefetch request"))
-                // Handle error
-            }
+            Err(_) => Err(TStatus::internal("Failed to process prefetch request")),
         }
     }
 }
