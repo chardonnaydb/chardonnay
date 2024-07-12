@@ -8,20 +8,17 @@ use bytes::Bytes;
 use chrono::DateTime;
 use common::config::Config;
 use common::full_range_id::FullRangeId;
-use common::keyspace_id::KeyspaceId;
 
 use uuid::Uuid;
 
 use crate::prefetching_buffer::KeyState;
 use crate::prefetching_buffer::PrefetchingBuffer;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
-use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::Arc;
 use tokio::sync::oneshot;
-use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
@@ -553,7 +550,6 @@ where
                                 .map_err(Error::from_storage_error)?;
 
                             // Update the prefetch buffer if this key has been requested by a prefetch call
-                            // TODO: Error Checking
                             self.prefetching_buffer
                                 .process_buffer_update(key, val)
                                 .await;
