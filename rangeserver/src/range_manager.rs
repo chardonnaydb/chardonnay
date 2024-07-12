@@ -576,8 +576,7 @@ where
                 // the lock sooner.
                 lock_table.release();
                 // Process transaction complete and remove the requests from the logs
-                let _ = self
-                    .prefetching_buffer
+                self.prefetching_buffer
                     .process_transaction_complete(tx.id)
                     .await;
                 Ok(())
