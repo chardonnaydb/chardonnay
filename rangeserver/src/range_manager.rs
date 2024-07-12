@@ -1,4 +1,3 @@
-use crate::prefetching_buffer;
 use crate::{
     epoch_provider::EpochProvider, error::Error, key_version::KeyVersion, storage::RangeInfo,
     storage::Storage, transaction_abort_reason::TransactionAbortReason,
