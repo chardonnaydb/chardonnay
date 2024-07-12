@@ -2,16 +2,15 @@ use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
 use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
-use std::path::Prefix;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
 use common::keyspace_id::KeyspaceId;
+use common::util;
 use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
-use common::{full_range_id, util};
 use flatbuffers::FlatBufferBuilder;
-use tokio::sync::{mpsc, oneshot, Mutex, RwLock};
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use uuid::Uuid;
@@ -794,7 +793,6 @@ pub mod tests {
         let mut config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
-                proto_server_addr: String::from("127.0.0.1:50051"),
                 proto_server_addr: String::from("127.0.0.1:50051"),
             },
             regions: std::collections::HashMap::new(),
