@@ -330,6 +330,23 @@ dependencies = [
 [[package]]
 name = "epoch_broadcaster"
 version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "common",
+ "flatbuf",
+ "flatbuffers",
+ "prost",
+ "proto",
+ "strum",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-build",
+ "uuid",
+]
 
 [[package]]
 name = "equivalent"
