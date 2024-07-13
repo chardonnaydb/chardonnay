@@ -421,15 +421,6 @@ where
                             .map_err(Error::from_storage_error)?;
 
                     get_result.val = val.clone();
-
-                    // TODO: what is the epoch here?
-                    // self
-                    // .cache
-                    // .write()
-                    // .await
-                    // .upsert(key.clone(), val.unwrap().clone(), 0)
-                    // .await
-                    // .map_err(Error::from_cache_error)?;
                 }
                 Ok(get_result)
             }

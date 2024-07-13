@@ -327,12 +327,11 @@ impl Cache for MemTableDB {
 }
 
 
-#[cfg(test)]
-pub mod tests {
+pub mod for_testing {
     use super::*;
 
-    const KV_SIZE: u64 = 30;
-    const MEMTABLE_SIZE: u64 = 2<<9;
+    pub const KV_SIZE: u64 = 30;
+    pub const MEMTABLE_SIZE: u64 = 2<<9;
 
     static rc_options: RCOptions = RCOptions{
         path: "",
@@ -346,7 +345,6 @@ pub mod tests {
             Arc::new(RwLock::new(MemTableDB::new(Some(&rc_options)).await))
         }
     }
-
     pub struct TestContext {
         pub mt_db: Arc<RwLock<MemTableDB>>,
     }
@@ -358,6 +356,40 @@ pub mod tests {
             mt_db: mt_db
         }
     }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use for_testing::*;
+
+    // const KV_SIZE: u64 = 30;
+    // const MEMTABLE_SIZE: u64 = 2<<9;
+
+    // static rc_options: RCOptions = RCOptions{
+    //     path: "",
+    //     num_write_buffers: 2, 
+    //     write_buffer_size: MEMTABLE_SIZE,
+    // };
+    // // static mut gc_epoch: u64 = 0;
+
+    // impl MemTableDB {
+    //     async fn create_test() -> Arc<RwLock<MemTableDB>> {
+    //         Arc::new(RwLock::new(MemTableDB::new(Some(&rc_options)).await))
+    //     }
+    // }
+
+    // pub struct TestContext {
+    //     pub mt_db: Arc<RwLock<MemTableDB>>,
+    // }
+
+    // pub async fn init() -> TestContext {
+    //     let mt_db = MemTableDB::create_test().await;
+
+    //     TestContext {
+    //         mt_db: mt_db
+    //     }
+    // }
 
     async fn fill(mt_db: &Arc<RwLock<MemTableDB>>, num_keys: u64, clear: bool) {
         
@@ -405,7 +437,7 @@ pub mod tests {
         let mut mt_db = context.mt_db.clone();
         
         let mut num_keys: u64 = 0;
-        num_keys = mt_db.read().await.rc_options.write_buffer_size/KV_SIZE - 1;
+        num_keys = mt_db.read().await.rc_options.write_buffer_size/for_testing::KV_SIZE - 1;
         fill(&mt_db, num_keys, false).await;
         println!("Fill complete >>>>>>!");
 
@@ -438,7 +470,7 @@ pub mod tests {
         let context = init().await;
         let mut mt_db = context.mt_db.clone();
         
-        let num_keys = mt_db.read().await.rc_options.write_buffer_size/KV_SIZE - 1;
+        let num_keys = mt_db.read().await.rc_options.write_buffer_size/for_testing::KV_SIZE - 1;
         fill(&mt_db, num_keys, false).await;
         println!("Fill complete >>>>>>!");
 
@@ -485,7 +517,7 @@ pub mod tests {
         let context = init().await;
         let mut mt_db = context.mt_db.clone();
         
-        let num_keys = mt_db.read().await.rc_options.write_buffer_size/KV_SIZE - 1;
+        let num_keys = mt_db.read().await.rc_options.write_buffer_size/for_testing::KV_SIZE - 1;
         fill(&mt_db, num_keys, false).await;
         println!("Fill complete >>>>>>!");
 
@@ -536,7 +568,7 @@ pub mod tests {
         let _ = mt_db.write().await.register_gc_callback(gc_callback);
         
         // fill two memtables
-        let num_keys = 100*(mt_db.read().await.rc_options.write_buffer_size/KV_SIZE - 1);
+        let num_keys = 100*(mt_db.read().await.rc_options.write_buffer_size/for_testing::KV_SIZE - 1);
         fill(&mt_db, num_keys, true).await;
         println!("Fill complete >>>>>>!");
 
