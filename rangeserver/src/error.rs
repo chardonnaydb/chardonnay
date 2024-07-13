@@ -1,6 +1,6 @@
 use crate::{
     epoch_provider::Error as EpochProviderError, storage::Error as StorageError,
-    transaction_abort_reason::TransactionAbortReason, wal::Error as WalError,
+    transaction_abort_reason::TransactionAbortReason, wal::Error as WalError, cache::Error as CacheError
 };
 
 use flatbuf::rangeserver_flatbuffers::range_server::Status;
@@ -17,6 +17,8 @@ pub enum Error {
     Timeout,
     UnknownTransaction,
     TransactionAborted(TransactionAbortReason),
+    // KeyNotFoundInCache,
+    // CacheIsFull,
     InternalError(Arc<dyn std::error::Error + Send + Sync>),
 }
 
@@ -33,6 +35,15 @@ impl Error {
     pub fn from_wal_error(e: WalError) -> Self {
         match e {
             WalError::Unknown => Self::InternalError(Arc::new(e)),
+        }
+    }
+
+    pub fn from_cache_error(e: CacheError) -> Self {
+        match e {
+            CacheError::KeyNotFound => Self::InternalError(Arc::new(e)), //Self::KeyNotFoundInCache,
+            CacheError::CacheIsFull => Self::InternalError(Arc::new(e)), //Self::CacheIsFull,
+            CacheError::Timeout => Self::Timeout,
+            CacheError::InternalError(_) => Self::InternalError(Arc::new(e)),
         }
     }
 

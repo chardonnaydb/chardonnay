@@ -18,7 +18,7 @@ use crate::transaction_info::TransactionInfo;
 use crate::warden_handler::WardenHandler;
 use crate::{
     epoch_provider::EpochProvider, error::Error, for_testing::in_memory_wal::InMemoryWal,
-    range_manager::RangeManager, storage::Storage,
+    range_manager::RangeManager, storage::Storage, cache::Cache,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
@@ -46,33 +46,37 @@ impl RangeServer for ProtoServer {
     }
 }
 
-pub struct Server<S, E>
+pub struct Server<S, E, C>
 where
     S: Storage,
     E: EpochProvider,
+    C: Cache,
 {
     config: Config,
     storage: Arc<S>,
     epoch_provider: Arc<E>,
+    cache: Arc<RwLock<C>>,
     warden_handler: WardenHandler,
     bg_runtime: tokio::runtime::Handle,
     // TODO: parameterize the WAL implementation too.
-    loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, E, InMemoryWal>>>>,
+    loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, E, InMemoryWal, C>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
 }
 
 type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
 
-impl<S, E> Server<S, E>
+impl<S, E, C> Server<S, E, C>
 where
     S: Storage,
     E: EpochProvider,
+    C: Cache,
 {
     pub fn new(
         config: Config,
         host_info: HostInfo,
         storage: Arc<S>,
         epoch_provider: Arc<E>,
+        cache: Arc<RwLock<C>>,
         bg_runtime: tokio::runtime::Handle,
     ) -> Arc<Self> {
         let warden_handler = WardenHandler::new(&config, &host_info);
@@ -80,6 +84,7 @@ where
             config,
             storage,
             epoch_provider,
+            cache,
             warden_handler,
             bg_runtime,
             loaded_ranges: RwLock::new(HashMap::new()),
@@ -132,7 +137,7 @@ where
 
     async fn load_range_in_bg_runtime(
         &self,
-        rm: Arc<RangeManager<S, E, InMemoryWal>>,
+        rm: Arc<RangeManager<S, E, InMemoryWal, C>>,
     ) -> Result<(), Error> {
         self.bg_runtime
             .spawn(async move { rm.load().await })
@@ -142,7 +147,7 @@ where
     async fn maybe_load_and_get_range(
         &self,
         id: &FullRangeId,
-    ) -> Result<Arc<RangeManager<S, E, InMemoryWal>>, Error> {
+    ) -> Result<Arc<RangeManager<S, E, InMemoryWal, C>>, Error> {
         {
             // Fast path when range has already been loaded.
             let range_table = self.loaded_ranges.read().await;
@@ -173,6 +178,7 @@ where
                         self.storage.clone(),
                         self.epoch_provider.clone(),
                         InMemoryWal::new(),
+                        self.cache.clone(),
                     );
                     (range_table).insert(id.range_id, rm.clone());
                     drop(range_table);
@@ -691,7 +697,8 @@ pub mod tests {
     use crate::for_testing::epoch_provider::EpochProvider;
     use crate::for_testing::mock_warden::MockWarden;
     use crate::storage::cassandra::Cassandra;
-    type Server = super::Server<Cassandra, EpochProvider>;
+    use crate::cache::memtabledb::MemTableDB;
+    type Server = super::Server<Cassandra, EpochProvider, MemTableDB>;
 
     impl Server {
         async fn is_assigned(&self, range_id: &FullRangeId) -> bool {
@@ -711,6 +718,7 @@ pub mod tests {
     async fn init() -> TestContext {
         let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
         let epoch_provider = Arc::new(EpochProvider::new());
+        let cache = Arc::new(RwLock::new(MemTableDB::new(None).await));
         let storage_context: crate::storage::cassandra::for_testing::TestContext =
             crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
@@ -746,6 +754,7 @@ pub mod tests {
             host_info,
             cassandra,
             epoch_provider,
+            cache,
             tokio::runtime::Handle::current().clone(),
         );
 

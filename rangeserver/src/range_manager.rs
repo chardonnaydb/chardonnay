@@ -1,7 +1,7 @@
 use crate::{
     epoch_provider::EpochProvider, error::Error, key_version::KeyVersion, storage::RangeInfo,
     storage::Storage, transaction_abort_reason::TransactionAbortReason,
-    transaction_info::TransactionInfo, wal::Wal,
+    transaction_info::TransactionInfo, wal::Wal, cache::Cache,
 };
 use bytes::Bytes;
 use chrono::DateTime;
@@ -149,17 +149,19 @@ enum State {
     Loaded(LoadedState),
 }
 
-pub struct RangeManager<S, E, W>
+pub struct RangeManager<S, E, W, C>
 where
     S: Storage,
     E: EpochProvider,
     W: Wal,
+    C: Cache,
 {
     range_id: FullRangeId,
     config: Config,
     storage: Arc<S>,
     epoch_provider: Arc<E>,
     wal: Mutex<W>,
+    cache: Arc<RwLock<C>>,
     state: Arc<RwLock<State>>,
 }
 
@@ -173,11 +175,12 @@ pub struct PrepareResult {
     pub epoch_lease: (u64, u64),
 }
 
-impl<S, E, W> RangeManager<S, E, W>
+impl<S, E, W, C> RangeManager<S, E, W, C>
 where
     S: Storage,
     E: EpochProvider,
     W: Wal,
+    C: Cache,
 {
     pub fn new(
         range_id: FullRangeId,
@@ -185,6 +188,7 @@ where
         storage: Arc<S>,
         epoch_provider: Arc<E>,
         wal: W,
+        cache: Arc<RwLock<C>>,
     ) -> Arc<Self> {
         Arc::new(RangeManager {
             range_id,
@@ -192,6 +196,7 @@ where
             storage,
             epoch_provider,
             wal: Mutex::new(wal),
+            cache,
             state: Arc::new(RwLock::new(State::Unloaded)),
         })
     }
@@ -388,15 +393,44 @@ where
                     return Err(Error::KeyIsOutOfRange);
                 };
                 self.acquire_range_lock(state, tx.clone()).await?;
-                let val = self
-                    .storage
-                    .get(self.range_id, key.clone())
-                    .await
-                    .map_err(Error::from_storage_error)?;
-                let get_result = GetResult {
-                    val: val.clone(),
+
+                let mut get_result = GetResult {
+                    val: None,
                     leader_sequence_number: state.range_info.leader_sequence_number as i64,
                 };
+
+                // check cache first
+                let cache_result = self
+                    .cache
+                    .read()
+                    .await
+                    .get(&key.clone(), None)
+                    .await;
+                    // .map_err(Error::from_cache_error)?;
+
+                if let Ok((val, _)) = cache_result {
+                    get_result.val = Some(val);
+                } else {
+                    // do some error checking cache error
+                    // assert!(cache_result.map_err(Error::from_cache_error) == Error::KeyNotFoundInCache);
+
+                    let val = self
+                            .storage
+                            .get(self.range_id, key.clone())
+                            .await
+                            .map_err(Error::from_storage_error)?;
+
+                    get_result.val = val.clone();
+
+                    // TODO: what is the epoch here?
+                    // self
+                    // .cache
+                    // .write()
+                    // .await
+                    // .upsert(key.clone(), val.unwrap().clone(), 0)
+                    // .await
+                    // .map_err(Error::from_cache_error)?;
+                }
                 Ok(get_result)
             }
         }
@@ -537,25 +571,31 @@ where
                     // We should also add retries in case of intermittent failures. Note that all our
                     // storage operations here are idempotent and safe to retry any number of times.
                     for put in prepare_record.puts().iter() {
+                        let mut cache_wg = self.cache.write().await;
                         for put in put.iter() {
                             // TODO: too much copying :(
                             let key =
                                 Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
                             let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
 
-                            self.storage
-                                .upsert(self.range_id, key, val, version)
-                                .await
-                                .map_err(Error::from_storage_error)?;
+                            // self.storage
+                            //     .upsert(self.range_id, key, val, version)
+                            //     .await
+                            //     .map_err(Error::from_storage_error)?;
+
+                            cache_wg.upsert(key, val, version.epoch).await.map_err(Error::from_cache_error)?;
                         }
                     }
                     for del in prepare_record.deletes().iter() {
+                        let mut cache_wg = self.cache.write().await;
                         for del in del.iter() {
                             let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
-                            self.storage
-                                .delete(self.range_id, key, version)
-                                .await
-                                .map_err(Error::from_storage_error)?;
+                            // self.storage
+                            //     .delete(self.range_id, key, version)
+                            //     .await
+                            //     .map_err(Error::from_storage_error)?;
+
+                            cache_wg.delete(key, version.epoch).await.map_err(Error::from_cache_error)?;
                         }
                     }
                 }
@@ -584,8 +624,9 @@ mod tests {
     use crate::for_testing::epoch_provider::EpochProvider;
     use crate::for_testing::in_memory_wal::InMemoryWal;
     use crate::storage::cassandra::Cassandra;
+    use crate::cache::memtabledb::MemTableDB;
     use crate::transaction_info::TransactionInfo;
-    type RM = RangeManager<Cassandra, EpochProvider, InMemoryWal>;
+    type RM = RangeManager<Cassandra, EpochProvider, InMemoryWal, MemTableDB>;
 
     impl RM {
         async fn abort_transaction(&self, tx: Arc<TransactionInfo>) {
@@ -708,6 +749,7 @@ mod tests {
         let storage_context: crate::storage::cassandra::for_testing::TestContext =
             crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
+        let cache = Arc::new(RwLock::new(MemTableDB::new(None).await));
         let range_id = FullRangeId {
             keyspace_id: storage_context.keyspace_id,
             range_id: storage_context.range_id,
@@ -724,6 +766,7 @@ mod tests {
             config,
             storage: cassandra,
             wal,
+            cache,
             epoch_provider,
             state: Arc::new(RwLock::new(State::Unloaded)),
         });

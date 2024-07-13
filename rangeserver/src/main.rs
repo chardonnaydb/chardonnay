@@ -11,10 +11,11 @@ use common::{
     region::{Region, Zone},
 };
 use rangeserver::{
-    for_testing::mock_warden::MockWarden, server::Server, storage::cassandra::Cassandra,
+    for_testing::mock_warden::MockWarden, server::Server, storage::cassandra::Cassandra, cache::memtabledb::MemTableDB,
 };
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
+use tokio::sync::RwLock;
 
 fn main() {
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
@@ -34,6 +35,7 @@ fn main() {
         let storage = Arc::new(Cassandra::new("127.0.0.1:9042".to_string()).await);
         let epoch_provider =
             Arc::new(rangeserver::for_testing::epoch_provider::EpochProvider::new());
+        let cache = Arc::new(RwLock::new(MemTableDB::new(None).await));
         let config = get_config(warden_address);
         let host_info = get_host_info();
         // TODO: set number of threads and pin to cores.
@@ -43,6 +45,7 @@ fn main() {
             host_info,
             storage,
             epoch_provider,
+            cache,
             bg_runtime.handle().clone(),
         );
         let res = Server::start(server, fast_network, CancellationToken::new())
