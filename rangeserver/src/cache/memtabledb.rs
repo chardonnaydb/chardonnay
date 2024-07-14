@@ -1,7 +1,5 @@
 use skiplist::OrderedSkipList;
 use std::cmp::Ordering;
-// use std::sync::RwLock;
-// use parking_lot::RwLock;
 use tokio::sync::RwLock;
 use std::mem;
 use bytes::Bytes;
@@ -11,13 +9,12 @@ use std::collections::HashMap;
 use std::vec::Vec;
 use std::thread;
 use std::sync::Mutex;
-// use rand::Rng;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::cmp::min;
 
 // memtable status changes from FLUSHED->MUTABLE->IMMUTABLE->FLUSHED
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MemTableStatus {
     FLUSHED,    // also initial status
     MUTABLE,
@@ -70,10 +67,10 @@ pub struct MemTable {
     entries: OrderedSkipList<MemTableEntry>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct MemTableDB {
     rc_options: RCOptions,
-    memtables: Vec<Arc<RwLock<MemTable>>>,
+    memtables: Vec<MemTable>,
     mutable_id: usize,
     latest_epoch: u64,
     gc_callback: Option<GCCallback>,
@@ -95,7 +92,7 @@ impl MemTableDB {
 
         let mut mt_db = MemTableDB {
             rc_options: opts.clone(),
-            memtables: Vec::<Arc<RwLock<MemTable>>>::new(), 
+            memtables: Vec::<MemTable>::new(), 
             mutable_id: 0,
             latest_epoch: 0,
             gc_callback: None,
@@ -110,13 +107,10 @@ impl MemTableDB {
                 oldest_epoch: 0,
                 // TODO: init with capacity
                 entries: OrderedSkipList::<MemTableEntry>::new(),};
-            mt_db.memtables.push(Arc::new(RwLock::new(mt)));
+            mt_db.memtables.push(mt);
         }
         // change the status of first memtable as mutable
-        // let mut memtable_wg = mt_db.memtables[mt_db.mutable_id].write().unwrap();
-        let mut memtable_wg = mt_db.memtables[mt_db.mutable_id].write().await;
-        memtable_wg.status = MemTableStatus::MUTABLE;
-        drop(memtable_wg);
+        mt_db.memtables[mt_db.mutable_id].status = MemTableStatus::MUTABLE;
         mt_db
     }
 
@@ -144,50 +138,35 @@ impl MemTableDB {
             let entry_size: u64 = key.len() as u64 + (val_len as u64) + (mem::size_of::<u64>() as u64) + (mem::size_of::<bool>() as u64);
             let entry = MemTableEntry { key: key, val: val_match, epoch: epoch, deleted: deleted };
             
-            // let mut memtable_wg = self.memtables[self.mutable_id].write().unwrap();
-            let mut memtable_wg = self.memtables[self.mutable_id].write().await;
-            assert!(memtable_wg.status == MemTableStatus::MUTABLE, 
-                "active memtable is not mutable ({}) ({:?})", self.mutable_id, memtable_wg.status);
+            assert!(self.memtables[self.mutable_id].status == MemTableStatus::MUTABLE, 
+                "active memtable is not mutable ({}) ({:?})", self.mutable_id, self.memtables[self.mutable_id].status);
 
             // println!("Memtable size {} entry size {}", memtable_wg.size_in_bytes, entry_size);
-            let mut flush_id: i32 = -1;
-            if memtable_wg.size_in_bytes + entry_size <= self.rc_options.write_buffer_size {
-                memtable_wg.entries.insert(entry);
-                memtable_wg.size_in_bytes += entry_size;
-                memtable_wg.latest_epoch = epoch;
-                self.latest_epoch = epoch;
-                drop(memtable_wg);
-            } else {
-                flush_id = self.mutable_id as i32;
+            if self.memtables[self.mutable_id].size_in_bytes + entry_size > self.rc_options.write_buffer_size {
+                let old_id= self.mutable_id;
                 let new_id = (self.mutable_id+1) % self.rc_options.num_write_buffers;
 
-                // let mut new_memtable_wg = self.memtables[new_id].write().unwrap();
-                let mut new_memtable_wg = self.memtables[new_id].write().await;
-                assert!(new_memtable_wg.status == MemTableStatus::FLUSHED, 
-                    "no free memtables {} {:?}", new_id, new_memtable_wg.status);
+                assert!(self.memtables[new_id].status == MemTableStatus::FLUSHED, 
+                    "no free memtables {} {:?}", new_id, self.memtables[new_id].status);
                 // Err(Error::OutOfSpace)
 
-                // TODO: these two operations need to be atomic
-                self.mutable_id = (self.mutable_id+1) % self.rc_options.num_write_buffers;
-                new_memtable_wg.status = MemTableStatus::MUTABLE;
-                memtable_wg.status = MemTableStatus::IMMUTABLE;
+                self.mutable_id = new_id;
+                self.memtables[new_id].status = MemTableStatus::MUTABLE;
+                self.memtables[old_id].status = MemTableStatus::IMMUTABLE;
+                self.memtables[new_id].oldest_epoch = epoch;
+                println!("Switched memtable from {} to {}", old_id, new_id);
 
                 // trigger garbage collection on flushed memtable
                 match self.gc_callback {
-                    Some(cb) => cb(memtable_wg.latest_epoch),
+                    Some(cb) => cb(self.memtables[self.mutable_id].latest_epoch),
                     None => println!("INFO: GC callback is not set {:?}", self.gc_callback),
                 }
-                drop(memtable_wg);
-
-                new_memtable_wg.entries.insert(entry);
-                new_memtable_wg.size_in_bytes += entry_size;
-                new_memtable_wg.latest_epoch = epoch;
-                new_memtable_wg.oldest_epoch = epoch;
-                self.latest_epoch = epoch;
-                drop(new_memtable_wg);
-
-                println!("Switched memtable from {} to {}", flush_id, new_id);
             }
+            self.memtables[self.mutable_id].entries.insert(entry);
+            self.memtables[self.mutable_id].size_in_bytes += entry_size;
+            self.memtables[self.mutable_id].latest_epoch = epoch;
+            self.latest_epoch = epoch;
+
             Ok(())
         }
 }
@@ -240,19 +219,18 @@ impl Cache for MemTableDB {
                 epoch_internal = self.latest_epoch;
             },
         }
-        
-        let mut_id = self.mutable_id; // take a snapshot of mutable_id, may change
 
         for i in 0..self.rc_options.num_write_buffers {
-            let id = (mut_id + self.rc_options.num_write_buffers - i) % self.rc_options.num_write_buffers; // mut_id is usize, should not become negative
+            let id = (self.mutable_id + self.rc_options.num_write_buffers - i) % self.rc_options.num_write_buffers; // mut_id is usize, should not become negative
             // let memtable_rg = self.memtables[id].read().unwrap();
-            let memtable_rg = self.memtables[id].read().await;
-            println!("GET-DBG: id {}, epoch {}, oldest_epoch {}, latest_epoch {}", id, epoch_internal, memtable_rg.oldest_epoch, memtable_rg.latest_epoch);
-            if memtable_rg.status == MemTableStatus::FLUSHED {
+            // let memtable_rg = self.memtables[id].read().await;
+            println!("GET-DBG: id {}, epoch {}, oldest_epoch {}, latest_epoch {}", id, epoch_internal, 
+                self.memtables[id].oldest_epoch, self.memtables[id].latest_epoch);
+            if self.memtables[id].status == MemTableStatus::FLUSHED {
                 break
             }
-            if memtable_rg.oldest_epoch <= epoch_internal && epoch_internal <= memtable_rg.latest_epoch {                
-                match memtable_rg.entries.iter().find(|&&ref entry| entry.key == key && entry.epoch <= epoch_internal)  {
+            if self.memtables[id].oldest_epoch <= epoch_internal && epoch_internal <= self.memtables[id].latest_epoch {                
+                match self.memtables[id].entries.iter().find(|&&ref entry| entry.key == key && entry.epoch <= epoch_internal)  {
                     Some(entry) => { 
                         println!("Found the entry {:?}", entry);
                         if entry.deleted {
@@ -267,7 +245,6 @@ impl Cache for MemTableDB {
                     }
                 }
             }
-            drop(memtable_rg);
         }
         Err(Error::KeyNotFound)
     }
@@ -289,25 +266,18 @@ impl Cache for MemTableDB {
         assert!(self.mutable_id >= 0 && self.mutable_id < self.rc_options.num_write_buffers, 
             "mutable_id is out of range ({})", self.mutable_id);
         
-        let mut_id = self.mutable_id; // take a snapshot of mutable_id, may change
+        // let mut_id = self.mutable_id;
 
         match epoch {
             Some(e) => {
                 for i in 1..self.rc_options.num_write_buffers {
-                    let id = (mut_id + self.rc_options.num_write_buffers - i) % self.rc_options.num_write_buffers; // mut_id is usize, should not become negative
-                    // let memtable_rg = self.memtables[id].write().unwrap();
-                    let memtable_rg = self.memtables[id].write().await;
-                    if memtable_rg.status == MemTableStatus::IMMUTABLE && e >= memtable_rg.latest_epoch {
-                        drop(memtable_rg);
-                        // let mut memtable_wg = self.memtables[id].write().unwrap();
-                        let mut memtable_wg = self.memtables[id].write().await;
-                        memtable_wg.status = MemTableStatus::FLUSHED;
-                        memtable_wg.size_in_bytes = 0;
-                        memtable_wg.entries.clear();
-                        println!("Changing memtable {} state from IMMUTABLE to {:?}", id, memtable_wg.status);
-                        drop(memtable_wg);
+                    let id = (self.mutable_id + self.rc_options.num_write_buffers - i) % self.rc_options.num_write_buffers; // mut_id is usize, should not become negative
+                    if self.memtables[id].status == MemTableStatus::IMMUTABLE && e >= self.memtables[id].latest_epoch {
+                        self.memtables[id].status = MemTableStatus::FLUSHED;
+                        self.memtables[id].size_in_bytes = 0;
+                        self.memtables[id].entries.clear();
+                        println!("Changing memtable {} state from IMMUTABLE to {:?}", id, self.memtables[id].status);
                     }
-                    // drop(memtable_rg);
                 }
                 Ok(())
             },
@@ -338,7 +308,6 @@ pub mod for_testing {
         num_write_buffers: 2, 
         write_buffer_size: MEMTABLE_SIZE,
     };
-    // static mut gc_epoch: u64 = 0;
 
     impl MemTableDB {
         async fn create_test() -> Arc<RwLock<MemTableDB>> {
@@ -363,55 +332,25 @@ pub mod tests {
     use super::*;
     use for_testing::*;
 
-    // const KV_SIZE: u64 = 30;
-    // const MEMTABLE_SIZE: u64 = 2<<9;
-
-    // static rc_options: RCOptions = RCOptions{
-    //     path: "",
-    //     num_write_buffers: 2, 
-    //     write_buffer_size: MEMTABLE_SIZE,
-    // };
-    // // static mut gc_epoch: u64 = 0;
-
-    // impl MemTableDB {
-    //     async fn create_test() -> Arc<RwLock<MemTableDB>> {
-    //         Arc::new(RwLock::new(MemTableDB::new(Some(&rc_options)).await))
-    //     }
-    // }
-
-    // pub struct TestContext {
-    //     pub mt_db: Arc<RwLock<MemTableDB>>,
-    // }
-
-    // pub async fn init() -> TestContext {
-    //     let mt_db = MemTableDB::create_test().await;
-
-    //     TestContext {
-    //         mt_db: mt_db
-    //     }
-    // }
-
     async fn fill(mt_db: &Arc<RwLock<MemTableDB>>, num_keys: u64, clear: bool) {
         
         let mut data = vec![0u8; 10];
         for i in 0..num_keys {
-            // let mut key_str = format!("k{}", i);
             let key = Bytes::from(format!("k{}", i));
             data[0] = i as u8;
             let value = Bytes::from(data.clone());
             let epoch = i;
-            println!("insert key {:?} value_size {:?} epoch {:?}", key, value.len(), epoch);
+            println!("FILL: insert key {:?} value_size {:?} epoch {:?}", key, value.len(), epoch);
             {
-                let mut mt_db_wg = mt_db.write().await;
-                match mt_db_wg.upsert(key.clone(), value.clone(), epoch).await {
+                // let mut mt_db_wg = mt_db.write().await;
+                match mt_db.write().await.upsert(key.clone(), value.clone(), epoch).await {
                     Err(e) => assert!(false, "insert result not ok! {}", e),
                     Ok(_) => {},
                 }
             }
             {
-                println!("get key {:?} epoch {:?}", key, epoch);
-                let mut mt_db_rg = mt_db.read().await;
-                match mt_db_rg.get(&key, None).await {
+                println!("FILL: get key {:?} epoch {:?}", key, epoch);
+                match mt_db.read().await.get(&key, None).await {
                     Err(e) => assert!(false, "get after insert returned error! {}", e),
                     Ok((val, ep)) => {
                         assert!(*val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
@@ -422,8 +361,8 @@ pub mod tests {
 
             // trigger a gc cleanup periodically 
             if clear && i%10 == 0 {
-                let mut mt_db_wg = mt_db.write().await;
-                match mt_db_wg.clear(Some(epoch)).await {
+                // let mut mt_db_wg = mt_db.write().await;
+                match mt_db.write().await.clear(Some(epoch)).await {
                     Ok(_) => println!("Clear() succeeded"),
                     Err(e) => assert!(false, "Clear() failed {}", e),
                 }
@@ -579,7 +518,7 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn concurrent_insert_get() {
+    async fn concurrent() {
         let context = init().await;
         let mut mt_db = context.mt_db.clone();
 
