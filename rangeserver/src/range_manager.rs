@@ -606,14 +606,10 @@ where
         Ok(val)
     }
 
-    pub async fn process_prefetch(
-        &self,
-        buffer: &Arc<PrefetchingBuffer>,
-        transaction_id: Uuid,
-        key: Bytes,
-    ) -> Result<(), Error> {
+    pub async fn prefetch(&self, transaction_id: Uuid, key: Bytes) -> Result<(), Error> {
         // Request prefetch from the prefetching buffer
-        if let Some(keystate) = buffer
+        if let Some(keystate) = self
+            .prefetching_buffer
             .process_prefetch_request(transaction_id, key.clone())
             .await
         {
@@ -627,14 +623,14 @@ where
                     let val = match self.prefetch_get(key.clone()).await {
                         Ok(value) => value,
                         Err(_) => {
-                            buffer
+                            self.prefetching_buffer
                                 .fetch_failed(key.clone(), fetch_sequence_number)
                                 .await;
                             return Err(Error::PrefetchError);
                         }
                     };
                     // Successfully fetched from database -> add to buffer and update records
-                    buffer
+                    self.prefetching_buffer
                         .fetch_complete(key.clone(), val, fetch_sequence_number)
                         .await;
                     Ok(())

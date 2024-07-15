@@ -85,10 +85,7 @@ where
             .map_err(|e| TStatus::internal(format!("Failed to load range: {:?}", e)))?;
 
         // Call process_prefetch_request in range_manager.rs
-        match range_manager
-            .process_prefetch(&self.buffer, transaction_id, key)
-            .await
-        {
+        match range_manager.prefetch(transaction_id, key).await {
             Ok(_) => {
                 let reply = PrefetchResponse {
                     status: format!("Prefetch request processed successfully"),
