@@ -4,7 +4,7 @@ use tokio::sync::RwLock;
 use std::mem;
 use bytes::Bytes;
 use std::sync::Arc;
-use crate::cache::{Cache, Error, GCCallback, RCOptions};
+use crate::cache::{Cache, Error, GCCallback, CacheOptions};
 use std::collections::HashMap;
 use std::vec::Vec;
 use std::thread;
@@ -12,6 +12,8 @@ use std::sync::Mutex;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::cmp::min;
+use std::cmp::max;
+use core::ops::Bound::Included;
 
 // memtable status changes from FLUSHED->MUTABLE->IMMUTABLE->FLUSHED
 #[derive(Clone, Debug, PartialEq)]
@@ -69,31 +71,31 @@ pub struct MemTable {
 
 #[derive(Debug)]
 pub struct MemTableDB {
-    rc_options: RCOptions,
+    cache_options: CacheOptions,
     memtables: Vec<MemTable>,
-    mutable_id: usize,
+    mut_memtable_idx: usize,
     latest_epoch: u64,
     gc_callback: Option<GCCallback>,
 }
 
 impl MemTableDB {
-    pub async fn new(rc_options: Option<&RCOptions>) -> Self {
+    pub async fn new(cache_options: Option<&CacheOptions>) -> Self {
 
-        let mut opts = RCOptions{
+        let mut opts = CacheOptions{
             path: "",
             num_write_buffers: 2,
             write_buffer_size: 2<<29,
          };
 
-        match rc_options {
+        match cache_options {
             Some(opt) => {opts = *opt},
             None => {},
         }
 
         let mut mt_db = MemTableDB {
-            rc_options: opts.clone(),
+            cache_options: opts.clone(),
             memtables: Vec::<MemTable>::new(), 
-            mutable_id: 0,
+            mut_memtable_idx: 0,
             latest_epoch: 0,
             gc_callback: None,
         };
@@ -110,7 +112,7 @@ impl MemTableDB {
             mt_db.memtables.push(mt);
         }
         // change the status of first memtable as mutable
-        mt_db.memtables[mt_db.mutable_id].status = MemTableStatus::MUTABLE;
+        mt_db.memtables[mt_db.mut_memtable_idx].status = MemTableStatus::MUTABLE;
         mt_db
     }
 
@@ -122,8 +124,8 @@ impl MemTableDB {
         val: Option<bytes::Bytes>) -> Result<(), Error> {
 
             // sanity checks
-            assert!(self.mutable_id >= 0 && self.mutable_id < self.rc_options.num_write_buffers, 
-                "mutable_id is out of range ({})", self.mutable_id);
+            assert!(self.mut_memtable_idx >= 0 && self.mut_memtable_idx < self.cache_options.num_write_buffers, 
+                "mut_memtable_idx is out of range ({})", self.mut_memtable_idx);
             
             let mut val_match = Bytes::new();
             let mut val_len = 0; 
@@ -136,21 +138,26 @@ impl MemTableDB {
             }
 
             let entry_size: u64 = key.len() as u64 + (val_len as u64) + (mem::size_of::<u64>() as u64) + (mem::size_of::<bool>() as u64);
-            let entry = MemTableEntry { key: key, val: val_match, epoch: epoch, deleted: deleted };
+            let entry = MemTableEntry { 
+                key, 
+                val: val_match, 
+                epoch, 
+                deleted };
             
-            assert!(self.memtables[self.mutable_id].status == MemTableStatus::MUTABLE, 
-                "active memtable is not mutable ({}) ({:?})", self.mutable_id, self.memtables[self.mutable_id].status);
+            assert!(self.memtables[self.mut_memtable_idx].status == MemTableStatus::MUTABLE, 
+                "active memtable is not mutable ({}) ({:?})", self.mut_memtable_idx, self.memtables[self.mut_memtable_idx].status);
 
             // println!("Memtable size {} entry size {}", memtable_wg.size_in_bytes, entry_size);
-            if self.memtables[self.mutable_id].size_in_bytes + entry_size > self.rc_options.write_buffer_size {
-                let old_id= self.mutable_id;
-                let new_id = (self.mutable_id+1) % self.rc_options.num_write_buffers;
+            if self.memtables[self.mut_memtable_idx].size_in_bytes + entry_size > self.cache_options.write_buffer_size {
+                let old_id= self.mut_memtable_idx;
+                let new_id = (self.mut_memtable_idx+1) % self.cache_options.num_write_buffers;
 
-                assert!(self.memtables[new_id].status == MemTableStatus::FLUSHED, 
-                    "no free memtables {} {:?}", new_id, self.memtables[new_id].status);
-                // Err(Error::OutOfSpace)
+                if self.memtables[new_id].status != MemTableStatus::FLUSHED {
+                    println!("No free memtables {} {:?}", new_id, self.memtables[new_id].status);
+                    return Err(Error::CacheIsFull);
+                }
 
-                self.mutable_id = new_id;
+                self.mut_memtable_idx = new_id;
                 self.memtables[new_id].status = MemTableStatus::MUTABLE;
                 self.memtables[old_id].status = MemTableStatus::IMMUTABLE;
                 self.memtables[new_id].oldest_epoch = epoch;
@@ -158,13 +165,13 @@ impl MemTableDB {
 
                 // trigger garbage collection on flushed memtable
                 match self.gc_callback {
-                    Some(cb) => cb(self.memtables[self.mutable_id].latest_epoch),
-                    None => println!("INFO: GC callback is not set {:?}", self.gc_callback),
+                    Some(cb) => cb(self.memtables[self.mut_memtable_idx].latest_epoch),
+                    None => println!("GC callback is not set"),
                 }
             }
-            self.memtables[self.mutable_id].entries.insert(entry);
-            self.memtables[self.mutable_id].size_in_bytes += entry_size;
-            self.memtables[self.mutable_id].latest_epoch = epoch;
+            self.memtables[self.mut_memtable_idx].entries.insert(entry);
+            self.memtables[self.mut_memtable_idx].size_in_bytes += entry_size;
+            self.memtables[self.mut_memtable_idx].latest_epoch = max(self.memtables[self.mut_memtable_idx].latest_epoch, epoch);
             self.latest_epoch = epoch;
 
             Ok(())
@@ -179,11 +186,6 @@ impl Cache for MemTableDB {
         val: bytes::Bytes,
         epoch: u64,
         ) -> Result<(), Error> {
-
-            // sanity checks
-            assert!(self.mutable_id >= 0 && self.mutable_id < self.rc_options.num_write_buffers, 
-                "mutable_id is out of range ({})", self.mutable_id);
-                        
             self.upsert_or_delete(key, epoch, false, Some(val)).await
     }
 
@@ -192,23 +194,18 @@ impl Cache for MemTableDB {
         key: bytes::Bytes,
         epoch: u64,
     ) -> Result<(), Error> {
-
-        // sanity checks
-        assert!(self.mutable_id >= 0 && self.mutable_id < self.rc_options.num_write_buffers, 
-            "mutable_id is out of range ({})", self.mutable_id);
-        
         self.upsert_or_delete(key, epoch, true, None).await
     }
 
     async fn get(
         &self, 
-        key: &bytes::Bytes,
+        key: bytes::Bytes,
         epoch: Option<u64>,
     ) -> Result<(bytes::Bytes, u64), Error> {
 
         // sanity checks
-        assert!(self.mutable_id >= 0 && self.mutable_id < self.rc_options.num_write_buffers, 
-            "mutable_id is out of range ({})", self.mutable_id);
+        assert!(self.mut_memtable_idx >= 0 && self.mut_memtable_idx < self.cache_options.num_write_buffers, 
+            "mut_memtable_idx is out of range ({})", self.mut_memtable_idx);
     
         let mut epoch_internal = 0;
         match epoch {
@@ -220,17 +217,24 @@ impl Cache for MemTableDB {
             },
         }
 
-        for i in 0..self.rc_options.num_write_buffers {
-            let id = (self.mutable_id + self.rc_options.num_write_buffers - i) % self.rc_options.num_write_buffers; // mut_id is usize, should not become negative
-            // let memtable_rg = self.memtables[id].read().unwrap();
-            // let memtable_rg = self.memtables[id].read().await;
-            println!("GET-DBG: id {}, epoch {}, oldest_epoch {}, latest_epoch {}", id, epoch_internal, 
-                self.memtables[id].oldest_epoch, self.memtables[id].latest_epoch);
-            if self.memtables[id].status == MemTableStatus::FLUSHED {
+        for i in 0..self.cache_options.num_write_buffers {
+            let idx = (self.mut_memtable_idx + self.cache_options.num_write_buffers - i) % self.cache_options.num_write_buffers; // mut_id is usize, should not become negative
+            println!("GET-DBG: key {:?} memtable_idx {}, epoch {}, oldest_epoch {}, latest_epoch {}", key, idx, epoch_internal, self.memtables[idx].oldest_epoch, self.memtables[idx].latest_epoch);
+            if self.memtables[idx].status == MemTableStatus::FLUSHED {
                 break
             }
-            if self.memtables[id].oldest_epoch <= epoch_internal && epoch_internal <= self.memtables[id].latest_epoch {                
-                match self.memtables[id].entries.iter().find(|&&ref entry| entry.key == key && entry.epoch <= epoch_internal)  {
+            if self.memtables[idx].oldest_epoch <= epoch_internal && epoch_internal <= self.memtables[idx].latest_epoch {
+                let start = MemTableEntry{
+                    key: key.clone(),
+                    val: Vec::new().into(),
+                    epoch: epoch_internal,
+                    deleted: false};
+                let mut end = start.clone();
+                end.epoch = 0;
+
+                let result = self.memtables[idx].entries.range(Included(&start), Included(&end)).next();
+
+                match result {
                     Some(entry) => { 
                         println!("Found the entry {:?}", entry);
                         if entry.deleted {
@@ -240,8 +244,8 @@ impl Cache for MemTableDB {
                         }
                     }
                     None => {
-                        println!("Entry not found in memtable {}", id);
-                        return Err(Error::KeyNotFound);
+                        println!("Entry not found in memtable {}", idx);
+                        // continue checking other memtables
                     }
                 }
             }
@@ -259,31 +263,23 @@ impl Cache for MemTableDB {
 
     async fn clear(
         &mut self,
-        epoch: Option<u64>,
+        epoch: u64,
     ) -> Result<(), Error> {
 
         // sanity checks
-        assert!(self.mutable_id >= 0 && self.mutable_id < self.rc_options.num_write_buffers, 
-            "mutable_id is out of range ({})", self.mutable_id);
+        assert!(self.mut_memtable_idx >= 0 && self.mut_memtable_idx < self.cache_options.num_write_buffers, 
+            "mut_memtable_idx is out of range ({})", self.mut_memtable_idx);
         
-        // let mut_id = self.mutable_id;
-
-        match epoch {
-            Some(e) => {
-                for i in 1..self.rc_options.num_write_buffers {
-                    let id = (self.mutable_id + self.rc_options.num_write_buffers - i) % self.rc_options.num_write_buffers; // mut_id is usize, should not become negative
-                    if self.memtables[id].status == MemTableStatus::IMMUTABLE && e >= self.memtables[id].latest_epoch {
-                        self.memtables[id].status = MemTableStatus::FLUSHED;
-                        self.memtables[id].size_in_bytes = 0;
-                        self.memtables[id].entries.clear();
-                        println!("Changing memtable {} state from IMMUTABLE to {:?}", id, self.memtables[id].status);
-                    }
-                }
-                Ok(())
-            },
-            None => panic!("epoch value not provided!"),
+        for i in 1..self.cache_options.num_write_buffers {
+            let id = (self.mut_memtable_idx + self.cache_options.num_write_buffers - i) % self.cache_options.num_write_buffers; // mut_id is usize, should not become negative
+            if self.memtables[id].status == MemTableStatus::IMMUTABLE && epoch >= self.memtables[id].latest_epoch {
+                self.memtables[id].status = MemTableStatus::FLUSHED;
+                self.memtables[id].size_in_bytes = 0;
+                self.memtables[id].entries.clear();
+                println!("Changing memtable {} state from IMMUTABLE to {:?}", id, self.memtables[id].status);
+            }
         }
-
+        Ok(())
     }
 
     async fn register_gc_callback(
@@ -303,7 +299,7 @@ pub mod for_testing {
     pub const KV_SIZE: u64 = 30;
     pub const MEMTABLE_SIZE: u64 = 2<<9;
 
-    static rc_options: RCOptions = RCOptions{
+    static cache_options: CacheOptions = CacheOptions{
         path: "",
         num_write_buffers: 2, 
         write_buffer_size: MEMTABLE_SIZE,
@@ -311,7 +307,7 @@ pub mod for_testing {
 
     impl MemTableDB {
         async fn create_test() -> Arc<RwLock<MemTableDB>> {
-            Arc::new(RwLock::new(MemTableDB::new(Some(&rc_options)).await))
+            Arc::new(RwLock::new(MemTableDB::new(Some(&cache_options)).await))
         }
     }
     pub struct TestContext {
@@ -350,7 +346,7 @@ pub mod tests {
             }
             {
                 println!("FILL: get key {:?} epoch {:?}", key, epoch);
-                match mt_db.read().await.get(&key, None).await {
+                match mt_db.read().await.get(key, None).await {
                     Err(e) => assert!(false, "get after insert returned error! {}", e),
                     Ok((val, ep)) => {
                         assert!(*val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
@@ -362,7 +358,7 @@ pub mod tests {
             // trigger a gc cleanup periodically 
             if clear && i%10 == 0 {
                 // let mut mt_db_wg = mt_db.write().await;
-                match mt_db.write().await.clear(Some(epoch)).await {
+                match mt_db.write().await.clear(epoch).await {
                     Ok(_) => println!("Clear() succeeded"),
                     Err(e) => assert!(false, "Clear() failed {}", e),
                 }
@@ -376,7 +372,7 @@ pub mod tests {
         let mut mt_db = context.mt_db.clone();
         
         let mut num_keys: u64 = 0;
-        num_keys = mt_db.read().await.rc_options.write_buffer_size/for_testing::KV_SIZE - 1;
+        num_keys = mt_db.read().await.cache_options.write_buffer_size/for_testing::KV_SIZE - 1;
         fill(&mt_db, num_keys, false).await;
         println!("Fill complete >>>>>>!");
 
@@ -394,7 +390,7 @@ pub mod tests {
             let value = Bytes::from(data.clone());
             epoch = i;
 
-            match mt_db.read().await.get(&key, Some(epoch)).await {
+            match mt_db.read().await.get(key, Some(epoch)).await {
                 Err(e) => assert!(false, "get after insert returned error! {}", e),
                 Ok((val, ep)) => {
                     assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
@@ -409,7 +405,7 @@ pub mod tests {
         let context = init().await;
         let mut mt_db = context.mt_db.clone();
         
-        let num_keys = mt_db.read().await.rc_options.write_buffer_size/for_testing::KV_SIZE - 1;
+        let num_keys = mt_db.read().await.cache_options.write_buffer_size/for_testing::KV_SIZE - 1;
         fill(&mt_db, num_keys, false).await;
         println!("Fill complete >>>>>>!");
 
@@ -424,7 +420,7 @@ pub mod tests {
         // modify a key
         let key = Bytes::from("k1");
         data[0] = 127 as u8;
-        let epoch = num_keys + 1;
+        let epoch = num_keys;
         let value = Bytes::from(data.clone());
         
         match mt_db.write().await.upsert(key.clone(), value.clone(), epoch).await {
@@ -433,7 +429,7 @@ pub mod tests {
         }
 
         // read older epoch
-        match mt_db.read().await.get(&key, Some(epoch-1)).await {
+        match mt_db.read().await.get(key.clone(), Some(epoch-1)).await {
             Err(e) => assert!(false, "get after insert returned error! {}", e),
             Ok((val, ep)) => {
                 assert!(val != value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
@@ -442,7 +438,16 @@ pub mod tests {
         }
 
         // read latest
-        match mt_db.read().await.get(&key, None).await {
+        match mt_db.read().await.get(key.clone(), None).await {
+            Err(e) => assert!(false, "get after insert returned error! {}", e),
+            Ok((val, ep)) => {
+                assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
+                assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
+            }
+        };
+
+        // read future
+        match mt_db.read().await.get(key.clone(), Some(epoch+1)).await {
             Err(e) => assert!(false, "get after insert returned error! {}", e),
             Ok((val, ep)) => {
                 assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
@@ -456,7 +461,7 @@ pub mod tests {
         let context = init().await;
         let mut mt_db = context.mt_db.clone();
         
-        let num_keys = mt_db.read().await.rc_options.write_buffer_size/for_testing::KV_SIZE - 1;
+        let num_keys = mt_db.read().await.cache_options.write_buffer_size/for_testing::KV_SIZE - 1;
         fill(&mt_db, num_keys, false).await;
         println!("Fill complete >>>>>>!");
 
@@ -472,15 +477,15 @@ pub mod tests {
         let key = Bytes::from("k1");
         data[0] = 1 as u8;
         let value = Bytes::from(data.clone());
-        let epoch = num_keys + 1;
+        let epoch = num_keys;
         
         match mt_db.write().await.delete(key.clone(), epoch).await {
             Err(e) => assert!(false, "delete returned error! {}", e),
             Ok(_) => {}
         }
 
-        // read older epoch
-        match mt_db.read().await.get(&key, Some(epoch-1)).await {
+        // // read older epoch
+        match mt_db.read().await.get(key.clone(), Some(epoch-1)).await {
             Err(e) => assert!(false, "get after insert returned error! {}", e),
             Ok((val, ep)) => {
                 assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
@@ -489,7 +494,7 @@ pub mod tests {
         }
 
         // read latest
-        match mt_db.read().await.get(&key, None).await {
+        match mt_db.read().await.get(key.clone(), None).await {
             Err(e) => {},
             Ok(_) => assert!(false, "get after delete returned a value!"),
         };
@@ -507,11 +512,11 @@ pub mod tests {
         let _ = mt_db.write().await.register_gc_callback(gc_callback);
         
         // fill two memtables
-        let num_keys = 100*(mt_db.read().await.rc_options.write_buffer_size/for_testing::KV_SIZE - 1);
+        let num_keys = 100*(mt_db.read().await.cache_options.write_buffer_size/for_testing::KV_SIZE - 1);
         fill(&mt_db, num_keys, true).await;
         println!("Fill complete >>>>>>!");
 
-        match mt_db.read().await.get(&Bytes::from(format!("k{}", 0)), None).await {
+        match mt_db.read().await.get(Bytes::from(format!("k{}", 0)), None).await {
             Err(e) => assert!(true, "key should not be found! {}", e),
             Ok((val, ep)) => assert!(false, "should not return any value! {:?} {}", val, ep),
         };
@@ -523,7 +528,7 @@ pub mod tests {
         let mut mt_db = context.mt_db.clone();
 
         // bump up the memtable size
-        mt_db.write().await.rc_options.write_buffer_size = 2<<21;
+        mt_db.write().await.cache_options.write_buffer_size = 2<<21;
 
         #[derive(Clone, Debug)]
         struct ThreadData {
@@ -616,7 +621,7 @@ pub mod tests {
 
                     // let mt_db_rg = mt_db_rd.read().unwrap();
                     // let mt_db_rg = mt_db_rd.read();
-                    match mt_db_rd.read().await.get(&key, Some(rand_epoch)).await {
+                    match mt_db_rd.read().await.get(key.clone(), Some(rand_epoch)).await {
                         Err(e) => assert!(false, "get returned error! {}", e),
                         Ok((val, ep)) => {
                             match rd_td.values.get(&key) {

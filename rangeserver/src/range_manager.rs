@@ -404,7 +404,7 @@ where
                     .cache
                     .read()
                     .await
-                    .get(&key.clone(), None)
+                    .get(key.clone(), None)
                     .await;
                     // .map_err(Error::from_cache_error)?;
 
