@@ -41,11 +41,7 @@ impl PrefetchingBuffer {
     /// the appropriate data structures and returns the state of they key,
     /// which is either Requested, Loading, or Fetched. If Loading, the
     /// process waits for another transaction to complete the fetch
-    pub async fn process_prefetch_request(
-        &self,
-        transaction_id: Uuid,
-        key: Bytes,
-    ) -> Option<KeyState> {
+    pub async fn process_prefetch_request(&self, transaction_id: Uuid, key: Bytes) -> KeyState {
         {
             let mut transaction_keys = self.transaction_keys.lock().await;
             let mut key_transactions = self.key_transactions.lock().await;
@@ -65,7 +61,7 @@ impl PrefetchingBuffer {
         }
 
         match key_state.get(&key).cloned().unwrap() {
-            KeyState::Fetched => return Some(KeyState::Fetched),
+            KeyState::Fetched => return KeyState::Fetched,
             KeyState::Loading(n) => {
                 // release the lock
                 drop(key_state);
@@ -75,7 +71,7 @@ impl PrefetchingBuffer {
                     let mut receiver = receiver.clone();
                     while receiver.changed().await.is_ok() {
                         if *receiver.borrow() == KeyState::Fetched {
-                            return Some(KeyState::Fetched);
+                            return KeyState::Fetched;
                         } else {
                             // The fetch failed and was returned to KeyState::Requested
                             // Return KeyState::Requested so that the caller can try again
@@ -84,18 +80,18 @@ impl PrefetchingBuffer {
                             self.change_keystate_to_loading(&mut key_state, key, n)
                                 .await
                                 .unwrap();
-                            return Some(KeyState::Requested(n));
+                            return KeyState::Requested(n);
                         }
                     }
                 }
-                return Some(KeyState::Loading(n));
+                return KeyState::Loading(n);
             }
             KeyState::Requested(n) => {
                 // Update keystate to loading while holding the lock to avoid race condition
                 self.change_keystate_to_loading(&mut key_state, key, n)
                     .await
                     .unwrap();
-                return Some(KeyState::Requested(n));
+                return KeyState::Requested(n);
             }
         }
     }
@@ -387,7 +383,7 @@ mod tests {
             prefetching_buffer
                 .process_prefetch_request(fake_transaction, fake_key.clone())
                 .await,
-            Some(KeyState::Requested(1))
+            KeyState::Requested(1)
         );
     }
 
@@ -478,7 +474,7 @@ mod tests {
         // Check that the future is now marked as ready
         assert_eq!(
             Future::poll(Pin::as_mut(&mut pending_future), &mut context),
-            Poll::Ready(Some(KeyState::Fetched))
+            Poll::Ready(KeyState::Fetched)
         );
     }
 
@@ -511,7 +507,7 @@ mod tests {
             prefetching_buffer
                 .process_prefetch_request(fake_transaction.clone(), fake_key.clone())
                 .await,
-            Some(KeyState::Fetched)
+            KeyState::Fetched
         );
     }
 
@@ -902,7 +898,7 @@ mod tests {
         // Check that the future is now marked as loading
         assert_eq!(
             Future::poll(Pin::as_mut(&mut pending_future), &mut context),
-            Poll::Ready(Some(KeyState::Requested(*n)))
+            Poll::Ready(KeyState::Requested(*n))
         );
     }
 

@@ -604,36 +604,33 @@ where
 
     pub async fn prefetch(&self, transaction_id: Uuid, key: Bytes) -> Result<(), Error> {
         // Request prefetch from the prefetching buffer
-        if let Some(keystate) = self
+        let keystate = self
             .prefetching_buffer
             .process_prefetch_request(transaction_id, key.clone())
-            .await
-        {
-            match keystate {
-                KeyState::Fetched => Ok(()), // key has previously been fetched
-                KeyState::Loading(_) => Err(Error::PrefetchError), // Something is wrong if loading was returned
-                KeyState::Requested(fetch_sequence_number) =>
-                // key has just been requested - start fetch
-                {
-                    // Fetch from database
-                    let val = match self.prefetch_get(key.clone()).await {
-                        Ok(value) => value,
-                        Err(_) => {
-                            self.prefetching_buffer
-                                .fetch_failed(key.clone(), fetch_sequence_number)
-                                .await;
-                            return Err(Error::PrefetchError);
-                        }
-                    };
-                    // Successfully fetched from database -> add to buffer and update records
-                    self.prefetching_buffer
-                        .fetch_complete(key.clone(), val, fetch_sequence_number)
-                        .await;
-                    Ok(())
-                }
+            .await;
+
+        match keystate {
+            KeyState::Fetched => Ok(()), // key has previously been fetched
+            KeyState::Loading(_) => Err(Error::PrefetchError), // Something is wrong if loading was returned
+            KeyState::Requested(fetch_sequence_number) =>
+            // key has just been requested - start fetch
+            {
+                // Fetch from database
+                let val = match self.prefetch_get(key.clone()).await {
+                    Ok(value) => value,
+                    Err(_) => {
+                        self.prefetching_buffer
+                            .fetch_failed(key.clone(), fetch_sequence_number)
+                            .await;
+                        return Err(Error::PrefetchError);
+                    }
+                };
+                // Successfully fetched from database -> add to buffer and update records
+                self.prefetching_buffer
+                    .fetch_complete(key.clone(), val, fetch_sequence_number)
+                    .await;
+                Ok(())
             }
-        } else {
-            Err(Error::PrefetchError)
         }
     }
 }
