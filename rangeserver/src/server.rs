@@ -29,10 +29,6 @@ use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
 
 use crate::prefetching_buffer::PrefetchingBuffer;
 
-pub mod rangeserver {
-    include!("../../proto/target/rangeserver/rangeserver.rs");
-}
-
 #[derive(Clone)]
 struct ProtoServer<S, E>
 where
