@@ -238,7 +238,7 @@ impl PrefetchingBuffer {
                 );
                 // If the key is no longer requested by any transaction, also delete it from the BTree
                 if !key_transactions.contains_key(key) {
-                    self.process_transaction_delete(key.clone()).await;
+                    self.delete(key.clone()).await;
                 }
             }
         }
@@ -247,7 +247,7 @@ impl PrefetchingBuffer {
     }
 
     /// Update the prefetch_store and update the key_state
-    pub async fn process_buffer_update(&self, key: Bytes, value: Bytes) {
+    pub async fn upsert(&self, key: Bytes, value: Bytes) {
         let mut prefetch_store = self.prefetch_store.lock().await;
         let mut key_state = self.key_state.lock().await;
         // If key is still being requested by a different transaction, update BTree with latest value
@@ -273,8 +273,9 @@ impl PrefetchingBuffer {
         }
     }
 
-    /// If a transaction deletes a key, it must also be deleted from the BTree
-    pub async fn process_transaction_delete(&self, key: Bytes) {
+    /// If a transaction deletes a key, it must also be deleted from the buffer
+    /// This function deletes a key from prefetch_store and key_state
+    pub async fn delete(&self, key: Bytes) {
         let mut prefetch_store = self.prefetch_store.lock().await;
         let mut key_state = self.key_state.lock().await;
         // Remove key from BTree and key_state
@@ -586,7 +587,7 @@ mod tests {
         // Update buffer
         let new_value = Bytes::from("updated testing value");
         prefetching_buffer
-            .process_buffer_update(fake_key.clone(), new_value.clone())
+            .upsert(fake_key.clone(), new_value.clone())
             .await;
 
         let buffer = prefetching_buffer.prefetch_store.lock().await;
@@ -632,9 +633,7 @@ mod tests {
         let _ = Future::poll(Pin::as_mut(&mut pending_future), &mut context);
 
         // Transaction deletes key
-        prefetching_buffer
-            .process_transaction_delete(fake_key.clone())
-            .await;
+        prefetching_buffer.delete(fake_key.clone()).await;
 
         let buffer = prefetching_buffer.prefetch_store.lock().await;
         assert_eq!(buffer.get(&fake_key.clone()), None);
@@ -681,7 +680,7 @@ mod tests {
         // Update buffer
         let new_value = Bytes::from("updated testing value");
         let _ = prefetching_buffer
-            .process_buffer_update(fake_key.clone(), new_value.clone())
+            .upsert(fake_key.clone(), new_value.clone())
             .await;
 
         // Remove prefetch request
@@ -765,7 +764,7 @@ mod tests {
         // Update buffer
         let new_value = Bytes::from("updated testing value");
         let _ = prefetching_buffer
-            .process_buffer_update(fake_key.clone(), new_value.clone())
+            .upsert(fake_key.clone(), new_value.clone())
             .await;
 
         // Remove prefetch request
@@ -821,7 +820,7 @@ mod tests {
         // Update buffer
         let new_value = Bytes::from("updated testing value");
         let _ = prefetching_buffer
-            .process_buffer_update(fake_key.clone(), new_value.clone())
+            .upsert(fake_key.clone(), new_value.clone())
             .await;
 
         // Remove prefetch request

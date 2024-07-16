@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -39,7 +39,6 @@ where
     S: Storage,
     E: EpochProvider,
 {
-    buffer: Arc<PrefetchingBuffer>,
     parent_server: Arc<Server<S, E>>,
 }
 
@@ -84,7 +83,6 @@ where
             .await
             .map_err(|e| TStatus::internal(format!("Failed to load range: {:?}", e)))?;
 
-        // Call process_prefetch_request in range_manager.rs
         match range_manager.prefetch(transaction_id, key).await {
             Ok(_) => {
                 let reply = PrefetchResponse {
@@ -705,11 +703,7 @@ where
             .parse()
             .unwrap();
 
-        // Create buffer to hold prefetch requests
-        // let prefetching_buffer = PrefetchingBuffer::new();
-        let buffer = &server.prefetching_buffer;
         let prefetch = ProtoServer {
-            buffer: buffer.clone(),
             parent_server: server.clone(),
         };
 

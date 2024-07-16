@@ -491,7 +491,7 @@ where
                         .map_err(Error::from_wal_error)?;
                 }
                 lock_table.release();
-                // Call transaction_completed for prebuffer
+
                 let _ = self
                     .prefetching_buffer
                     .process_transaction_complete(tx.id)
@@ -561,9 +561,7 @@ where
                                 .map_err(Error::from_storage_error)?;
 
                             // Update the prefetch buffer if this key has been requested by a prefetch call
-                            self.prefetching_buffer
-                                .process_buffer_update(key, val)
-                                .await;
+                            self.prefetching_buffer.upsert(key, val).await;
                         }
                     }
                     for del in prepare_record.deletes().iter() {
@@ -575,9 +573,7 @@ where
                                 .map_err(Error::from_storage_error)?;
 
                             // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
-                            self.prefetching_buffer
-                                .process_transaction_delete(key)
-                                .await;
+                            self.prefetching_buffer.delete(key).await;
                         }
                     }
                 }
