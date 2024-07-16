@@ -2,6 +2,7 @@ use bytes::Bytes;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{watch, Mutex};
 use uuid::Uuid;
@@ -21,7 +22,7 @@ pub struct PrefetchingBuffer {
     pub key_transactions: Arc<Mutex<HashMap<Bytes, BTreeSet<Uuid>>>>, // stores key -> set of transaction_ids
     pub key_state_watcher: Arc<Mutex<HashMap<Bytes, watch::Receiver<KeyState>>>>, // key -> receiver for state changes
     pub key_state_sender: Arc<Mutex<HashMap<Bytes, watch::Sender<KeyState>>>>, // key -> sender for state changes
-    pub fetch_sequence_number: Mutex<u64>,
+    pub fetch_sequence_number: AtomicU64,
 }
 
 impl PrefetchingBuffer {
@@ -33,7 +34,7 @@ impl PrefetchingBuffer {
             key_transactions: Arc::new(Mutex::new(HashMap::new())),
             key_state_watcher: Arc::new(Mutex::new(HashMap::new())),
             key_state_sender: Arc::new(Mutex::new(HashMap::new())),
-            fetch_sequence_number: Mutex::new(0),
+            fetch_sequence_number: AtomicU64::new(0),
         }
     }
 
@@ -55,15 +56,14 @@ impl PrefetchingBuffer {
         // Check if key has already been requested by another transaction
         // If not, add to key_state with fetch state Requested
         if !key_state.contains_key(&key.clone()) {
-            let mut fetch_sequence_number = self.fetch_sequence_number.lock().await;
-            *fetch_sequence_number += 1;
-            key_state.insert(key.clone(), KeyState::Requested(*fetch_sequence_number));
+            let fetch_sequence_number = self.fetch_sequence_number.fetch_add(1, Ordering::SeqCst);
+            // Increment by 1 so that keystate sequence number matches current fetch_sequence_number
+            key_state.insert(key.clone(), KeyState::Requested(fetch_sequence_number + 1));
         }
 
         match key_state.get(&key).cloned().unwrap() {
             KeyState::Fetched => return KeyState::Fetched,
             KeyState::Loading(n) => {
-                // release the lock
                 drop(key_state);
                 // wait for fetch to complete
                 let key_state_watcher = self.key_state_watcher.lock().await;
@@ -466,9 +466,11 @@ mod tests {
 
         // Add value to BTree for this key
         let fake_value = Some(Bytes::from("testing value"));
-        let n = prefetching_buffer.fetch_sequence_number.lock().await;
+        let n = prefetching_buffer
+            .fetch_sequence_number
+            .load(Ordering::SeqCst);
         let _ = prefetching_buffer
-            .fetch_complete(fake_key.clone(), fake_value.clone(), *n)
+            .fetch_complete(fake_key.clone(), fake_value.clone(), n)
             .await;
 
         // Check that the future is now marked as ready
@@ -497,9 +499,11 @@ mod tests {
 
         // Add value to BTree for this key
         let fake_value = Some(Bytes::from("testing value"));
-        let n = prefetching_buffer.fetch_sequence_number.lock().await;
+        let n = prefetching_buffer
+            .fetch_sequence_number
+            .load(Ordering::SeqCst);
         let _ = prefetching_buffer
-            .fetch_complete(fake_key.clone(), fake_value.clone(), *n)
+            .fetch_complete(fake_key.clone(), fake_value.clone(), n)
             .await;
 
         // Check that processing a new request for the same key returns it as fetched
@@ -530,9 +534,11 @@ mod tests {
 
         // Add value to BTree for this key
         let fake_value = Some(Bytes::from("testing value"));
-        let n = prefetching_buffer.fetch_sequence_number.lock().await;
+        let n = prefetching_buffer
+            .fetch_sequence_number
+            .load(Ordering::SeqCst);
         let _ = prefetching_buffer
-            .fetch_complete(fake_key.clone(), fake_value.clone(), *n)
+            .fetch_complete(fake_key.clone(), fake_value.clone(), n)
             .await;
 
         // Check that the value in the BTree for that key is as expected
@@ -571,9 +577,11 @@ mod tests {
 
         // Add value to BTree for this key
         let fake_value = Some(Bytes::from("testing value"));
-        let n = prefetching_buffer.fetch_sequence_number.lock().await;
-        prefetching_buffer
-            .fetch_complete(fake_key.clone(), fake_value.clone(), *n)
+        let n = prefetching_buffer
+            .fetch_sequence_number
+            .load(Ordering::SeqCst);
+        let _ = prefetching_buffer
+            .fetch_complete(fake_key.clone(), fake_value.clone(), n)
             .await;
 
         // Process transaction is complete for fake_transaction with a new value
@@ -619,9 +627,11 @@ mod tests {
 
         // Add value to BTree for this key
         let fake_value = Some(Bytes::from("testing value"));
-        let n = prefetching_buffer.fetch_sequence_number.lock().await;
-        prefetching_buffer
-            .fetch_complete(fake_key.clone(), fake_value.clone(), *n)
+        let n = prefetching_buffer
+            .fetch_sequence_number
+            .load(Ordering::SeqCst);
+        let _ = prefetching_buffer
+            .fetch_complete(fake_key.clone(), fake_value.clone(), n)
             .await;
 
         // Process transaction is complete for fake_transaction with a new value
@@ -664,9 +674,11 @@ mod tests {
 
         // Add value to BTree for this key
         let fake_value = Some(Bytes::from("testing value"));
-        let n = prefetching_buffer.fetch_sequence_number.lock().await;
+        let n = prefetching_buffer
+            .fetch_sequence_number
+            .load(Ordering::SeqCst);
         let _ = prefetching_buffer
-            .fetch_complete(fake_key.clone(), fake_value.clone(), *n)
+            .fetch_complete(fake_key.clone(), fake_value.clone(), n)
             .await;
 
         // Process transaction is complete for fake_transaction with a new value
@@ -748,9 +760,11 @@ mod tests {
 
         // Add value to BTree for this key
         let fake_value = Some(Bytes::from("testing value"));
-        let n = prefetching_buffer.fetch_sequence_number.lock().await;
+        let n = prefetching_buffer
+            .fetch_sequence_number
+            .load(Ordering::SeqCst);
         let _ = prefetching_buffer
-            .fetch_complete(fake_key.clone(), fake_value.clone(), *n)
+            .fetch_complete(fake_key.clone(), fake_value.clone(), n)
             .await;
 
         // Process transaction is complete for fake_transaction with a new value
@@ -804,9 +818,11 @@ mod tests {
 
         // Add value to BTree for this key
         let fake_value = Some(Bytes::from("testing value"));
-        let n = prefetching_buffer.fetch_sequence_number.lock().await;
+        let n = prefetching_buffer
+            .fetch_sequence_number
+            .load(Ordering::SeqCst);
         let _ = prefetching_buffer
-            .fetch_complete(fake_key.clone(), fake_value.clone(), *n)
+            .fetch_complete(fake_key.clone(), fake_value.clone(), n)
             .await;
 
         // Process transaction is complete for fake_transaction with a new value
@@ -892,13 +908,15 @@ mod tests {
         let _ = Future::poll(Pin::as_mut(&mut pending_future), &mut context);
 
         // Fetch failed from database
-        let n = prefetching_buffer.fetch_sequence_number.lock().await;
-        let _ = prefetching_buffer.fetch_failed(fake_key.clone(), *n).await;
+        let n = prefetching_buffer
+            .fetch_sequence_number
+            .load(Ordering::SeqCst);
+        let _ = prefetching_buffer.fetch_failed(fake_key.clone(), n).await;
 
         // Check that the future is now marked as loading
         assert_eq!(
             Future::poll(Pin::as_mut(&mut pending_future), &mut context),
-            Poll::Ready(KeyState::Requested(*n))
+            Poll::Ready(KeyState::Requested(n))
         );
     }
 
@@ -930,8 +948,10 @@ mod tests {
         let _ = Future::poll(Pin::as_mut(&mut pending_future), &mut context);
 
         // Fetch failed from database
-        let n = prefetching_buffer.fetch_sequence_number.lock().await;
-        let _ = prefetching_buffer.fetch_failed(fake_key.clone(), *n).await;
+        let n = prefetching_buffer
+            .fetch_sequence_number
+            .load(Ordering::SeqCst);
+        let _ = prefetching_buffer.fetch_failed(fake_key.clone(), n).await;
 
         // Check that the future is now marked as loading
         let _ = Future::poll(Pin::as_mut(&mut pending_future), &mut context);
@@ -940,7 +960,7 @@ mod tests {
         {
             let keystate = prefetching_buffer.key_state.lock().await;
             let val = keystate.get(&fake_key.clone()).unwrap();
-            assert_eq!(*val, KeyState::Loading(*n));
+            assert_eq!(*val, KeyState::Loading(n));
         }
     }
 }
