@@ -76,6 +76,7 @@ impl Error {
                 // TODO: get the error from the message.
                 Err(Self::InternalError(Arc::new(std::fmt::Error)))
             }
+            Status::PrefetchError => Err(Self::PrefetchError),
             _ => Err(Self::InternalError(Arc::new(std::fmt::Error))),
         }
     }
