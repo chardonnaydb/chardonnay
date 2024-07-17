@@ -255,19 +255,16 @@ impl PrefetchingBuffer {
             .await
             .contains_key(&key.clone())
         {
-            if let KeyState::Deleted = key_state.get(&key).unwrap() {
-                // A new value is in the database, so remove the deleted flag to allow another
-                // transaction to fetch from database
-                let _ = key_state.remove(&key);
-            } else {
-                let _ = prefetch_store.insert(key.clone(), value);
-                // If the key is still loading in a prefetch, change to fetched
-                if let KeyState::Loading(_) = key_state.get(&key).unwrap() {
-                    key_state.insert(key.clone(), KeyState::Fetched);
-                    // Notify all watchers of the state change
-                    if let Some(sender) = self.key_state_sender.lock().await.get(&key) {
-                        let _ = sender.send(KeyState::Fetched);
-                    }
+            let _ = prefetch_store.insert(key.clone(), value);
+            // If the key is still loading in a prefetch or is marked as deleted, change to fetched
+            let cur_key_state = key_state.get(&key).unwrap();
+            if matches!(cur_key_state, KeyState::Loading(_))
+                || matches!(cur_key_state, KeyState::Deleted)
+            {
+                key_state.insert(key.clone(), KeyState::Fetched);
+                // Notify all watchers of the state change
+                if let Some(sender) = self.key_state_sender.lock().await.get(&key) {
+                    let _ = sender.send(KeyState::Fetched);
                 }
             }
         } else {
