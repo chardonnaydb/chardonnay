@@ -12,7 +12,6 @@ pub enum KeyState {
     Fetched,        // Key has been fetched and is in the BTree
     Loading(u64),   // Key has been requested and is being fetched
     Requested(u64), // Key has been requested but fetching has not been started
-    Deleted,        // Key has been deleted from the database and does not exist anymore
 }
 
 #[derive(Default, Debug)]
@@ -94,7 +93,6 @@ impl PrefetchingBuffer {
                     .unwrap();
                 return KeyState::Requested(n);
             }
-            KeyState::Deleted => return KeyState::Deleted,
         }
     }
 
@@ -256,11 +254,8 @@ impl PrefetchingBuffer {
             .contains_key(&key.clone())
         {
             let _ = prefetch_store.insert(key.clone(), value);
-            // If the key is still loading in a prefetch or is marked as deleted, change to fetched
-            let cur_key_state = key_state.get(&key).unwrap();
-            if matches!(cur_key_state, KeyState::Loading(_))
-                || matches!(cur_key_state, KeyState::Deleted)
-            {
+            // If the key is still loading in a prefetch, change to fetched
+            if let KeyState::Loading(_) = key_state.get(&key).unwrap() {
                 key_state.insert(key.clone(), KeyState::Fetched);
                 // Notify all watchers of the state change
                 if let Some(sender) = self.key_state_sender.lock().await.get(&key) {
@@ -275,25 +270,20 @@ impl PrefetchingBuffer {
     }
 
     /// If a transaction deletes a key, it must also be deleted from the buffer
-    /// This function deletes a key from prefetch_store and updated the key_state to delete
-    /// so that future calls to prefetch on this key know that the key does not exist in
-    /// the database
+    /// This function deletes a key from prefetch_store
     pub async fn delete(&self, key: Bytes) {
         let mut prefetch_store = self.prefetch_store.lock().await;
-        let mut key_state = self.key_state.lock().await;
         // Remove key from BTree and key_state
         let _ = prefetch_store.remove(&key); // might be None
-        let _ = key_state.insert(key, KeyState::Deleted);
     }
 
-    /// If no transactions are requesting a key anymore, if can be wiped from the buffer
-    /// This function deletes a key from prefetch_store and key_state
+    /// If no transactions are  requesting a key, it can be flushed from the buffer
+    /// This function deletes a key from prefetch_store and the key_state
     pub async fn transaction_delete(&self, key: Bytes) {
-        let mut prefetch_store = self.prefetch_store.lock().await;
         let mut key_state = self.key_state.lock().await;
+        self.delete(key.clone()).await;
         // Remove key from BTree and key_state
-        let _ = prefetch_store.remove(&key); // might be None
-        let _ = key_state.remove(&key);
+        let _ = key_state.remove(&key); // might be None
     }
 
     /// Removes a transaction from the key_transaction hashmap.
@@ -659,12 +649,7 @@ mod tests {
         prefetching_buffer.delete(fake_key.clone()).await;
 
         let buffer = prefetching_buffer.prefetch_store.lock().await;
-        let key_state = prefetching_buffer.key_state.lock().await;
         assert_eq!(buffer.get(&fake_key.clone()), None);
-        assert_eq!(
-            *key_state.get(&fake_key.clone()).unwrap(),
-            KeyState::Deleted
-        );
     }
 
     #[tokio::test]

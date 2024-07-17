@@ -631,7 +631,6 @@ where
                     .await;
                 Ok(())
             }
-            KeyState::Deleted => Err(Error::PrefetchError),
         }
     }
 }
