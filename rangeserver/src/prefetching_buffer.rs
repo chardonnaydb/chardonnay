@@ -248,7 +248,6 @@ impl PrefetchingBuffer {
     pub async fn upsert(&self, key: Bytes, value: Bytes) {
         let mut prefetch_store = self.prefetch_store.lock().await;
         let mut key_state = self.key_state.lock().await;
-        eprintln!("in upsert");
         // If key is still being requested by a different transaction, update BTree with latest value
         if self
             .key_transactions
@@ -257,12 +256,10 @@ impl PrefetchingBuffer {
             .contains_key(&key.clone())
         {
             if let KeyState::Deleted = key_state.get(&key).unwrap() {
-                eprintln!("in deleted section");
                 // A new value is in the database, so remove the deleted flag to allow another
                 // transaction to fetch from database
                 let _ = key_state.remove(&key);
             } else {
-                eprintln!("in else section");
                 let _ = prefetch_store.insert(key.clone(), value);
                 // If the key is still loading in a prefetch, change to fetched
                 if let KeyState::Loading(_) = key_state.get(&key).unwrap() {
