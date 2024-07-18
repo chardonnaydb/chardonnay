@@ -59,6 +59,7 @@ impl PartialEq for MemTableEntry {
     }
 }
 
+// Memtable uses an orderedskiplist to store entries to support logarithmic inserts/lookups and fast scans.
 #[derive(Debug)]
 pub struct MemTable {
     id: usize,
@@ -69,6 +70,10 @@ pub struct MemTable {
     entries: OrderedSkipList<MemTableEntry>,
 }
 
+// MemTableDB uses multiple buffers called memtables to store client entries. 
+// Only a single memtable is mutable at a given time. Once that memtable fills up, it is marked as     immutable.
+// Clients can register for a callback function to know the epoch associated with immutable memtables. Clients can then call the Clear() api to garbage collect old immutable memtables.
+// MemTableDB assumes a single writer, multiple reader setup.
 #[derive(Debug)]
 pub struct MemTableDB {
     cache_options: CacheOptions,
@@ -79,42 +84,6 @@ pub struct MemTableDB {
 }
 
 impl MemTableDB {
-    pub async fn new(cache_options: Option<&CacheOptions>) -> Self {
-
-        let mut opts = CacheOptions{
-            path: "",
-            num_write_buffers: 2,
-            write_buffer_size: 2<<29,
-         };
-
-        match cache_options {
-            Some(opt) => {opts = *opt},
-            None => {},
-        }
-
-        let mut mt_db = MemTableDB {
-            cache_options: opts.clone(),
-            memtables: Vec::<MemTable>::new(), 
-            mut_memtable_idx: 0,
-            latest_epoch: 0,
-            gc_callback: None,
-        };
-
-        for i in 0..opts.num_write_buffers {
-            let mt = MemTable { 
-                id: i,
-                size_in_bytes: 0,
-                status: MemTableStatus::FLUSHED,
-                latest_epoch: 0,
-                oldest_epoch: 0,
-                // TODO: init with capacity
-                entries: OrderedSkipList::<MemTableEntry>::new(),};
-            mt_db.memtables.push(mt);
-        }
-        // change the status of first memtable as mutable
-        mt_db.memtables[mt_db.mut_memtable_idx].status = MemTableStatus::MUTABLE;
-        mt_db
-    }
 
     async fn upsert_or_delete(
         &mut self,
@@ -180,6 +149,48 @@ impl MemTableDB {
 
 impl Cache for MemTableDB {
 
+    async fn new(
+        cache_options: Option<&CacheOptions>,
+    ) -> Self {
+
+        let mut opts = CacheOptions{
+            path: "",
+            num_write_buffers: 2,
+            write_buffer_size: 2<<29,
+         };
+
+        match cache_options {
+            Some(opt) => {opts = *opt},
+            None => {},
+        }
+        let mut mt_db = MemTableDB {
+            cache_options: opts.clone(),
+            memtables: Vec::<MemTable>::new(),
+            mut_memtable_idx: 0,
+            latest_epoch: 0,
+            gc_callback: None,
+        };
+
+        mt_db.cache_options = opts.clone();
+
+        for i in 0..opts.num_write_buffers {
+            let mt = MemTable {
+                id: i,
+                size_in_bytes: 0,
+                status: MemTableStatus::FLUSHED,
+                latest_epoch: 0,
+                oldest_epoch: 0,
+                // TODO: init with capacity
+                entries: OrderedSkipList::<MemTableEntry>::new(),};
+            mt_db.memtables.push(mt);
+        }
+        // change the status of first memtable as mutable
+        mt_db.memtables[mt_db.mut_memtable_idx].status = MemTableStatus::MUTABLE;
+
+        mt_db
+
+    }
+
     async fn upsert(
         &mut self,
         key: bytes::Bytes,
@@ -219,32 +230,31 @@ impl Cache for MemTableDB {
 
         for i in 0..self.cache_options.num_write_buffers {
             let idx = (self.mut_memtable_idx + self.cache_options.num_write_buffers - i) % self.cache_options.num_write_buffers; // mut_id is usize, should not become negative
-            println!("GET-DBG: key {:?} memtable_idx {}, epoch {}, oldest_epoch {}, latest_epoch {}", key, idx, epoch_internal, self.memtables[idx].oldest_epoch, self.memtables[idx].latest_epoch);
+            // println!("GET-DBG: key {:?} memtable_idx {}, epoch {}, oldest_epoch {}, latest_epoch {}", key, idx, epoch_internal, self.memtables[idx].oldest_epoch, self.memtables[idx].latest_epoch);
             if self.memtables[idx].status == MemTableStatus::FLUSHED {
                 break
             }
-            if self.memtables[idx].oldest_epoch <= epoch_internal && epoch_internal <= self.memtables[idx].latest_epoch {
+            if self.memtables[idx].oldest_epoch <= epoch_internal {
                 let start = MemTableEntry{
                     key: key.clone(),
                     val: Vec::new().into(),
                     epoch: epoch_internal,
                     deleted: false};
-                let mut end = start.clone();
-                end.epoch = 0;
-
-                let result = self.memtables[idx].entries.range(Included(&start), Included(&end)).next();
+                let result = self.memtables[idx].entries.lower_bound(Included(&start));
 
                 match result {
-                    Some(entry) => { 
-                        println!("Found the entry {:?}", entry);
-                        if entry.deleted {
-                            return Err(Error::KeyNotFound);
-                        } else {
-                            return Ok((entry.val.clone(), entry.epoch));
+                    Some(entry) => {
+                        if entry.key == key {
+                            // println!("Found the entry {:?}", entry);
+                            if entry.deleted {
+                                return Err(Error::KeyNotFound);
+                            } else {
+                                return Ok((entry.val.clone(), entry.epoch));
+                            }
                         }
                     }
                     None => {
-                        println!("Entry not found in memtable {}", idx);
+                        // println!("Entry not found in memtable {}", idx);
                         // continue checking other memtables
                     }
                 }
@@ -297,17 +307,11 @@ pub mod for_testing {
     use super::*;
 
     pub const KV_SIZE: u64 = 30;
-    pub const MEMTABLE_SIZE: u64 = 2<<9;
-
-    static cache_options: CacheOptions = CacheOptions{
-        path: "",
-        num_write_buffers: 2, 
-        write_buffer_size: MEMTABLE_SIZE,
-    };
+    pub const TEST_MEMTABLE_SIZE: u64 = 2<<9;
 
     impl MemTableDB {
         async fn create_test() -> Arc<RwLock<MemTableDB>> {
-            Arc::new(RwLock::new(MemTableDB::new(Some(&cache_options)).await))
+            Arc::new(RwLock::new(MemTableDB::new(None).await))
         }
     }
     pub struct TestContext {
@@ -371,8 +375,9 @@ pub mod tests {
         let context = init().await;
         let mut mt_db = context.mt_db.clone();
         
-        let mut num_keys: u64 = 0;
-        num_keys = mt_db.read().await.cache_options.write_buffer_size/for_testing::KV_SIZE - 1;
+        // reduce to memtable size for unit tests
+        mt_db.write().await.cache_options.write_buffer_size = TEST_MEMTABLE_SIZE;
+        let num_keys = mt_db.read().await.cache_options.write_buffer_size/for_testing::KV_SIZE - 1;
         fill(&mt_db, num_keys, false).await;
         println!("Fill complete >>>>>>!");
 
@@ -405,6 +410,8 @@ pub mod tests {
         let context = init().await;
         let mut mt_db = context.mt_db.clone();
         
+        // reduce to memtable size for unit tests
+        mt_db.write().await.cache_options.write_buffer_size = TEST_MEMTABLE_SIZE;
         let num_keys = mt_db.read().await.cache_options.write_buffer_size/for_testing::KV_SIZE - 1;
         fill(&mt_db, num_keys, false).await;
         println!("Fill complete >>>>>>!");
@@ -457,10 +464,50 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn get_immutable_memtable() {
+        let context = init().await;
+        let mt_db = context.mt_db.clone();
+
+        // reduce to memtable size for unit tests
+        mt_db.write().await.cache_options.write_buffer_size = TEST_MEMTABLE_SIZE;
+        // fill two memtables
+        let num_keys = 2*(mt_db.read().await.cache_options.write_buffer_size/for_testing::KV_SIZE - 1);
+        fill(&mt_db, num_keys, false).await;
+        println!("Fill complete >>>>>>!");
+
+        // // modify a key
+        let epoch = 1;
+        let mut data = vec![0u8; 10];
+        let key = Bytes::from(format!("k{}", epoch));
+        data[0] = epoch as u8;
+        let value = Bytes::from(data.clone());
+
+        // read original key epoch
+        match mt_db.read().await.get(key.clone(), Some(epoch)).await {
+            Err(e) => assert!(false, "get after insert returned error! {}", e),
+            Ok((val, ep)) => {
+                assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
+                assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
+            }
+        };
+
+        // read latest
+        match mt_db.read().await.get(key.clone(), Some(num_keys)).await {
+            Err(e) => assert!(false, "get after insert returned error! {}", e),
+            Ok((val, ep)) => {
+                assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
+                assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
+            }
+        };
+    }
+
+    #[tokio::test]
     async fn delete() {
         let context = init().await;
         let mut mt_db = context.mt_db.clone();
         
+        // reduce to memtable size for unit tests
+        mt_db.write().await.cache_options.write_buffer_size = TEST_MEMTABLE_SIZE;
         let num_keys = mt_db.read().await.cache_options.write_buffer_size/for_testing::KV_SIZE - 1;
         fill(&mt_db, num_keys, false).await;
         println!("Fill complete >>>>>>!");
@@ -511,7 +558,9 @@ pub mod tests {
 
         let _ = mt_db.write().await.register_gc_callback(gc_callback);
         
-        // fill two memtables
+        // reduce to memtable size for unit tests
+        mt_db.write().await.cache_options.write_buffer_size = TEST_MEMTABLE_SIZE;
+        // fill memtables
         let num_keys = 100*(mt_db.read().await.cache_options.write_buffer_size/for_testing::KV_SIZE - 1);
         fill(&mt_db, num_keys, true).await;
         println!("Fill complete >>>>>>!");
@@ -525,9 +574,9 @@ pub mod tests {
     #[tokio::test]
     async fn concurrent() {
         let context = init().await;
-        let mut mt_db = context.mt_db.clone();
+        let mt_db = context.mt_db.clone();
 
-        // bump up the memtable size
+        // set up the memtable size for this unit test
         mt_db.write().await.cache_options.write_buffer_size = 2<<21;
 
         #[derive(Clone, Debug)]

@@ -27,8 +27,12 @@ pub struct CacheOptions {
 
 // callback from range cache to range server to garbage collect old epochs
 type GCCallback = fn(epoch: u64) -> ();
-
 pub trait Cache: Send + Sync + 'static {
+    // constructor
+    fn new(
+        cache_options: Option<&CacheOptions>,
+    ) -> impl std::future::Future<Output = Self> + Send;
+
     // inserts or updates a key
     fn upsert(
         &mut self,
@@ -44,21 +48,13 @@ pub trait Cache: Send + Sync + 'static {
         epoch: u64,
     ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 
-    // If the key is not in cache, returns Error
-    // If exact epoch is in cache, returns the (value, epoch) for that epoch
-    // If older epochs are in cache, returns the (value, epoch) of the latest epoch
-    // If only newer epochs are in cache, returns Error
-    // If requested epoch is None, returns the latest (value, epoch)
+    // If epoch is none, returns the latest value, else
+    // returns the value of latest cache epoch <= requested epoch
     fn get(
         &self,
         key: Bytes,
         epoch: Option<u64>,
     ) -> impl std::future::Future<Output = Result<(bytes::Bytes, u64), Error>> + Send;
-
-    // fn iter(
-    //     &self,
-    //     epoch: Option<u64>,
-    // ) -> impl Result<Iter<'_, T>, Error>;
 
     // clears the cache entries upto a given epoch
     fn clear(

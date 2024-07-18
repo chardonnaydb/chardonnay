@@ -20,6 +20,7 @@ use rangeserver::{
     for_testing::{epoch_provider::EpochProvider, mock_warden::MockWarden},
     server::Server,
     transaction_info::TransactionInfo,
+    cache::memtabledb::MemTableDB,
 };
 use tokio::runtime::Builder;
 use uuid::Uuid;
@@ -30,7 +31,6 @@ struct TestContext {
     server_runtime: tokio::runtime::Runtime,
     client_runtime: tokio::runtime::Runtime,
     storage_context: rangeserver::storage::cassandra::for_testing::TestContext,
-    cache_context: rangeserver::cache::memtabledb::for_testing::TestContext,
 }
 
 fn get_config(warden_address: SocketAddr) -> Config {
@@ -77,7 +77,6 @@ async fn setup_server(
     warden_address: SocketAddr,
     epoch_provider: Arc<EpochProvider>,
     storage_context: &rangeserver::storage::cassandra::for_testing::TestContext,
-    cache_context: &rangeserver::cache::memtabledb::for_testing::TestContext,
 ) -> tokio::runtime::Runtime {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     let server_address = server_socket.local_addr().unwrap();
@@ -90,18 +89,16 @@ async fn setup_server(
         }
     });
     let storage = storage_context.cassandra.clone();
-    let cache = cache_context.mt_db.clone();
 
     runtime.spawn(async move {
         let config = get_config(warden_address);
         let host_info = get_server_host_info(server_address);
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-        let server = Server::new(
+        let server = Server::<_, _, MemTableDB>::new(
             config,
             host_info,
             storage,
             epoch_provider,
-            cache,
             bg_runtime.handle().clone(),
         );
         let res = Server::start(server, fast_network, cancellation_token)
@@ -143,14 +140,12 @@ async fn setup() -> TestContext {
     let cancellation_token = CancellationToken::new();
     let storage_context: rangeserver::storage::cassandra::for_testing::TestContext =
         rangeserver::storage::cassandra::for_testing::init().await;
-    let cache_context: rangeserver::cache::memtabledb::for_testing::TestContext =               rangeserver::cache::memtabledb::for_testing::init().await;
     let server_runtime = setup_server(
         server_socket,
         cancellation_token.clone(),
         warden_address,
         epoch_provider.clone(),
         &storage_context,
-        &cache_context,
     )
     .await;
     let (client, client_runtime) = setup_client(cancellation_token.clone(), server_address).await;
@@ -172,7 +167,6 @@ async fn setup() -> TestContext {
         server_runtime,
         client_runtime,
         storage_context,
-        cache_context,
     }
 }
 

@@ -188,7 +188,7 @@ where
         storage: Arc<S>,
         epoch_provider: Arc<E>,
         wal: W,
-        cache: Arc<RwLock<C>>,
+        cache: C,
     ) -> Arc<Self> {
         Arc::new(RangeManager {
             range_id,
@@ -196,7 +196,7 @@ where
             storage,
             epoch_provider,
             wal: Mutex::new(wal),
-            cache,
+            cache: Arc::new(RwLock::new(cache)),
             state: Arc::new(RwLock::new(State::Unloaded)),
         })
     }
@@ -406,14 +406,10 @@ where
                     .await
                     .get(key.clone(), None)
                     .await;
-                    // .map_err(Error::from_cache_error)?;
 
                 if let Ok((val, _)) = cache_result {
                     get_result.val = Some(val);
                 } else {
-                    // do some error checking cache error
-                    // assert!(cache_result.map_err(Error::from_cache_error) == Error::KeyNotFoundInCache);
-
                     let val = self
                             .storage
                             .get(self.range_id, key.clone())
@@ -569,10 +565,11 @@ where
                                 Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
                             let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
 
-                            // self.storage
-                            //     .upsert(self.range_id, key, val, version)
-                            //     .await
-                            //     .map_err(Error::from_storage_error)?;
+                            // TODO: we should do the storage writes lazily in the background
+                            self.storage
+                                .upsert(self.range_id, key.clone(), val.clone(), version)
+                                .await
+                                .map_err(Error::from_storage_error)?;
 
                             cache_wg.upsert(key, val, version.epoch).await.map_err(Error::from_cache_error)?;
                         }
@@ -581,10 +578,12 @@ where
                         let mut cache_wg = self.cache.write().await;
                         for del in del.iter() {
                             let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
-                            // self.storage
-                            //     .delete(self.range_id, key, version)
-                            //     .await
-                            //     .map_err(Error::from_storage_error)?;
+
+                            // TODO: we should do the storage writes lazily in the background
+                            self.storage
+                                .delete(self.range_id, key.clone(), version)
+                                .await
+                                .map_err(Error::from_storage_error)?;
 
                             cache_wg.delete(key, version.epoch).await.map_err(Error::from_cache_error)?;
                         }

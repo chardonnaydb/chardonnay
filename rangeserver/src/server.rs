@@ -18,7 +18,7 @@ use crate::transaction_info::TransactionInfo;
 use crate::warden_handler::WardenHandler;
 use crate::{
     epoch_provider::EpochProvider, error::Error, for_testing::in_memory_wal::InMemoryWal,
-    range_manager::RangeManager, storage::Storage, cache::Cache,
+    range_manager::RangeManager, storage::Storage, cache::Cache, cache::memtabledb::MemTableDB
 };
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
@@ -55,7 +55,6 @@ where
     config: Config,
     storage: Arc<S>,
     epoch_provider: Arc<E>,
-    cache: Arc<RwLock<C>>,
     warden_handler: WardenHandler,
     bg_runtime: tokio::runtime::Handle,
     // TODO: parameterize the WAL implementation too.
@@ -76,7 +75,6 @@ where
         host_info: HostInfo,
         storage: Arc<S>,
         epoch_provider: Arc<E>,
-        cache: Arc<RwLock<C>>,
         bg_runtime: tokio::runtime::Handle,
     ) -> Arc<Self> {
         let warden_handler = WardenHandler::new(&config, &host_info);
@@ -84,7 +82,6 @@ where
             config,
             storage,
             epoch_provider,
-            cache,
             warden_handler,
             bg_runtime,
             loaded_ranges: RwLock::new(HashMap::new()),
@@ -178,7 +175,7 @@ where
                         self.storage.clone(),
                         self.epoch_provider.clone(),
                         InMemoryWal::new(),
-                        self.cache.clone(),
+                        C::new(None).await,
                     );
                     (range_table).insert(id.range_id, rm.clone());
                     drop(range_table);
@@ -697,7 +694,6 @@ pub mod tests {
     use crate::for_testing::epoch_provider::EpochProvider;
     use crate::for_testing::mock_warden::MockWarden;
     use crate::storage::cassandra::Cassandra;
-    use crate::cache::memtabledb::MemTableDB;
     type Server = super::Server<Cassandra, EpochProvider, MemTableDB>;
 
     impl Server {
@@ -718,7 +714,6 @@ pub mod tests {
     async fn init() -> TestContext {
         let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
         let epoch_provider = Arc::new(EpochProvider::new());
-        let cache = Arc::new(RwLock::new(MemTableDB::new(None).await));
         let storage_context: crate::storage::cassandra::for_testing::TestContext =
             crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
@@ -754,7 +749,6 @@ pub mod tests {
             host_info,
             cassandra,
             epoch_provider,
-            cache,
             tokio::runtime::Handle::current().clone(),
         );
 

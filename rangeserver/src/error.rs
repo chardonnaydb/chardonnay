@@ -17,8 +17,8 @@ pub enum Error {
     Timeout,
     UnknownTransaction,
     TransactionAborted(TransactionAbortReason),
-    // KeyNotFoundInCache,
-    // CacheIsFull,
+    KeyNotFoundInCache,
+    CacheIsFull,
     InternalError(Arc<dyn std::error::Error + Send + Sync>),
 }
 
@@ -40,8 +40,8 @@ impl Error {
 
     pub fn from_cache_error(e: CacheError) -> Self {
         match e {
-            CacheError::KeyNotFound => Self::InternalError(Arc::new(e)), //Self::KeyNotFoundInCache,
-            CacheError::CacheIsFull => Self::InternalError(Arc::new(e)), //Self::CacheIsFull,
+            CacheError::KeyNotFound => Self::KeyNotFoundInCache,
+            CacheError::CacheIsFull => Self::CacheIsFull,
             CacheError::Timeout => Self::Timeout,
             CacheError::InternalError(_) => Self::InternalError(Arc::new(e)),
         }
@@ -63,6 +63,8 @@ impl Error {
             Self::Timeout => Status::Timeout,
             Self::UnknownTransaction => Status::UnknownTransaction,
             Self::TransactionAborted(_) => Status::TransactionAborted,
+            Self::KeyNotFoundInCache => Status::KeyNotFoundInCache,
+            Self::CacheIsFull => Status::CacheIsFull,
             Self::InternalError(_) => Status::InternalError,
         }
     }
@@ -77,6 +79,8 @@ impl Error {
             Status::RangeOwnershipLost => Err(Self::RangeOwnershipLost),
             Status::Timeout => Err(Self::Timeout),
             Status::UnknownTransaction => Err(Self::UnknownTransaction),
+            Status::KeyNotFoundInCache => Err(Self::KeyNotFoundInCache),
+            Status::CacheIsFull => Err(Self::CacheIsFull),
             Status::TransactionAborted => {
                 // TODO: get the reason from the message.
                 Err(Self::TransactionAborted(TransactionAbortReason::Other))

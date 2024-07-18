@@ -39,6 +39,8 @@ enum Status:byte {
   InternalError,
   TransactionAborted,
   UnknownTransaction,
+  KeyNotFoundInCache,
+  CacheIsFull,
 }
 
 table GetRequest {
