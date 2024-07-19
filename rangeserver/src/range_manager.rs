@@ -584,7 +584,7 @@ where
                                 .await
                                 .map_err(Error::from_storage_error)?;
 
-                            cache_wg.upsert(key, val, version.epoch).await.map_err(Error::from_cache_error)?;
+                            cache_wg.upsert(key.clone(), val.clone(), version.epoch).await.map_err(Error::from_cache_error)?;
 
                             // Update the prefetch buffer if this key has been requested by a prefetch call
                             self.prefetching_buffer.upsert(key, val).await;
@@ -601,7 +601,7 @@ where
                                 .await
                                 .map_err(Error::from_storage_error)?;
 
-                            cache_wg.delete(key, version.epoch).await.map_err(Error::from_cache_error)?;
+                            cache_wg.delete(key.clone(), version.epoch).await.map_err(Error::from_cache_error)?;
 
                             // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
                             self.prefetching_buffer.delete(key).await;

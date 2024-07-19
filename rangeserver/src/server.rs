@@ -30,19 +30,21 @@ use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
 use crate::prefetching_buffer::PrefetchingBuffer;
 
 #[derive(Clone)]
-struct ProtoServer<S, E>
+struct ProtoServer<S, E, C>
 where
     S: Storage,
     E: EpochProvider,
+    C: Cache,
 {
-    parent_server: Arc<Server<S, E>>,
+    parent_server: Arc<Server<S, E, C>>,
 }
 
 #[tonic::async_trait]
-impl<S, E> RangeServer for ProtoServer<S, E>
+impl<S, E, C> RangeServer for ProtoServer<S, E, C>
 where
     S: Storage,
     E: EpochProvider,
+    C: Cache,
 {
     async fn prefetch(
         &self,
