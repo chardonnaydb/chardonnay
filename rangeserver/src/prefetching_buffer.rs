@@ -205,14 +205,21 @@ impl PrefetchingBuffer {
         }
     }
 
+    /// If a fetch fails, change the key_state back from Loading back to Requested
+    /// and notify waiting transactions so that they can try the fetch again
     pub async fn fetch_failed(&self, key: Bytes, fetch_sequence_number: u64) {
         let mut cur_state = self.state.lock().await;
-        // The fetch failed, so change from Loading back to Requested
-        cur_state
-            .key_state
-            .insert(key.clone(), KeyState::Requested(fetch_sequence_number));
-        if let Some(sender) = cur_state.key_state_sender.get(&key) {
-            let _ = sender.send(KeyState::Requested(fetch_sequence_number));
+        if let Some(KeyState::Loading(n)) = cur_state.key_state.get(&key.clone()) {
+            // If the current loading number is not equal to input fetch_sequence_number
+            // this means another later transaction deleted and changed the key
+            if *n == fetch_sequence_number {
+                cur_state
+                    .key_state
+                    .insert(key.clone(), KeyState::Requested(fetch_sequence_number));
+                if let Some(sender) = cur_state.key_state_sender.get(&key) {
+                    let _ = sender.send(KeyState::Requested(fetch_sequence_number));
+                }
+            }
         }
     }
 
@@ -233,7 +240,7 @@ impl PrefetchingBuffer {
                 );
                 // If the key is no longer requested by any transaction, also delete it from the BTree
                 if !cur_state.key_transactions.contains_key(&key) {
-                    self.transaction_delete(key.clone(), &mut cur_state).await;
+                    self.evict_key(key.clone(), &mut cur_state).await;
                 }
             }
         }
@@ -244,8 +251,8 @@ impl PrefetchingBuffer {
     /// Update the prefetch_store and update the key_state
     pub async fn upsert(&self, key: Bytes, value: Bytes) {
         let mut cur_state = self.state.lock().await;
-        // If key is still being requested by a different transaction, update BTree with latest value
-        if cur_state.key_transactions.contains_key(&key.clone()) {
+        // If key is in key_state, it is being requested by a transaction
+        if cur_state.key_state.contains_key(&key.clone()) {
             let _ = cur_state.prefetch_store.insert(key.clone(), value);
             // If the key is still loading in a prefetch, change to fetched
             if let KeyState::Loading(_) = cur_state.key_state.get(&key).unwrap() {
@@ -255,24 +262,31 @@ impl PrefetchingBuffer {
                     let _ = sender.send(KeyState::Fetched);
                 }
             }
-        } else {
-            // If key is not being requested by any transactions, remove from prefetch_store instead of update
-            let _ = cur_state.prefetch_store.remove(&key); // might be None
-            let _ = cur_state.key_state.remove(&key); // might be None
         }
     }
 
     /// If a transaction deletes a key, it must also be deleted from the buffer
-    /// This function deletes a key from prefetch_store
+    /// This function deletes a key from prefetch_store and updates the key_state
+    /// to fetched (i.e. the buffer reflects the state of the database)
     pub async fn delete(&self, key: Bytes) {
         let mut cur_state = self.state.lock().await;
-        let _ = cur_state.prefetch_store.remove(&key); // might be None
+        if cur_state.key_state.contains_key(&key.clone()) {
+            let _ = cur_state.prefetch_store.remove(&key.clone());
+            // If the key is still loading in a prefetch, change to fetched
+            if let KeyState::Loading(_) = cur_state.key_state.get(&key).unwrap() {
+                cur_state.key_state.insert(key.clone(), KeyState::Fetched);
+                // Notify all watchers of the state change
+                if let Some(sender) = cur_state.key_state_sender.get(&key) {
+                    let _ = sender.send(KeyState::Fetched);
+                }
+            }
+        }
     }
 
     /// If no transactions are  requesting a key, it can be flushed from the buffer
     /// This function deletes a key from prefetch_store and the key_state
     /// It needs be called with the lock held
-    async fn transaction_delete(&self, key: Bytes, state: &mut State) {
+    async fn evict_key(&self, key: Bytes, state: &mut State) {
         let _ = state.prefetch_store.remove(&key);
         let _ = state.key_state.remove(&key); // might be None
     }
