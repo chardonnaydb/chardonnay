@@ -11,16 +11,14 @@ pub enum Error {
     Timeout,
     #[error("No space left in range cache")]
     CacheIsFull,
-    #[error("Key not present in range cache")]
-    KeyNotFound,
     #[error("range cache error: {0}")]
     InternalError(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 // Range cache options
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug)]
 pub struct CacheOptions {
-    pub path: &'static str,   /* disk path where the db is stored */
+    pub path: String,   /* disk path where the db is stored */
     pub num_write_buffers: usize,   /* num memtables */
     pub write_buffer_size: u64, /* memtable size */
 }
@@ -30,7 +28,7 @@ type GCCallback = fn(epoch: u64) -> ();
 pub trait Cache: Send + Sync + 'static {
     // constructor
     fn new(
-        cache_options: Option<&CacheOptions>,
+        cache_options: CacheOptions,
     ) -> impl std::future::Future<Output = Self> + Send;
 
     // inserts or updates a key

@@ -147,33 +147,31 @@ impl MemTableDB {
         }
 }
 
+impl Default for CacheOptions {
+    fn default() -> Self {
+        CacheOptions {
+            path: String::new(),
+            num_write_buffers: 2,
+            write_buffer_size: 2<<29,
+        }
+    }
+}
+
 impl Cache for MemTableDB {
 
     async fn new(
-        cache_options: Option<&CacheOptions>,
+        cache_options: CacheOptions,
     ) -> Self {
 
-        let mut opts = CacheOptions{
-            path: "",
-            num_write_buffers: 2,
-            write_buffer_size: 2<<29,
-         };
-
-        match cache_options {
-            Some(opt) => {opts = *opt},
-            None => {},
-        }
         let mut mt_db = MemTableDB {
-            cache_options: opts.clone(),
+            cache_options,
             memtables: Vec::<MemTable>::new(),
             mut_memtable_idx: 0,
             latest_epoch: 0,
             gc_callback: None,
         };
 
-        mt_db.cache_options = opts.clone();
-
-        for i in 0..opts.num_write_buffers {
+        for i in 0..mt_db.cache_options.num_write_buffers {
             let mt = MemTable {
                 id: i,
                 size_in_bytes: 0,
@@ -303,7 +301,7 @@ pub mod for_testing {
 
     impl MemTableDB {
         async fn create_test() -> Arc<RwLock<MemTableDB>> {
-            Arc::new(RwLock::new(MemTableDB::new(None).await))
+            Arc::new(RwLock::new(MemTableDB::new(CacheOptions::default()).await))
         }
     }
     pub struct TestContext {

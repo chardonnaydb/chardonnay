@@ -18,7 +18,7 @@ use crate::transaction_info::TransactionInfo;
 use crate::warden_handler::WardenHandler;
 use crate::{
     epoch_provider::EpochProvider, error::Error, for_testing::in_memory_wal::InMemoryWal,
-    range_manager::RangeManager, storage::Storage, cache::Cache, cache::memtabledb::MemTableDB
+    range_manager::RangeManager, storage::Storage, cache::Cache, cache::memtabledb::MemTableDB, cache::CacheOptions,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
@@ -175,7 +175,7 @@ where
                         self.storage.clone(),
                         self.epoch_provider.clone(),
                         InMemoryWal::new(),
-                        C::new(None).await,
+                        C::new(CacheOptions::default()).await,
                     );
                     (range_table).insert(id.range_id, rm.clone());
                     drop(range_table);

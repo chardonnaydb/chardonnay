@@ -1,7 +1,7 @@
 use crate::{
     epoch_provider::EpochProvider, error::Error, key_version::KeyVersion, storage::RangeInfo,
     storage::Storage, transaction_abort_reason::TransactionAbortReason,
-    transaction_info::TransactionInfo, wal::Wal, cache::Cache,
+    transaction_info::TransactionInfo, wal::Wal, cache::Cache, cache::CacheOptions,
 };
 use bytes::Bytes;
 use chrono::DateTime;
@@ -740,7 +740,7 @@ mod tests {
         let storage_context: crate::storage::cassandra::for_testing::TestContext =
             crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
-        let cache = Arc::new(RwLock::new(MemTableDB::new(None).await));
+        let cache = Arc::new(RwLock::new(MemTableDB::new(CacheOptions::default()).await));
         let range_id = FullRangeId {
             keyspace_id: storage_context.keyspace_id,
             range_id: storage_context.range_id,

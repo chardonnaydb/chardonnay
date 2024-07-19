@@ -39,7 +39,6 @@ enum Status:byte {
   InternalError,
   TransactionAborted,
   UnknownTransaction,
-  KeyNotFoundInCache,
   CacheIsFull,
 }
 
