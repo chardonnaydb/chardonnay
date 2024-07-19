@@ -1,44 +1,22 @@
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct RangeId {
-    #[prost(string, tag = "1")]
-    pub keyspace_id: ::prost::alloc::string::String,
-    #[prost(string, tag = "2")]
-    pub range_id: ::prost::alloc::string::String,
+pub struct SetEpochRequest {
+    #[prost(uint64, tag = "1")]
+    pub epoch: u64,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct RangeKey {
-    #[prost(message, optional, tag = "1")]
-    pub range: ::core::option::Option<RangeId>,
-    #[prost(bytes = "vec", tag = "2")]
-    pub key: ::prost::alloc::vec::Vec<u8>,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct PrefetchRequest {
-    /// Request message contains a range_key, which is a tuple containing a range and key to prefetch
-    #[prost(message, repeated, tag = "1")]
-    pub range_key: ::prost::alloc::vec::Vec<RangeKey>,
-    #[prost(string, tag = "2")]
-    pub transaction_id: ::prost::alloc::string::String,
-}
-#[allow(clippy::derive_partial_eq_without_eq)]
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct PrefetchResponse {
-    #[prost(string, tag = "1")]
-    pub status: ::prost::alloc::string::String,
-}
+pub struct SetEpochResponse {}
 /// Generated client implementations.
-pub mod range_server_client {
+pub mod epoch_broadcaster_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
     use tonic::codegen::http::Uri;
     #[derive(Debug, Clone)]
-    pub struct RangeServerClient<T> {
+    pub struct EpochBroadcasterClient<T> {
         inner: tonic::client::Grpc<T>,
     }
-    impl RangeServerClient<tonic::transport::Channel> {
+    impl EpochBroadcasterClient<tonic::transport::Channel> {
         /// Attempt to create a new client by connecting to a given endpoint.
         pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
         where
@@ -49,7 +27,7 @@ pub mod range_server_client {
             Ok(Self::new(conn))
         }
     }
-    impl<T> RangeServerClient<T>
+    impl<T> EpochBroadcasterClient<T>
     where
         T: tonic::client::GrpcService<tonic::body::BoxBody>,
         T::Error: Into<StdError>,
@@ -67,7 +45,7 @@ pub mod range_server_client {
         pub fn with_interceptor<F>(
             inner: T,
             interceptor: F,
-        ) -> RangeServerClient<InterceptedService<T, F>>
+        ) -> EpochBroadcasterClient<InterceptedService<T, F>>
         where
             F: tonic::service::Interceptor,
             T::ResponseBody: Default,
@@ -81,7 +59,7 @@ pub mod range_server_client {
                 http::Request<tonic::body::BoxBody>,
             >>::Error: Into<StdError> + Send + Sync,
         {
-            RangeServerClient::new(InterceptedService::new(inner, interceptor))
+            EpochBroadcasterClient::new(InterceptedService::new(inner, interceptor))
         }
         /// Compress requests with the given encoding.
         ///
@@ -114,11 +92,11 @@ pub mod range_server_client {
             self.inner = self.inner.max_encoding_message_size(limit);
             self
         }
-        pub async fn prefetch(
+        pub async fn set_epoch(
             &mut self,
-            request: impl tonic::IntoRequest<super::PrefetchRequest>,
+            request: impl tonic::IntoRequest<super::SetEpochRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::PrefetchResponse>,
+            tonic::Response<super::SetEpochResponse>,
             tonic::Status,
         > {
             self.inner
@@ -132,32 +110,34 @@ pub mod range_server_client {
                 })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/rangeserver.RangeServer/Prefetch",
+                "/epoch_broadcaster.EpochBroadcaster/SetEpoch",
             );
             let mut req = request.into_request();
             req.extensions_mut()
-                .insert(GrpcMethod::new("rangeserver.RangeServer", "Prefetch"));
+                .insert(
+                    GrpcMethod::new("epoch_broadcaster.EpochBroadcaster", "SetEpoch"),
+                );
             self.inner.unary(req, path, codec).await
         }
     }
 }
 /// Generated server implementations.
-pub mod range_server_server {
+pub mod epoch_broadcaster_server {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
     use tonic::codegen::*;
-    /// Generated trait containing gRPC methods that should be implemented for use with RangeServerServer.
+    /// Generated trait containing gRPC methods that should be implemented for use with EpochBroadcasterServer.
     #[async_trait]
-    pub trait RangeServer: Send + Sync + 'static {
-        async fn prefetch(
+    pub trait EpochBroadcaster: Send + Sync + 'static {
+        async fn set_epoch(
             &self,
-            request: tonic::Request<super::PrefetchRequest>,
+            request: tonic::Request<super::SetEpochRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::PrefetchResponse>,
+            tonic::Response<super::SetEpochResponse>,
             tonic::Status,
         >;
     }
     #[derive(Debug)]
-    pub struct RangeServerServer<T: RangeServer> {
+    pub struct EpochBroadcasterServer<T: EpochBroadcaster> {
         inner: _Inner<T>,
         accept_compression_encodings: EnabledCompressionEncodings,
         send_compression_encodings: EnabledCompressionEncodings,
@@ -165,7 +145,7 @@ pub mod range_server_server {
         max_encoding_message_size: Option<usize>,
     }
     struct _Inner<T>(Arc<T>);
-    impl<T: RangeServer> RangeServerServer<T> {
+    impl<T: EpochBroadcaster> EpochBroadcasterServer<T> {
         pub fn new(inner: T) -> Self {
             Self::from_arc(Arc::new(inner))
         }
@@ -217,9 +197,9 @@ pub mod range_server_server {
             self
         }
     }
-    impl<T, B> tonic::codegen::Service<http::Request<B>> for RangeServerServer<T>
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for EpochBroadcasterServer<T>
     where
-        T: RangeServer,
+        T: EpochBroadcaster,
         B: Body + Send + 'static,
         B::Error: Into<StdError> + Send + 'static,
     {
@@ -235,25 +215,25 @@ pub mod range_server_server {
         fn call(&mut self, req: http::Request<B>) -> Self::Future {
             let inner = self.inner.clone();
             match req.uri().path() {
-                "/rangeserver.RangeServer/Prefetch" => {
+                "/epoch_broadcaster.EpochBroadcaster/SetEpoch" => {
                     #[allow(non_camel_case_types)]
-                    struct PrefetchSvc<T: RangeServer>(pub Arc<T>);
+                    struct SetEpochSvc<T: EpochBroadcaster>(pub Arc<T>);
                     impl<
-                        T: RangeServer,
-                    > tonic::server::UnaryService<super::PrefetchRequest>
-                    for PrefetchSvc<T> {
-                        type Response = super::PrefetchResponse;
+                        T: EpochBroadcaster,
+                    > tonic::server::UnaryService<super::SetEpochRequest>
+                    for SetEpochSvc<T> {
+                        type Response = super::SetEpochResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::PrefetchRequest>,
+                            request: tonic::Request<super::SetEpochRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as RangeServer>::prefetch(&inner, request).await
+                                <T as EpochBroadcaster>::set_epoch(&inner, request).await
                             };
                             Box::pin(fut)
                         }
@@ -265,7 +245,7 @@ pub mod range_server_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let inner = inner.0;
-                        let method = PrefetchSvc(inner);
+                        let method = SetEpochSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
@@ -296,7 +276,7 @@ pub mod range_server_server {
             }
         }
     }
-    impl<T: RangeServer> Clone for RangeServerServer<T> {
+    impl<T: EpochBroadcaster> Clone for EpochBroadcasterServer<T> {
         fn clone(&self) -> Self {
             let inner = self.inner.clone();
             Self {
@@ -308,7 +288,7 @@ pub mod range_server_server {
             }
         }
     }
-    impl<T: RangeServer> Clone for _Inner<T> {
+    impl<T: EpochBroadcaster> Clone for _Inner<T> {
         fn clone(&self) -> Self {
             Self(Arc::clone(&self.0))
         }
@@ -318,7 +298,7 @@ pub mod range_server_server {
             write!(f, "{:?}", self.0)
         }
     }
-    impl<T: RangeServer> tonic::server::NamedService for RangeServerServer<T> {
-        const NAME: &'static str = "rangeserver.RangeServer";
+    impl<T: EpochBroadcaster> tonic::server::NamedService for EpochBroadcasterServer<T> {
+        const NAME: &'static str = "epoch_broadcaster.EpochBroadcaster";
     }
 }

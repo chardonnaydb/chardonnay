@@ -1,0 +1,13 @@
+syntax = "proto3";
+package epoch_broadcaster;
+
+service EpochBroadcaster {
+    rpc SetEpoch (SetEpochRequest) returns (SetEpochResponse);
+}
+
+message SetEpochRequest {
+    uint64 epoch = 1;
+}
+
+message SetEpochResponse {
+}

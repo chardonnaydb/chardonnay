@@ -1,0 +1,34 @@
+namespace EpochBroadcaster;
+
+table Uuidu128 {
+  lower:uint64;
+  upper:uint64;
+}
+
+enum Status:byte {
+  Ok = 0,
+  InvalidRequestFormat,
+  EpochUnknown,
+}
+
+table ReadEpochRequest {
+  request_id:Uuidu128;
+}
+
+table ReadEpochResponse {
+  request_id:Uuidu128;
+  status:Status;
+  epoch:uint64;
+}
+
+enum MessageType:byte { ReadEpoch = 0 }
+
+table RequestEnvelope {
+  type:MessageType;
+  bytes:[ubyte];
+}
+
+table ResponseEnvelope {
+  type:MessageType;
+  bytes:[ubyte];
+}

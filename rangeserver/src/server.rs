@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
+use common::keyspace_id::KeyspaceId;
 use common::util;
 use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
 use flatbuffers::FlatBufferBuilder;
@@ -26,11 +27,23 @@ use flatbuf::rangeserver_flatbuffers::range_server::*;
 use proto::rangeserver::range_server_server::{RangeServer, RangeServerServer};
 use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
 
-#[derive(Debug, Default)]
-struct ProtoServer {}
+use crate::prefetching_buffer::PrefetchingBuffer;
+
+#[derive(Clone)]
+struct ProtoServer<S, E>
+where
+    S: Storage,
+    E: EpochProvider,
+{
+    parent_server: Arc<Server<S, E>>,
+}
 
 #[tonic::async_trait]
-impl RangeServer for ProtoServer {
+impl<S, E> RangeServer for ProtoServer<S, E>
+where
+    S: Storage,
+    E: EpochProvider,
+{
     async fn prefetch(
         &self,
         request: Request<PrefetchRequest>, // Accept request of type PrefetchRequest
@@ -38,11 +51,43 @@ impl RangeServer for ProtoServer {
         // Return an instance of type PrefetchResponse
         println!("Got a request: {:?}", request);
 
-        let reply = PrefetchResponse {
-            status: format!("Prefetch request received"),
+        // Extract transaction_id, requested key, keyspace_id, and range_id from the request
+        let transaction_id = Uuid::parse_str(&request.get_ref().transaction_id).map_err(|e| {
+            TStatus::internal(format!(
+                "Transaction id is not in the correct format: {:?}",
+                e
+            ))
+        })?;
+
+        let key = Bytes::from(request.get_ref().range_key[0].key.clone());
+        let range = request.get_ref().range_key[0].range.as_ref().unwrap();
+        let keyspace_id = KeyspaceId::new(Uuid::parse_str(&range.keyspace_id).map_err(|e| {
+            TStatus::internal(format!("Keyspace id is not in the correct format: {:?}", e))
+        })?);
+        let range_id = Uuid::parse_str(&range.range_id).map_err(|e| {
+            TStatus::internal(format!("Range id is not in the correct format: {:?}", e))
+        })?;
+
+        let full_range_id = FullRangeId {
+            keyspace_id: keyspace_id,
+            range_id: range_id,
         };
 
-        Ok(Response::new(reply)) // Send back our formatted greeting
+        let range_manager = self
+            .parent_server
+            .maybe_load_and_get_range(&full_range_id)
+            .await
+            .map_err(|e| TStatus::internal(format!("Failed to load range: {:?}", e)))?;
+
+        match range_manager.prefetch(transaction_id, key).await {
+            Ok(_) => {
+                let reply = PrefetchResponse {
+                    status: format!("Prefetch request processed successfully"),
+                };
+                Ok(Response::new(reply)) // Send back response
+            }
+            Err(_) => Err(TStatus::internal("Failed to process prefetch request")),
+        }
     }
 }
 
@@ -60,6 +105,7 @@ where
     // TODO: parameterize the WAL implementation too.
     loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, E, InMemoryWal, C>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
+    prefetching_buffer: Arc<PrefetchingBuffer>,
 }
 
 type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
@@ -86,6 +132,7 @@ where
             bg_runtime,
             loaded_ranges: RwLock::new(HashMap::new()),
             transaction_table: RwLock::new(HashMap::new()),
+            prefetching_buffer: Arc::new(PrefetchingBuffer::new()),
         })
     }
 
@@ -176,6 +223,7 @@ where
                         self.epoch_provider.clone(),
                         InMemoryWal::new(),
                         C::new(CacheOptions::default()).await,
+                        self.prefetching_buffer.clone(),
                     );
                     (range_table).insert(id.range_id, rm.clone());
                     drop(range_table);
@@ -654,7 +702,9 @@ where
             .parse()
             .unwrap();
 
-        let prefetch = ProtoServer::default();
+        let prefetch = ProtoServer {
+            parent_server: server.clone(),
+        };
 
         // Spawn the gRPC server as a separate task
         server.bg_runtime.spawn(async move {
