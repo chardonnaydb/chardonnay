@@ -18,6 +18,7 @@ pub enum Error {
     UnknownTransaction,
     TransactionAborted(TransactionAbortReason),
     InternalError(Arc<dyn std::error::Error + Send + Sync>),
+    PrefetchError,
 }
 
 impl Error {
@@ -53,6 +54,7 @@ impl Error {
             Self::UnknownTransaction => Status::UnknownTransaction,
             Self::TransactionAborted(_) => Status::TransactionAborted,
             Self::InternalError(_) => Status::InternalError,
+            Self::PrefetchError => Status::PrefetchError,
         }
     }
 
@@ -74,6 +76,7 @@ impl Error {
                 // TODO: get the error from the message.
                 Err(Self::InternalError(Arc::new(std::fmt::Error)))
             }
+            Status::PrefetchError => Err(Self::PrefetchError),
             _ => Err(Self::InternalError(Arc::new(std::fmt::Error))),
         }
     }

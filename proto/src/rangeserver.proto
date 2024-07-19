@@ -18,6 +18,7 @@ service RangeServer {
 message PrefetchRequest {
     // Request message contains a range_key, which is a tuple containing a range and key to prefetch
     repeated RangeKey range_key = 1;
+    string transaction_id = 2;
 }
 
 message PrefetchResponse {

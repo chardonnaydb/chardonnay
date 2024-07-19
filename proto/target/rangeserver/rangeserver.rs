@@ -20,6 +20,8 @@ pub struct PrefetchRequest {
     /// Request message contains a range_key, which is a tuple containing a range and key to prefetch
     #[prost(message, repeated, tag = "1")]
     pub range_key: ::prost::alloc::vec::Vec<RangeKey>,
+    #[prost(string, tag = "2")]
+    pub transaction_id: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

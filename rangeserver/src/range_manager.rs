@@ -8,6 +8,10 @@ use chrono::DateTime;
 use common::config::Config;
 use common::full_range_id::FullRangeId;
 
+use uuid::Uuid;
+
+use crate::prefetching_buffer::KeyState;
+use crate::prefetching_buffer::PrefetchingBuffer;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -161,6 +165,7 @@ where
     epoch_provider: Arc<E>,
     wal: Mutex<W>,
     state: Arc<RwLock<State>>,
+    prefetching_buffer: Arc<PrefetchingBuffer>,
 }
 
 pub struct GetResult {
@@ -185,6 +190,7 @@ where
         storage: Arc<S>,
         epoch_provider: Arc<E>,
         wal: W,
+        prefetching_buffer: Arc<PrefetchingBuffer>,
     ) -> Arc<Self> {
         Arc::new(RangeManager {
             range_id,
@@ -193,6 +199,7 @@ where
             epoch_provider,
             wal: Mutex::new(wal),
             state: Arc::new(RwLock::new(State::Unloaded)),
+            prefetching_buffer,
         })
     }
 
@@ -484,6 +491,11 @@ where
                         .map_err(Error::from_wal_error)?;
                 }
                 lock_table.release();
+
+                let _ = self
+                    .prefetching_buffer
+                    .process_transaction_complete(tx.id)
+                    .await;
                 Ok(())
             }
         }
@@ -544,18 +556,24 @@ where
                             let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
 
                             self.storage
-                                .upsert(self.range_id, key, val, version)
+                                .upsert(self.range_id, key.clone(), val.clone(), version)
                                 .await
                                 .map_err(Error::from_storage_error)?;
+
+                            // Update the prefetch buffer if this key has been requested by a prefetch call
+                            self.prefetching_buffer.upsert(key, val).await;
                         }
                     }
                     for del in prepare_record.deletes().iter() {
                         for del in del.iter() {
                             let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
                             self.storage
-                                .delete(self.range_id, key, version)
+                                .delete(self.range_id, key.clone(), version)
                                 .await
                                 .map_err(Error::from_storage_error)?;
+
+                            // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
+                            self.prefetching_buffer.delete(key).await;
                         }
                     }
                 }
@@ -564,6 +582,53 @@ where
                 // gets to storage directly. We should implement a memtable to allow us to release
                 // the lock sooner.
                 lock_table.release();
+                // Process transaction complete and remove the requests from the logs
+                self.prefetching_buffer
+                    .process_transaction_complete(tx.id)
+                    .await;
+                Ok(())
+            }
+        }
+    }
+
+    /// Get from database without acquiring any locks
+    /// This is a very basic copy of the 'get' function
+    pub async fn prefetch_get(&self, key: Bytes) -> Result<Option<Bytes>, Error> {
+        let val = self
+            .storage
+            .get(self.range_id, key.clone())
+            .await
+            .map_err(Error::from_storage_error)?;
+        Ok(val)
+    }
+
+    pub async fn prefetch(&self, transaction_id: Uuid, key: Bytes) -> Result<(), Error> {
+        // Request prefetch from the prefetching buffer
+        let keystate = self
+            .prefetching_buffer
+            .process_prefetch_request(transaction_id, key.clone())
+            .await;
+
+        match keystate {
+            KeyState::Fetched => Ok(()), // key has previously been fetched
+            KeyState::Loading(_) => Err(Error::PrefetchError), // Something is wrong if loading was returned
+            KeyState::Requested(fetch_sequence_number) =>
+            // key has just been requested - start fetch
+            {
+                // Fetch from database
+                let val = match self.prefetch_get(key.clone()).await {
+                    Ok(value) => value,
+                    Err(_) => {
+                        self.prefetching_buffer
+                            .fetch_failed(key.clone(), fetch_sequence_number)
+                            .await;
+                        return Err(Error::PrefetchError);
+                    }
+                };
+                // Successfully fetched from database -> add to buffer and update records
+                self.prefetching_buffer
+                    .fetch_complete(key.clone(), val, fetch_sequence_number)
+                    .await;
                 Ok(())
             }
         }
@@ -708,6 +773,7 @@ mod tests {
         let storage_context: crate::storage::cassandra::for_testing::TestContext =
             crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
+        let prefetching_buffer = Arc::new(PrefetchingBuffer::new());
         let range_id = FullRangeId {
             keyspace_id: storage_context.keyspace_id,
             range_id: storage_context.range_id,
@@ -726,6 +792,7 @@ mod tests {
             wal,
             epoch_provider,
             state: Arc::new(RwLock::new(State::Unloaded)),
+            prefetching_buffer,
         });
         let rm_copy = rm.clone();
         let init_handle = tokio::spawn(async move { rm_copy.load().await.unwrap() });
