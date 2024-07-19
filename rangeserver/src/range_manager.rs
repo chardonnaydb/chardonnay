@@ -400,14 +400,15 @@ where
                 };
 
                 // check cache first
-                let cache_result = self
+                let (value, _epoch) = self
                     .cache
                     .read()
                     .await
                     .get(key.clone(), None)
-                    .await;
+                    .await
+                    .unwrap();
 
-                if let Ok((val, _)) = cache_result {
+                if let Some(val) = value {
                     get_result.val = Some(val);
                 } else {
                     let val = self

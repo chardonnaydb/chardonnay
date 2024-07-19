@@ -54,7 +54,7 @@ pub trait Cache: Send + Sync + 'static {
         &self,
         key: Bytes,
         epoch: Option<u64>,
-    ) -> impl std::future::Future<Output = Result<(bytes::Bytes, u64), Error>> + Send;
+    ) -> impl std::future::Future<Output = Result<(Option<Bytes>, u64), Error>> + Send;
 
     // clears the cache entries upto a given epoch
     fn clear(

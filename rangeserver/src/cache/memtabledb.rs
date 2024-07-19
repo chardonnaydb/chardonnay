@@ -212,7 +212,7 @@ impl Cache for MemTableDB {
         &self, 
         key: bytes::Bytes,
         epoch: Option<u64>,
-    ) -> Result<(bytes::Bytes, u64), Error> {
+    ) -> Result<(Option<Bytes>, u64), Error> {
 
         // sanity checks
         assert!(self.mut_memtable_idx >= 0 && self.mut_memtable_idx < self.cache_options.num_write_buffers, 
@@ -247,9 +247,9 @@ impl Cache for MemTableDB {
                         if entry.key == key {
                             // println!("Found the entry {:?}", entry);
                             if entry.deleted {
-                                return Err(Error::KeyNotFound);
+                                return Ok((None, epoch.unwrap_or(0)));
                             } else {
-                                return Ok((entry.val.clone(), entry.epoch));
+                                return Ok((Some(entry.val.clone()), entry.epoch));
                             }
                         }
                     }
@@ -260,16 +260,8 @@ impl Cache for MemTableDB {
                 }
             }
         }
-        Err(Error::KeyNotFound)
+        return Ok((None, epoch.unwrap_or(0)));
     }
-
-    // async fn get_range() -> Result<LoadedState, Error> {
-        
-    // }
-
-    // async fn get_iterator() -> Result<LoadedState, Error> {
-        
-    // }
 
     async fn clear(
         &mut self,
@@ -350,13 +342,9 @@ pub mod tests {
             }
             {
                 println!("FILL: get key {:?} epoch {:?}", key, epoch);
-                match mt_db.read().await.get(key, None).await {
-                    Err(e) => assert!(false, "get after insert returned error! {}", e),
-                    Ok((val, ep)) => {
-                        assert!(*val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
-                        assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
-                    }
-                }
+                let (val, ep) = mt_db.read().await.get(key, None).await.unwrap();
+                assert!(val.clone().unwrap() == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val.unwrap());
+                assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
             }
 
             // trigger a gc cleanup periodically 
@@ -395,13 +383,9 @@ pub mod tests {
             let value = Bytes::from(data.clone());
             epoch = i;
 
-            match mt_db.read().await.get(key, Some(epoch)).await {
-                Err(e) => assert!(false, "get after insert returned error! {}", e),
-                Ok((val, ep)) => {
-                    assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
-                    assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
-                }
-            }
+            let (val, ep) = mt_db.read().await.get(key, Some(epoch)).await.unwrap();
+            assert!(val.clone().unwrap() == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
+            assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
         }
     }
 
@@ -436,31 +420,19 @@ pub mod tests {
         }
 
         // read older epoch
-        match mt_db.read().await.get(key.clone(), Some(epoch-1)).await {
-            Err(e) => assert!(false, "get after insert returned error! {}", e),
-            Ok((val, ep)) => {
-                assert!(val != value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
-                assert!(ep == 1, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
-            }
-        }
+        let (val, ep) =  mt_db.read().await.get(key.clone(), Some(epoch-1)).await.unwrap();
+        assert!(val.clone().unwrap() != value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
+        assert!(ep == 1, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
 
         // read latest
-        match mt_db.read().await.get(key.clone(), None).await {
-            Err(e) => assert!(false, "get after insert returned error! {}", e),
-            Ok((val, ep)) => {
-                assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
-                assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
-            }
-        };
+        let (val, ep) = mt_db.read().await.get(key.clone(), None).await.unwrap();
+        assert!(val.clone().unwrap() == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
+        assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
 
         // read future
-        match mt_db.read().await.get(key.clone(), Some(epoch+1)).await {
-            Err(e) => assert!(false, "get after insert returned error! {}", e),
-            Ok((val, ep)) => {
-                assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
-                assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
-            }
-        };
+        let (val, ep) = mt_db.read().await.get(key.clone(), Some(epoch+1)).await.unwrap();
+        assert!(val.clone().unwrap() == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
+        assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
     }
 
     #[tokio::test]
@@ -483,22 +455,14 @@ pub mod tests {
         let value = Bytes::from(data.clone());
 
         // read original key epoch
-        match mt_db.read().await.get(key.clone(), Some(epoch)).await {
-            Err(e) => assert!(false, "get after insert returned error! {}", e),
-            Ok((val, ep)) => {
-                assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
-                assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
-            }
-        };
+        let (val, ep) = mt_db.read().await.get(key.clone(), Some(epoch)).await.unwrap();
+        assert!(val.clone().unwrap() == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
+        assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
 
         // read latest
-        match mt_db.read().await.get(key.clone(), Some(num_keys)).await {
-            Err(e) => assert!(false, "get after insert returned error! {}", e),
-            Ok((val, ep)) => {
-                assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
-                assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
-            }
-        };
+        let (val, ep) = mt_db.read().await.get(key.clone(), Some(num_keys)).await.unwrap();
+        assert!(val.clone().unwrap() == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
+        assert!(ep == epoch, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
     }
 
     #[tokio::test]
@@ -532,19 +496,13 @@ pub mod tests {
         }
 
         // // read older epoch
-        match mt_db.read().await.get(key.clone(), Some(epoch-1)).await {
-            Err(e) => assert!(false, "get after insert returned error! {}", e),
-            Ok((val, ep)) => {
-                assert!(val == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
-                assert!(ep == 1, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
-            }
-        }
+        let (val, ep) = mt_db.read().await.get(key.clone(), Some(epoch-1)).await.unwrap();
+        assert!(val.clone().unwrap() == value, "get after insert returned wrong value! expected {:?} got {:?}", value, val);
+        assert!(ep == 1, "get after insert returned wrong epoch! expected {:?} got {:?}", epoch, ep);
 
         // read latest
-        match mt_db.read().await.get(key.clone(), None).await {
-            Err(e) => {},
-            Ok(_) => assert!(false, "get after delete returned a value!"),
-        };
+        let (val, ep) = mt_db.read().await.get(key.clone(), None).await.unwrap();
+        assert!(val.is_none() == true, "get after delete returned a value!");
     }
 
     fn gc_callback(epoch: u64) {
@@ -565,10 +523,8 @@ pub mod tests {
         fill(&mt_db, num_keys, true).await;
         println!("Fill complete >>>>>>!");
 
-        match mt_db.read().await.get(Bytes::from(format!("k{}", 0)), None).await {
-            Err(e) => assert!(true, "key should not be found! {}", e),
-            Ok((val, ep)) => assert!(false, "should not return any value! {:?} {}", val, ep),
-        };
+        let (val, ep) = mt_db.read().await.get(Bytes::from(format!("k{}", 0)), None).await.unwrap();
+        assert!(val.is_none() == true, "key should not be found!");
     }
 
     #[tokio::test]
@@ -668,22 +624,15 @@ pub mod tests {
                     let key = Bytes::from(format!("k{}", rand_key));
                     println!("key {:?}, epoch {}", key, rand_epoch);
 
-                    // let mt_db_rg = mt_db_rd.read().unwrap();
-                    // let mt_db_rg = mt_db_rd.read();
-                    match mt_db_rd.read().await.get(key.clone(), Some(rand_epoch)).await {
-                        Err(e) => assert!(false, "get returned error! {}", e),
-                        Ok((val, ep)) => {
-                            match rd_td.values.get(&key) {
-                                None => {},
-                                Some(v) => {
-                                    println!("Get result requested epoch {}, get_epoch {}", rand_epoch, ep);
-                                    assert!(*val == v[ep as usize], "get returned wrong value! expected {:?} got {:?}", v[ep as usize], val);
-                                    assert!(ep <= rand_epoch, "get returned wrong epoch! expected {:?} got {:?}", rand_epoch, ep);
-                                }
-                            }
+                    let (val, ep) = mt_db_rd.read().await.get(key.clone(), Some(rand_epoch)).await.unwrap();
+                    match rd_td.values.get(&key) {
+                        None => {},
+                        Some(v) => {
+                            println!("Get result requested epoch {}, get_epoch {}", rand_epoch, ep);
+                            assert!(val.clone().unwrap() == v[ep as usize], "get returned wrong value! expected {:?} got {:?}", v[ep as usize], val);
+                            assert!(ep <= rand_epoch, "get returned wrong epoch! expected {:?} got {:?}", rand_epoch, ep);
                         }
                     }
-                    // drop(mt_db_rg)
                 }
             });
             handles.push(rd_handle);
