@@ -1,6 +1,6 @@
 use crate::{
     epoch_provider::Error as EpochProviderError, storage::Error as StorageError,
-    transaction_abort_reason::TransactionAbortReason, wal::Error as WalError,
+    transaction_abort_reason::TransactionAbortReason, wal::Error as WalError, cache::Error as CacheError
 };
 
 use flatbuf::rangeserver_flatbuffers::range_server::Status;
@@ -17,6 +17,7 @@ pub enum Error {
     Timeout,
     UnknownTransaction,
     TransactionAborted(TransactionAbortReason),
+    CacheIsFull,
     InternalError(Arc<dyn std::error::Error + Send + Sync>),
     PrefetchError,
 }
@@ -37,6 +38,14 @@ impl Error {
         }
     }
 
+    pub fn from_cache_error(e: CacheError) -> Self {
+        match e {
+            CacheError::CacheIsFull => Self::CacheIsFull,
+            CacheError::Timeout => Self::Timeout,
+            CacheError::InternalError(_) => Self::InternalError(Arc::new(e)),
+        }
+    }
+
     pub fn from_epoch_provider_error(e: EpochProviderError) -> Self {
         match e {
             EpochProviderError::Unknown => Self::InternalError(Arc::new(e)),
@@ -53,6 +62,7 @@ impl Error {
             Self::Timeout => Status::Timeout,
             Self::UnknownTransaction => Status::UnknownTransaction,
             Self::TransactionAborted(_) => Status::TransactionAborted,
+            Self::CacheIsFull => Status::CacheIsFull,
             Self::InternalError(_) => Status::InternalError,
             Self::PrefetchError => Status::PrefetchError,
         }
@@ -68,6 +78,7 @@ impl Error {
             Status::RangeOwnershipLost => Err(Self::RangeOwnershipLost),
             Status::Timeout => Err(Self::Timeout),
             Status::UnknownTransaction => Err(Self::UnknownTransaction),
+            Status::CacheIsFull => Err(Self::CacheIsFull),
             Status::TransactionAborted => {
                 // TODO: get the reason from the message.
                 Err(Self::TransactionAborted(TransactionAbortReason::Other))
