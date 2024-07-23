@@ -11,7 +11,7 @@ use common::{
     region::{Region, Zone},
 };
 use rangeserver::{
-    for_testing::mock_warden::MockWarden, server::Server, storage::cassandra::Cassandra,
+    for_testing::mock_warden::MockWarden, server::Server, storage::cassandra::Cassandra, cache::memtabledb::MemTableDB,
 };
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
@@ -38,7 +38,7 @@ fn main() {
         let host_info = get_host_info();
         // TODO: set number of threads and pin to cores.
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-        let server = Server::new(
+        let server = Server::<_, _, MemTableDB>::new(
             config,
             host_info,
             storage,

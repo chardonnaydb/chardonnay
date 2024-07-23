@@ -20,6 +20,7 @@ use rangeserver::{
     for_testing::{epoch_provider::EpochProvider, mock_warden::MockWarden},
     server::Server,
     transaction_info::TransactionInfo,
+    cache::memtabledb::MemTableDB,
 };
 use tokio::runtime::Builder;
 use uuid::Uuid;
@@ -93,7 +94,7 @@ async fn setup_server(
         let config = get_config(warden_address);
         let host_info = get_server_host_info(server_address);
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-        let server = Server::new(
+        let server = Server::<_, _, MemTableDB>::new(
             config,
             host_info,
             storage,
