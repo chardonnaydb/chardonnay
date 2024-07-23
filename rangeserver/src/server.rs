@@ -18,8 +18,9 @@ use uuid::Uuid;
 use crate::transaction_info::TransactionInfo;
 use crate::warden_handler::WardenHandler;
 use crate::{
+    cache::memtabledb::MemTableDB, cache::Cache, cache::CacheOptions,
     epoch_provider::EpochProvider, error::Error, for_testing::in_memory_wal::InMemoryWal,
-    range_manager::RangeManager, storage::Storage, cache::Cache, cache::memtabledb::MemTableDB, cache::CacheOptions,
+    range_manager::RangeManager, storage::Storage,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
@@ -30,21 +31,6 @@ use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
 use crate::prefetching_buffer::PrefetchingBuffer;
 
 #[derive(Clone)]
-<<<<<<< HEAD
-struct ProtoServer<S, E>
-where
-    S: Storage,
-    E: EpochProvider,
-{
-    parent_server: Arc<Server<S, E>>,
-}
-
-#[tonic::async_trait]
-impl<S, E> RangeServer for ProtoServer<S, E>
-where
-    S: Storage,
-    E: EpochProvider,
-=======
 struct ProtoServer<S, E, C>
 where
     S: Storage,
@@ -60,7 +46,6 @@ where
     S: Storage,
     E: EpochProvider,
     C: Cache,
->>>>>>> origin
 {
     async fn prefetch(
         &self,
@@ -240,10 +225,7 @@ where
                         self.storage.clone(),
                         self.epoch_provider.clone(),
                         InMemoryWal::new(),
-<<<<<<< HEAD
-=======
                         C::new(CacheOptions::default()).await,
->>>>>>> origin
                         self.prefetching_buffer.clone(),
                     );
                     (range_table).insert(id.range_id, rm.clone());
