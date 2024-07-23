@@ -18,13 +18,24 @@ service Warden {
     rpc RegisterRangeServer(RegisterRangeServerRequest) returns (stream WardenUpdate) {}
 }
 
+// A full assignment of ranges to a range server. The monotonically increasing version field indicates the
+// version of the full assignment, and the range field contains the list of ranges
+// that the range server is responsible for.
 message FullAssignment {
-   repeated RangeId range = 1;
+   int64 version = 1;
+   repeated RangeId range = 2;
 }
 
+// An incremental assignment of ranges to a range server. The monotonically increasing version field indicates the
+// version of the incremental assignment, and the previous_version field indicates the version that this
+// incremental assignment is based on. The load field contains the list of ranges that the range server
+// should start serving, and the unload field contains the list of ranges that the range server should stop
+// serving. Clients should reestablish connection to receive a full update if they don't have the assignment referred to by previous_version.
 message IncrementalAssignment {
-    repeated RangeId load = 1;
-    repeated RangeId unload = 2;
+    int64 version = 1;
+    int64 previous_version = 2;
+    repeated RangeId load = 3;
+    repeated RangeId unload = 4;
 }
 
 message WardenUpdate {
