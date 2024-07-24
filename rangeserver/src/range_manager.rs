@@ -422,13 +422,19 @@ where
                 if let Some(val) = value {
                     get_result.val = Some(val);
                 } else {
-                    let val = self
-                        .storage
-                        .get(self.range_id, key.clone())
-                        .await
-                        .map_err(Error::from_storage_error)?;
+                    if let Some(val) = value {
+                        // check prefetch buffer
+                        let val = self.prefetching_buffer.get_from_buffer(key.clone).await;
+                        get_result.val = val.clone();
+                    } else {
+                        let val = self
+                            .storage
+                            .get(self.range_id, key.clone())
+                            .await
+                            .map_err(Error::from_storage_error)?;
 
-                    get_result.val = val.clone();
+                        get_result.val = val.clone();
+                    }
                 }
                 Ok(get_result)
             }
