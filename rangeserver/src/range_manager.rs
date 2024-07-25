@@ -12,10 +12,6 @@ use uuid::Uuid;
 
 use crate::prefetching_buffer::KeyState;
 use crate::prefetching_buffer::PrefetchingBuffer;
-use uuid::Uuid;
-
-use crate::prefetching_buffer::KeyState;
-use crate::prefetching_buffer::PrefetchingBuffer;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -422,10 +418,10 @@ where
                 if let Some(val) = value {
                     get_result.val = Some(val);
                 } else {
+                    // check prefetch buffer
+                    let value = self.prefetching_buffer.get_from_buffer(key.clone()).await;
                     if let Some(val) = value {
-                        // check prefetch buffer
-                        let val = self.prefetching_buffer.get_from_buffer(key.clone).await;
-                        get_result.val = val.clone();
+                        get_result.val = Some(val);
                     } else {
                         let val = self
                             .storage
