@@ -1,7 +1,7 @@
 use crate::{
-    epoch_provider::EpochProvider, error::Error, key_version::KeyVersion, storage::RangeInfo,
-    storage::Storage, transaction_abort_reason::TransactionAbortReason,
-    transaction_info::TransactionInfo, wal::Wal, cache::Cache, cache::CacheOptions,
+    cache::Cache, cache::CacheOptions, epoch_provider::EpochProvider, error::Error,
+    key_version::KeyVersion, storage::RangeInfo, storage::Storage,
+    transaction_abort_reason::TransactionAbortReason, transaction_info::TransactionInfo, wal::Wal,
 };
 use bytes::Bytes;
 use chrono::DateTime;
@@ -418,13 +418,19 @@ where
                 if let Some(val) = value {
                     get_result.val = Some(val);
                 } else {
-                    let val = self
+                    // check prefetch buffer
+                    let value = self.prefetching_buffer.get_from_buffer(key.clone()).await;
+                    if let Some(val) = value {
+                        get_result.val = Some(val);
+                    } else {
+                        let val = self
                             .storage
                             .get(self.range_id, key.clone())
                             .await
                             .map_err(Error::from_storage_error)?;
 
-                    get_result.val = val.clone();
+                        get_result.val = val.clone();
+                    }
                 }
                 Ok(get_result)
             }
@@ -584,7 +590,10 @@ where
                                 .await
                                 .map_err(Error::from_storage_error)?;
 
-                            cache_wg.upsert(key.clone(), val.clone(), version.epoch).await.map_err(Error::from_cache_error)?;
+                            cache_wg
+                                .upsert(key.clone(), val.clone(), version.epoch)
+                                .await
+                                .map_err(Error::from_cache_error)?;
 
                             // Update the prefetch buffer if this key has been requested by a prefetch call
                             self.prefetching_buffer.upsert(key, val).await;
@@ -601,7 +610,10 @@ where
                                 .await
                                 .map_err(Error::from_storage_error)?;
 
-                            cache_wg.delete(key.clone(), version.epoch).await.map_err(Error::from_cache_error)?;
+                            cache_wg
+                                .delete(key.clone(), version.epoch)
+                                .await
+                                .map_err(Error::from_cache_error)?;
 
                             // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
                             self.prefetching_buffer.delete(key).await;
@@ -676,11 +688,11 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::cache::memtabledb::MemTableDB;
     use crate::epoch_provider::EpochProvider as EpochProviderTrait;
     use crate::for_testing::epoch_provider::EpochProvider;
     use crate::for_testing::in_memory_wal::InMemoryWal;
     use crate::storage::cassandra::Cassandra;
-    use crate::cache::memtabledb::MemTableDB;
     use crate::transaction_info::TransactionInfo;
     type RM = RangeManager<Cassandra, EpochProvider, InMemoryWal, MemTableDB>;
 
