@@ -419,7 +419,11 @@ where
                     get_result.val = Some(val);
                 } else {
                     // check prefetch buffer
-                    let value = self.prefetching_buffer.get_from_buffer(key.clone()).await;
+                    let value = self
+                        .prefetching_buffer
+                        .get_from_buffer(key.clone())
+                        .await
+                        .map_err(|_| return Error::PrefetchError)?;
                     if let Some(val) = value {
                         get_result.val = Some(val);
                     } else {

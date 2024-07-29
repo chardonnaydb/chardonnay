@@ -43,13 +43,17 @@ impl PrefetchingBuffer {
     }
 
     /// Returns the value for a key from the prefetch_store
-    pub async fn get_from_buffer(&self, key: Bytes) -> Option<Bytes> {
+    pub async fn get_from_buffer(&self, key: Bytes) -> Result<Option<Bytes>, ()> {
         let cur_state = self.state.lock().await;
-        let val = cur_state.prefetch_store.get(&key);
-        if let Some(value) = val {
-            return Some(value.clone());
+        if let Some(KeyState::Fetched) = cur_state.key_state.get(&key.clone()) {
+            let val = cur_state.prefetch_store.get(&key);
+            if let Some(value) = val {
+                return Ok(Some(value.clone()));
+            } else {
+                return Err(());
+            }
         } else {
-            return None;
+            return Ok(None);
         }
     }
 
