@@ -75,6 +75,8 @@ impl MockWarden {
                     .unwrap()
                     .remove(range);
                 let incremental = proto::warden::IncrementalAssignment {
+                    version: 2,
+                    previous_version: 1,
                     unload: vec![range_proto],
                     load: vec![],
                 };
@@ -104,6 +106,8 @@ impl MockWarden {
             (*host_ranges).get_mut(host).unwrap().insert(*range);
         }
         let incremental = proto::warden::IncrementalAssignment {
+            version: 2,
+            previous_version: 1,
             load: vec![range_proto],
             unload: vec![],
         };
@@ -146,6 +150,7 @@ impl Warden for WardenState {
             Some(ranges) => ranges.iter().map(range_id_proto).collect(),
         };
         let full = proto::warden::FullAssignment {
+            version: 1,
             range: assigned_ranges,
         };
         let warden_update = WardenUpdate {
