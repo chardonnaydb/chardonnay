@@ -426,14 +426,10 @@ impl RangeClient {
         range_id: &FullRangeId,
         keys: Vec<Bytes>,
     ) -> Result<(), RangeServerError> {
-        println!("trying to connect");
-
         // Connect to the gRPC server
         let mut client = RangeServerClient::connect("http://127.0.0.1:50051")
             .await
             .unwrap();
-
-        println!("Successfully connected to the server");
 
         // Create a PrefetchRequest
         let transaction_id = tx.id.to_string();
