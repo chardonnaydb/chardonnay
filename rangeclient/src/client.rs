@@ -436,8 +436,7 @@ impl RangeClient {
         println!("Successfully connected to the server");
 
         // Create a PrefetchRequest
-        let transaction_id = tx.id.to_string(); // Generate a new UUID for the transaction_id
-                                                // let key = Bytes::from("your_key".to_string()); // Replace "your_key" with the actual key value
+        let transaction_id = tx.id.to_string();
         let keyspace_id = range_id.keyspace_id.id.to_string();
         let range_id = range_id.range_id.to_string();
 
