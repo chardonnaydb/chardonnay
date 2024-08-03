@@ -193,8 +193,10 @@ impl PrefetchingBuffer {
             // If the current loading number is not equal to input fetch_sequence_number
             // this means another later transaction deleted and changed the key
             if *n == fetch_sequence_number {
-                // Update/add key to BTree
-                cur_state.prefetch_store.insert(key.clone(), value.unwrap());
+                // Update/add key to BTree - if None then don't add it but still mark as fetched
+                if let Some(data) = value {
+                    cur_state.prefetch_store.insert(key.clone(), data);
+                }
                 // Update key_state to reflect fetch completion
                 cur_state.key_state.insert(key.clone(), KeyState::Fetched);
                 // Notify all watchers of the state change

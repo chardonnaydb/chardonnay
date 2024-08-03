@@ -8,12 +8,15 @@ use flatbuf::rangeserver_flatbuffers::range_server::Record as FlatbufRecord;
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use flatbuffers::FlatBufferBuilder;
+use proto::rangeserver::range_server_client::RangeServerClient;
+use proto::rangeserver::{PrefetchRequest, RangeId, RangeKey};
 use rangeserver::error::Error as RangeServerError;
 use rangeserver::transaction_info::TransactionInfo;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
+use tonic::Request;
 use uuid::Uuid;
 
 pub struct PrepareOk {
@@ -415,5 +418,52 @@ impl RangeClient {
         );
         fbb.finish(fbb_root, None);
         fbb.finished_data()
+    }
+
+    pub async fn prefetch(
+        &self,
+        tx: Arc<TransactionInfo>,
+        range_id: &FullRangeId,
+        keys: Vec<Bytes>,
+    ) -> Result<(), RangeServerError> {
+        // Connect to the gRPC server
+        let mut client = RangeServerClient::connect("http://127.0.0.1:50051")
+            .await
+            .unwrap();
+
+        // Create a PrefetchRequest
+        let transaction_id = tx.id.to_string();
+        let keyspace_id = range_id.keyspace_id.id.to_string();
+        let range_id = range_id.range_id.to_string();
+
+        let range = RangeId {
+            keyspace_id,
+            range_id,
+        };
+
+        let range_keys: Vec<RangeKey> = keys
+            .into_iter()
+            .map(|key| RangeKey {
+                range: Some(range.clone()),
+                key: key.to_vec(),
+            })
+            .collect();
+
+        let request = PrefetchRequest {
+            transaction_id,
+            range_key: range_keys,
+        };
+
+        // Send the request
+        match client.prefetch(Request::new(request)).await {
+            Ok(response) => {
+                println!("RESPONSE={:?}", response);
+                Ok(())
+            }
+            Err(e) => {
+                println!("Failed prefetch: {:?}", e);
+                Err(RangeServerError::PrefetchError)
+            }
+        }
     }
 }
