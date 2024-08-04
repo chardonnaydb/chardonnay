@@ -33,7 +33,14 @@ impl EpochBroadcaster for ProtoServer {
         &self,
         request: Request<SetEpochRequest>,
     ) -> Result<Response<SetEpochResponse>, TStatus> {
+        let reply = SetEpochResponse {};
         let current_epoch = self.server.epoch.load(SeqCst);
+        if current_epoch == 0 {
+            // Can't accept the RPC, since we don't know if it is stale.
+            // TODO(tamer): on startup, the broadcaster should sync with
+            // the epoch service and read the latest epoch.
+            return Ok(Response::new(reply));
+        }
         let new_epoch = request.get_ref().epoch as usize;
         if new_epoch > current_epoch {
             let _ = self
@@ -41,8 +48,6 @@ impl EpochBroadcaster for ProtoServer {
                 .epoch
                 .compare_exchange(current_epoch, new_epoch, SeqCst, SeqCst);
         }
-        let reply = SetEpochResponse {};
-
         Ok(Response::new(reply))
     }
 }
