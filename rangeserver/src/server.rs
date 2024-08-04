@@ -18,8 +18,8 @@ use uuid::Uuid;
 use crate::transaction_info::TransactionInfo;
 use crate::warden_handler::WardenHandler;
 use crate::{
-    epoch_provider::EpochProvider, error::Error, for_testing::in_memory_wal::InMemoryWal,
-    range_manager::RangeManager, storage::Storage, cache::Cache, cache::memtabledb::MemTableDB, cache::CacheOptions,
+    cache::Cache, cache::CacheOptions, epoch_provider::EpochProvider, error::Error,
+    for_testing::in_memory_wal::InMemoryWal, range_manager::RangeManager, storage::Storage,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
@@ -735,6 +735,7 @@ where
 
 #[cfg(test)]
 pub mod tests {
+    use crate::cache::memtabledb::MemTableDB;
     use common::config::{RangeServerConfig, RegionConfig};
     use common::network::for_testing::udp_fast_network::UdpFastNetwork;
     use common::region::{Region, Zone};

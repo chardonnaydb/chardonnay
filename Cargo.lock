@@ -1270,7 +1270,9 @@ dependencies = [
  "machnet",
  "prost",
  "proto",
+ "rand 0.8.5",
  "scylla",
+ "skiplist",
  "strum",
  "thiserror",
  "tokio",
@@ -1450,6 +1452,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9e9e0b4211b72e7b8b6e85c807d36c212bdb33ea8587f7569562a84df5465b1"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "skiplist"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0eec25f46463fcdc5e02f388c2780b1b58e01be81a8378e62ec60931beccc3f6"
+dependencies = [
+ "rand 0.8.5",
 ]
 
 [[package]]
