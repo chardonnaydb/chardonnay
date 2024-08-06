@@ -39,7 +39,10 @@ impl EpochBroadcaster for ProtoServer {
             // Can't accept the RPC, since we don't know if it is stale.
             // TODO(tamer): on startup, the broadcaster should sync with
             // the epoch service and read the latest epoch.
-            return Ok(Response::new(reply));
+            return Err(TStatus::new(
+                tonic::Code::FailedPrecondition,
+                "Epoch not yet initialized",
+            ));
         }
         let new_epoch = request.get_ref().epoch as usize;
         if new_epoch > current_epoch {
