@@ -13,6 +13,7 @@ use proto::rangeserver::{PrefetchRequest, RangeId, RangeKey};
 use rangeserver::error::Error as RangeServerError;
 use rangeserver::transaction_info::TransactionInfo;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -425,11 +426,11 @@ impl RangeClient {
         tx: Arc<TransactionInfo>,
         range_id: &FullRangeId,
         keys: Vec<Bytes>,
+        proto_server_addr: SocketAddr,
     ) -> Result<(), RangeServerError> {
+        let addr = format!("http://{}", proto_server_addr);
         // Connect to the gRPC server
-        let mut client = RangeServerClient::connect("http://127.0.0.1:50051")
-            .await
-            .unwrap();
+        let mut client = RangeServerClient::connect(addr).await.unwrap();
 
         // Create a PrefetchRequest
         let transaction_id = tx.id.to_string();

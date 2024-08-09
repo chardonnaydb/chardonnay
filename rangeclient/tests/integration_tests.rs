@@ -22,6 +22,7 @@ use rangeserver::{
     server::Server,
     transaction_info::TransactionInfo,
 };
+use tokio::net::TcpListener;
 use tokio::runtime::Builder;
 use uuid::Uuid;
 
@@ -31,9 +32,10 @@ struct TestContext {
     server_runtime: tokio::runtime::Runtime,
     client_runtime: tokio::runtime::Runtime,
     storage_context: rangeserver::storage::cassandra::for_testing::TestContext,
+    proto_server_address: SocketAddr,
 }
 
-fn get_config(warden_address: SocketAddr) -> Config {
+fn get_config(warden_address: SocketAddr, proto_server_address: SocketAddr) -> Config {
     // TODO: should be read from file!
     let region = Region {
         cloud: None,
@@ -45,7 +47,7 @@ fn get_config(warden_address: SocketAddr) -> Config {
     let mut config = Config {
         range_server: RangeServerConfig {
             range_maintenance_duration: time::Duration::from_secs(1),
-            proto_server_addr: String::from("127.0.0.1:50051"),
+            proto_server_addr: proto_server_address,
         },
         regions: std::collections::HashMap::new(),
     };
@@ -75,6 +77,7 @@ async fn setup_server(
     server_socket: UdpSocket,
     cancellation_token: CancellationToken,
     warden_address: SocketAddr,
+    proto_server_listener: TcpListener,
     epoch_provider: Arc<EpochProvider>,
     storage_context: &rangeserver::storage::cassandra::for_testing::TestContext,
 ) -> tokio::runtime::Runtime {
@@ -91,7 +94,7 @@ async fn setup_server(
     let storage = storage_context.cassandra.clone();
 
     runtime.spawn(async move {
-        let config = get_config(warden_address);
+        let config = get_config(warden_address, proto_server_listener.local_addr().unwrap());
         let host_info = get_server_host_info(server_address);
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
         let server = Server::<_, _, MemTableDB>::new(
@@ -101,9 +104,16 @@ async fn setup_server(
             epoch_provider,
             bg_runtime.handle().clone(),
         );
-        let res = Server::start(server, fast_network, cancellation_token)
-            .await
-            .unwrap();
+        // TODO pass in TCP stream with port 0
+        // need to propagate address to client
+        let res = Server::start(
+            server,
+            fast_network,
+            cancellation_token,
+            proto_server_listener,
+        )
+        .await
+        .unwrap();
         res.await.unwrap()
     });
     runtime
@@ -137,6 +147,8 @@ async fn setup() -> TestContext {
     let epoch_provider = Arc::new(rangeserver::for_testing::epoch_provider::EpochProvider::new());
     let mock_warden = MockWarden::new();
     let warden_address = mock_warden.start().await.unwrap();
+    let proto_server_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proto_server_address = proto_server_listener.local_addr().unwrap();
     let cancellation_token = CancellationToken::new();
     let storage_context: rangeserver::storage::cassandra::for_testing::TestContext =
         rangeserver::storage::cassandra::for_testing::init().await;
@@ -144,6 +156,7 @@ async fn setup() -> TestContext {
         server_socket,
         cancellation_token.clone(),
         warden_address,
+        proto_server_listener,
         epoch_provider.clone(),
         &storage_context,
     )
@@ -167,6 +180,7 @@ async fn setup() -> TestContext {
         server_runtime,
         client_runtime,
         storage_context,
+        proto_server_address,
     }
 }
 
@@ -352,7 +366,12 @@ async fn test_prefetch() {
         .unwrap();
     let tx2 = start_transaction();
     let keys = vec![key1.clone(), key2.clone()];
-    let vals = context.client.prefetch(tx2, &range_id, keys).await.unwrap();
+    let addr = context.proto_server_address;
+    let vals = context
+        .client
+        .prefetch(tx2, &range_id, keys, addr)
+        .await
+        .unwrap();
     assert_eq!(vals, ());
     tear_down(context).await;
 }

@@ -679,6 +679,7 @@ mod tests {
     use common::util;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
+    use tokio::net::TcpListener;
     use uuid::Uuid;
 
     use super::*;
@@ -817,10 +818,12 @@ mod tests {
             keyspace_id: storage_context.keyspace_id,
             range_id: storage_context.range_id,
         };
+
+        let proto_server_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
-                proto_server_addr: String::from("127.0.0.1:50051"),
+                proto_server_addr: proto_server_listener.local_addr().unwrap(),
             },
             regions: std::collections::HashMap::new(),
         };
