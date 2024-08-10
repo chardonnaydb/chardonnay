@@ -1,13 +1,13 @@
 use std::fs;
 
 fn main() {
-    let epoch_broadcaster_out_dir = "target/epoch_broadcaster";
-    fs::create_dir_all(epoch_broadcaster_out_dir).unwrap();
+    let epoch_publisher_out_dir = "target/epoch_publisher";
+    fs::create_dir_all(epoch_publisher_out_dir).unwrap();
     tonic_build::configure()
         .build_server(true)
-        .out_dir(epoch_broadcaster_out_dir)
+        .out_dir(epoch_publisher_out_dir)
         .compile(
-            &["src/epoch_broadcaster.proto"],
+            &["src/epoch_publisher.proto"],
             &["src"], // specify the root location to search proto dependencies
         )
         .unwrap();

@@ -1,5 +1,5 @@
-#[path = "../target/epoch_broadcaster/epoch_broadcaster.rs"]
-pub mod epoch_broadcaster;
+#[path = "../target/epoch_publisher/epoch_publisher.rs"]
+pub mod epoch_publisher;
 #[path = "../target/rangeserver/rangeserver.rs"]
 pub mod rangeserver;
 #[path = "../target/warden/warden.rs"]
