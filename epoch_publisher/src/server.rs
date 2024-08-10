@@ -7,14 +7,12 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
-use proto::epoch_broadcaster::epoch_broadcaster_server::{
-    EpochBroadcaster, EpochBroadcasterServer,
-};
-use proto::epoch_broadcaster::{SetEpochRequest, SetEpochResponse};
+use proto::epoch_publisher::epoch_publisher_server::{EpochPublisher, EpochPublisherServer};
+use proto::epoch_publisher::{SetEpochRequest, SetEpochResponse};
 use tokio_util::sync::CancellationToken;
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
-use flatbuf::epoch_broadcaster_flatbuffers::epoch_broadcaster::*;
+use flatbuf::epoch_publisher_flatbuffers::epoch_publisher::*;
 
 type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
 
@@ -28,7 +26,7 @@ struct ProtoServer {
 }
 
 #[tonic::async_trait]
-impl EpochBroadcaster for ProtoServer {
+impl EpochPublisher for ProtoServer {
     async fn set_epoch(
         &self,
         request: Request<SetEpochRequest>,
@@ -37,7 +35,7 @@ impl EpochBroadcaster for ProtoServer {
         let current_epoch = self.server.epoch.load(SeqCst);
         if current_epoch == 0 {
             // Can't accept the RPC, since we don't know if it is stale.
-            // TODO(tamer): on startup, the broadcaster should sync with
+            // TODO(tamer): on startup, the publisher should sync with
             // the epoch service and read the latest epoch.
             return Err(TStatus::new(
                 tonic::Code::FailedPrecondition,
@@ -194,7 +192,7 @@ impl Server {
             // TODO(tamer): make this configurable.
             let addr = SocketAddr::from_str("127.0.0.1:10010").unwrap();
             if let Err(e) = TServer::builder()
-                .add_service(EpochBroadcasterServer::new(proto_server))
+                .add_service(EpochPublisherServer::new(proto_server))
                 .serve(addr)
                 .await
             {

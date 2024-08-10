@@ -1,4 +1,4 @@
-use crate::epoch_provider::EpochProvider as Trait;
+use crate::epoch_supplier::EpochSupplier as Trait;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::RwLock;
@@ -33,13 +33,13 @@ struct State {
     epoch: u64,
     waiters: BinaryHeap<EpochWaiter>,
 }
-pub struct EpochProvider {
+pub struct EpochSupplier {
     state: RwLock<State>,
 }
 
-impl EpochProvider {
-    pub fn new() -> EpochProvider {
-        EpochProvider {
+impl EpochSupplier {
+    pub fn new() -> EpochSupplier {
+        EpochSupplier {
             state: RwLock::new(State {
                 epoch: 0,
                 waiters: BinaryHeap::new(),
@@ -59,13 +59,13 @@ impl EpochProvider {
     }
 }
 
-impl Trait for EpochProvider {
-    async fn read_epoch(&self) -> Result<u64, crate::epoch_provider::Error> {
+impl Trait for EpochSupplier {
+    async fn read_epoch(&self) -> Result<u64, crate::epoch_supplier::Error> {
         let state = self.state.read().unwrap();
         Ok(state.epoch)
     }
 
-    async fn wait_until_epoch(&self, epoch: u64) -> Result<(), crate::epoch_provider::Error> {
+    async fn wait_until_epoch(&self, epoch: u64) -> Result<(), crate::epoch_supplier::Error> {
         let (s, r) = oneshot::channel();
         {
             let mut state = self.state.write().unwrap();

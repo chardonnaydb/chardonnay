@@ -1,4 +1,4 @@
-namespace EpochBroadcaster;
+namespace EpochPublisher;
 
 table Uuidu128 {
   lower:uint64;
