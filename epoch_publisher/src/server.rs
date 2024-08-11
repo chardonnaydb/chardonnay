@@ -221,10 +221,11 @@ impl Server {
                 println!("Unable to start proto server: {}", e);
             }
         });
-
+        let ct_clone = cancellation_token.clone();
         tokio::spawn(async move {
-            let _ = Self::network_server_loop(server, fast_network, cancellation_token).await;
+            let _ = Self::network_server_loop(server, fast_network, ct_clone).await;
             println!("Network server loop exited!")
         });
+        cancellation_token.cancelled().await;
     }
 }

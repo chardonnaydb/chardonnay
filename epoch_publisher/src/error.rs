@@ -1,7 +1,7 @@
 use flatbuf::epoch_publisher_flatbuffers::epoch_publisher::Status;
 use thiserror::Error;
 
-#[derive(Clone, Debug, Error)]
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum Error {
     #[error("Invalid Request Format Error")]
     InvalidRequestFormat,

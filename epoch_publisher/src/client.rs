@@ -9,7 +9,7 @@ use tokio::sync::{oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-// Provides an async rpc interface to a specific epoch publisher.
+/// Provides an async rpc interface to a specific epoch publisher.
 pub struct EpochPublisherClient {
     fast_network: Arc<dyn FastNetwork>,
     range_server_info: HostInfo,
