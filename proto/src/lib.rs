@@ -1,3 +1,5 @@
+#[path = "../target/epoch/epoch.rs"]
+pub mod epoch;
 #[path = "../target/epoch_publisher/epoch_publisher.rs"]
 pub mod epoch_publisher;
 #[path = "../target/rangeserver/rangeserver.rs"]
