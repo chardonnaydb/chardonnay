@@ -1,0 +1,13 @@
+syntax = "proto3";
+package epoch;
+
+service Epoch {
+    rpc ReadEpoch (ReadEpochRequest) returns (ReadEpochResponse);
+}
+
+message ReadEpochRequest {
+}
+
+message ReadEpochResponse {
+    uint64 epoch = 1;
+}

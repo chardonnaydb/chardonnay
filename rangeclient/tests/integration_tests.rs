@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use std::{
+    collections::HashSet,
     net::{SocketAddr, UdpSocket},
     sync::Arc,
     time,
@@ -7,7 +8,7 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 use common::{
-    config::{Config, RangeServerConfig, RegionConfig},
+    config::{Config, EpochConfig, RangeServerConfig, RegionConfig},
     full_range_id::FullRangeId,
     host_info::HostInfo,
     keyspace_id::KeyspaceId,
@@ -34,27 +35,31 @@ struct TestContext {
 }
 
 fn get_config(warden_address: SocketAddr) -> Config {
-    // TODO: should be read from file!
     let region = Region {
         cloud: None,
         name: "test-region".into(),
     };
     let region_config = RegionConfig {
-        warden_address: warden_address.to_string(),
+        warden_address: warden_address,
+        epoch_publishers: HashSet::new(),
+    };
+    let epoch_config = EpochConfig {
+        // Not used in these tests.
+        proto_server_addr: "127.0.0.1:1".parse().unwrap(),
     };
     let mut config = Config {
         range_server: RangeServerConfig {
             range_maintenance_duration: time::Duration::from_secs(1),
-            proto_server_addr: String::from("127.0.0.1:50051"),
+            proto_server_addr: "127.0.0.1:50051".parse().unwrap(),
         },
         regions: std::collections::HashMap::new(),
+        epoch: epoch_config,
     };
     config.regions.insert(region, region_config);
     config
 }
 
 fn get_server_host_info(address: SocketAddr) -> HostInfo {
-    // TODO: should be read from enviroment!
     let identity: String = "test_server".into();
     let region = Region {
         cloud: None,

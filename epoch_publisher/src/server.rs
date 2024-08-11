@@ -1,4 +1,6 @@
+use common::config::Config;
 use flatbuffers::FlatBufferBuilder;
+use proto::epoch::epoch_client::EpochClient;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
@@ -18,6 +20,7 @@ type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
 
 pub struct Server {
     epoch: AtomicUsize,
+    config: Config,
     bg_runtime: tokio::runtime::Handle,
 }
 
@@ -35,8 +38,8 @@ impl EpochPublisher for ProtoServer {
         let current_epoch = self.server.epoch.load(SeqCst);
         if current_epoch == 0 {
             // Can't accept the RPC, since we don't know if it is stale.
-            // TODO(tamer): on startup, the publisher should sync with
-            // the epoch service and read the latest epoch.
+            // This should never happen since we always sync the epoch before
+            // enabling the server, but keeping the check defensively anyway.
             return Err(TStatus::new(
                 tonic::Code::FailedPrecondition,
                 "Epoch not yet initialized",
@@ -173,18 +176,37 @@ impl Server {
         }
     }
 
-    pub fn new(bg_runtime: tokio::runtime::Handle) -> Arc<Server> {
+    async fn initial_epoch_sync(&self) {
+        // TODO: catch retryable errors and reconnect to epoch.
+        let addr = format!("http://{}", self.config.epoch.proto_server_addr.clone());
+
+        let mut client = EpochClient::connect(addr).await.unwrap();
+        let request = proto::epoch::ReadEpochRequest {};
+
+        let epoch = client
+            .read_epoch(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner()
+            .epoch as usize;
+
+        self.epoch.store(epoch, SeqCst);
+    }
+
+    pub fn new(config: Config, bg_runtime: tokio::runtime::Handle) -> Arc<Server> {
         Arc::new(Server {
             epoch: AtomicUsize::new(0),
             bg_runtime,
+            config,
         })
     }
 
-    pub fn start(
+    pub async fn start(
         server: Arc<Server>,
         fast_network: Arc<dyn FastNetwork>,
         cancellation_token: CancellationToken,
     ) {
+        server.initial_epoch_sync().await;
         let proto_server = ProtoServer {
             server: server.clone(),
         };

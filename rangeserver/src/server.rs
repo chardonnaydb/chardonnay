@@ -697,12 +697,7 @@ where
         });
 
         // Pull the gRPC server address and define the service
-        let addr = server
-            .config
-            .range_server
-            .proto_server_addr
-            .parse()
-            .unwrap();
+        let addr = server.config.range_server.proto_server_addr;
 
         let prefetch = ProtoServer {
             parent_server: server.clone(),
@@ -736,10 +731,11 @@ where
 #[cfg(test)]
 pub mod tests {
     use crate::cache::memtabledb::MemTableDB;
-    use common::config::{RangeServerConfig, RegionConfig};
+    use common::config::{EpochConfig, RangeServerConfig, RegionConfig};
     use common::network::for_testing::udp_fast_network::UdpFastNetwork;
     use common::region::{Region, Zone};
     use core::time;
+    use std::collections::HashSet;
     use std::net::UdpSocket;
 
     use super::*;
@@ -781,14 +777,20 @@ pub mod tests {
             name: "a".into(),
         };
         let region_config = RegionConfig {
-            warden_address: warden_address.to_string(),
+            warden_address: warden_address,
+            epoch_publishers: HashSet::new(),
+        };
+        let epoch_config = EpochConfig {
+            // Not used in these tests.
+            proto_server_addr: "127.0.0.1:50052".parse().unwrap(),
         };
         let mut config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
-                proto_server_addr: String::from("127.0.0.1:50051"),
+                proto_server_addr: "127.0.0.1:50051".parse().unwrap(),
             },
             regions: std::collections::HashMap::new(),
+            epoch: epoch_config,
         };
         config.regions.insert(region, region_config);
         let identity: String = "test_server".into();

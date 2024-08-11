@@ -675,10 +675,11 @@ where
 #[cfg(test)]
 mod tests {
 
-    use common::config::RangeServerConfig;
+    use common::config::{EpochConfig, RangeServerConfig};
     use common::util;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
+    use std::net::SocketAddr;
     use uuid::Uuid;
 
     use super::*;
@@ -818,12 +819,17 @@ mod tests {
             keyspace_id: storage_context.keyspace_id,
             range_id: storage_context.range_id,
         };
+        let epoch_config = EpochConfig {
+            // Not used in these tests.
+            proto_server_addr: "127.0.0.1:50052".parse().unwrap(),
+        };
         let config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
-                proto_server_addr: String::from("127.0.0.1:50051"),
+                proto_server_addr: "127.0.0.1:50051".parse().unwrap(),
             },
             regions: std::collections::HashMap::new(),
+            epoch: epoch_config,
         };
         let rm = Arc::new(RM {
             range_id,
