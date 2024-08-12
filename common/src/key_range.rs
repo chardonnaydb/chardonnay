@@ -18,14 +18,14 @@ impl KeyRange {
         within_lower && within_upper
     }
 
-    fn all() -> KeyRange {
+    pub fn all() -> KeyRange {
         KeyRange {
             lower_bound_inclusive: None,
             upper_bound_exclusive: None,
         }
     }
 
-    fn empty() -> KeyRange {
+    pub fn empty() -> KeyRange {
         KeyRange {
             lower_bound_inclusive: Some(Bytes::new()),
             upper_bound_exclusive: Some(Bytes::new()),

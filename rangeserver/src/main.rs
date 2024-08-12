@@ -1,17 +1,19 @@
 use std::{
+    collections::HashSet,
     net::{SocketAddr, UdpSocket},
     sync::Arc,
     time,
 };
 
 use common::{
-    config::{Config, RangeServerConfig, RegionConfig},
+    config::{Config, EpochConfig, RangeServerConfig, RegionConfig},
     host_info::HostInfo,
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
     region::{Region, Zone},
 };
 use rangeserver::{
-    for_testing::mock_warden::MockWarden, server::Server, storage::cassandra::Cassandra, cache::memtabledb::MemTableDB,
+    cache::memtabledb::MemTableDB, for_testing::mock_warden::MockWarden, server::Server,
+    storage::cassandra::Cassandra,
 };
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
@@ -32,8 +34,8 @@ fn main() {
         let mock_warden = MockWarden::new();
         let warden_address = mock_warden.start().await.unwrap();
         let storage = Arc::new(Cassandra::new("127.0.0.1:9042".to_string()).await);
-        let epoch_provider =
-            Arc::new(rangeserver::for_testing::epoch_provider::EpochProvider::new());
+        let epoch_supplier =
+            Arc::new(rangeserver::for_testing::epoch_supplier::EpochSupplier::new());
         let config = get_config(warden_address);
         let host_info = get_host_info();
         // TODO: set number of threads and pin to cores.
@@ -42,7 +44,7 @@ fn main() {
             config,
             host_info,
             storage,
-            epoch_provider,
+            epoch_supplier,
             bg_runtime.handle().clone(),
         );
         let res = Server::start(server, fast_network, CancellationToken::new())
@@ -60,14 +62,19 @@ fn get_config(warden_address: SocketAddr) -> Config {
         name: "test-region".into(),
     };
     let region_config = RegionConfig {
-        warden_address: warden_address.to_string(),
+        warden_address: warden_address,
+        epoch_publishers: HashSet::new(),
+    };
+    let epoch = EpochConfig {
+        proto_server_addr: "127.0.0.1:50052".parse().unwrap(),
     };
     let mut config = Config {
         range_server: RangeServerConfig {
             range_maintenance_duration: time::Duration::from_secs(1),
-            proto_server_addr: String::from("127.0.0.1:50051"),
+            proto_server_addr: "127.0.0.1:50051".parse().unwrap(),
         },
         regions: std::collections::HashMap::new(),
+        epoch,
     };
     config.regions.insert(region, region_config);
     config

@@ -1,7 +1,7 @@
 use crate::{
-    cache::Cache, cache::CacheOptions, epoch_provider::EpochProvider, error::Error,
-    key_version::KeyVersion, storage::RangeInfo, storage::Storage,
-    transaction_abort_reason::TransactionAbortReason, transaction_info::TransactionInfo, wal::Wal,
+    cache::Cache, epoch_supplier::EpochSupplier, error::Error, key_version::KeyVersion,
+    storage::RangeInfo, storage::Storage, transaction_abort_reason::TransactionAbortReason,
+    transaction_info::TransactionInfo, wal::Wal,
 };
 use bytes::Bytes;
 use chrono::DateTime;
@@ -156,14 +156,14 @@ enum State {
 pub struct RangeManager<S, E, W, C>
 where
     S: Storage,
-    E: EpochProvider,
+    E: EpochSupplier,
     W: Wal,
     C: Cache,
 {
     range_id: FullRangeId,
     config: Config,
     storage: Arc<S>,
-    epoch_provider: Arc<E>,
+    epoch_supplier: Arc<E>,
     wal: Mutex<W>,
     cache: Arc<RwLock<C>>,
     state: Arc<RwLock<State>>,
@@ -183,7 +183,7 @@ pub struct PrepareResult {
 impl<S, E, W, C> RangeManager<S, E, W, C>
 where
     S: Storage,
-    E: EpochProvider,
+    E: EpochSupplier,
     W: Wal,
     C: Cache,
 {
@@ -191,7 +191,7 @@ where
         range_id: FullRangeId,
         config: Config,
         storage: Arc<S>,
-        epoch_provider: Arc<E>,
+        epoch_supplier: Arc<E>,
         wal: W,
         cache: C,
         prefetching_buffer: Arc<PrefetchingBuffer>,
@@ -200,7 +200,7 @@ where
             range_id,
             config,
             storage,
-            epoch_provider,
+            epoch_supplier,
             wal: Mutex::new(wal),
             cache: Arc::new(RwLock::new(cache)),
             state: Arc::new(RwLock::new(State::Unloaded)),
@@ -211,7 +211,7 @@ where
     async fn load_inner(&self) -> Result<LoadedState, Error> {
         // TODO: handle all errors instead of panicking.
         let epoch = self
-            .epoch_provider
+            .epoch_supplier
             .read_epoch()
             .await
             .map_err(Error::from_epoch_provider_error)?;
@@ -223,7 +223,7 @@ where
         // Epoch read from the provider can be 1 less than the true epoch. The highest known epoch
         // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
         // we just wait for the epoch to advance once.
-        self.epoch_provider
+        self.epoch_supplier
             .wait_until_epoch(epoch + 1)
             .await
             .map_err(Error::from_epoch_provider_error)?;
@@ -257,7 +257,7 @@ where
 
     async fn renew_epoch_lease_task(
         range_id: FullRangeId,
-        epoch_provider: Arc<E>,
+        epoch_supplier: Arc<E>,
         storage: Arc<S>,
         state: Arc<RwLock<State>>,
         lease_renewal_interval: std::time::Duration,
@@ -265,7 +265,7 @@ where
         loop {
             let leader_sequence_number: u64;
             let old_lease: (u64, u64);
-            let epoch = epoch_provider
+            let epoch = epoch_supplier
                 .read_epoch()
                 .await
                 .map_err(Error::from_epoch_provider_error)?;
@@ -321,13 +321,13 @@ where
         lease_renewal_interval: std::time::Duration,
     ) -> tokio::task::JoinHandle<Result<(), Error>> {
         let range_id = self.range_id;
-        let epoch_provider = self.epoch_provider.clone();
+        let epoch_supplier = self.epoch_supplier.clone();
         let storage = self.storage.clone();
         let state = self.state.clone();
         let task_handle = tokio::spawn(async move {
             Self::renew_epoch_lease_task(
                 range_id,
-                epoch_provider,
+                epoch_supplier,
                 storage,
                 state,
                 lease_renewal_interval,
@@ -432,7 +432,7 @@ where
                             .get(self.range_id, key.clone())
                             .await
                             .map_err(Error::from_storage_error)?;
-
+                      
                         get_result.val = val.clone();
                     }
                 }
@@ -685,20 +685,22 @@ where
 #[cfg(test)]
 mod tests {
 
-    use common::config::RangeServerConfig;
+    use common::config::{EpochConfig, RangeServerConfig};
     use common::util;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
+    use std::net::SocketAddr;
     use uuid::Uuid;
 
     use super::*;
     use crate::cache::memtabledb::MemTableDB;
-    use crate::epoch_provider::EpochProvider as EpochProviderTrait;
-    use crate::for_testing::epoch_provider::EpochProvider;
+    use crate::cache::CacheOptions;
+    use crate::epoch_supplier::EpochSupplier as EpochSupplierTrait;
+    use crate::for_testing::epoch_supplier::EpochSupplier;
     use crate::for_testing::in_memory_wal::InMemoryWal;
     use crate::storage::cassandra::Cassandra;
     use crate::transaction_info::TransactionInfo;
-    type RM = RangeManager<Cassandra, EpochProvider, InMemoryWal, MemTableDB>;
+    type RM = RangeManager<Cassandra, EpochSupplier, InMemoryWal, MemTableDB>;
 
     impl RM {
         async fn abort_transaction(&self, tx: Arc<TransactionInfo>) {
@@ -782,7 +784,7 @@ mod tests {
         }
 
         async fn commit_transaction(&self, tx: Arc<TransactionInfo>) -> Result<(), Error> {
-            let epoch = self.epoch_provider.read_epoch().await.unwrap();
+            let epoch = self.epoch_supplier.read_epoch().await.unwrap();
             let mut fbb = FlatBufferBuilder::new();
             let request_id = Some(Uuidu128::create(
                 &mut fbb,
@@ -816,7 +818,7 @@ mod tests {
     }
 
     async fn init() -> TestContext {
-        let epoch_provider = Arc::new(EpochProvider::new());
+        let epoch_supplier = Arc::new(EpochSupplier::new());
         let wal = Mutex::new(InMemoryWal::new());
         let storage_context: crate::storage::cassandra::for_testing::TestContext =
             crate::storage::cassandra::for_testing::init().await;
@@ -827,12 +829,17 @@ mod tests {
             keyspace_id: storage_context.keyspace_id,
             range_id: storage_context.range_id,
         };
+        let epoch_config = EpochConfig {
+            // Not used in these tests.
+            proto_server_addr: "127.0.0.1:50052".parse().unwrap(),
+        };
         let config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
-                proto_server_addr: String::from("127.0.0.1:50051"),
+                proto_server_addr: "127.0.0.1:50051".parse().unwrap(),
             },
             regions: std::collections::HashMap::new(),
+            epoch: epoch_config,
         };
         let rm = Arc::new(RM {
             range_id,
@@ -840,16 +847,16 @@ mod tests {
             storage: cassandra,
             wal,
             cache,
-            epoch_provider,
+            epoch_supplier,
             state: Arc::new(RwLock::new(State::Unloaded)),
             prefetching_buffer,
         });
         let rm_copy = rm.clone();
         let init_handle = tokio::spawn(async move { rm_copy.load().await.unwrap() });
-        let epoch_provider = rm.epoch_provider.clone();
+        let epoch_supplier = rm.epoch_supplier.clone();
         // Give some delay so the RM can see the epoch advancing.
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        epoch_provider.set_epoch(1).await;
+        epoch_supplier.set_epoch(1).await;
         init_handle.await.unwrap();
         TestContext {
             rm,

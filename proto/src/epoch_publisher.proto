@@ -1,7 +1,7 @@
 syntax = "proto3";
-package epoch_broadcaster;
+package epoch_publisher;
 
-service EpochBroadcaster {
+service EpochPublisher {
     rpc SetEpoch (SetEpochRequest) returns (SetEpochResponse);
 }
 

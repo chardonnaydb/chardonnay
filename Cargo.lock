@@ -273,6 +273,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "derivative",
  "flatbuf",
  "flatbuffers",
  "tokio",
@@ -308,6 +309,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derivative"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -325,7 +337,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "epoch_broadcaster"
+name = "epoch_publisher"
 version = "0.1.0"
 dependencies = [
  "bytes",
@@ -1270,7 +1282,9 @@ dependencies = [
  "machnet",
  "prost",
  "proto",
+ "rand 0.8.5",
  "scylla",
+ "skiplist",
  "strum",
  "thiserror",
  "tokio",
@@ -1450,6 +1464,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9e9e0b4211b72e7b8b6e85c807d36c212bdb33ea8587f7569562a84df5465b1"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "skiplist"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0eec25f46463fcdc5e02f388c2780b1b58e01be81a8378e62ec60931beccc3f6"
+dependencies = [
+ "rand 0.8.5",
 ]
 
 [[package]]
