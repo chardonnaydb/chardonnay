@@ -10,17 +10,15 @@ pub trait AssignmentComputation {
     fn get_assignment(&self, version: i64, full_update: bool) -> Option<WardenUpdate>;
 }
 pub struct SimpleAssignmentComputation {
-    keyspace_id: KeyspaceId,
     base_ranges: Option<Vec<RangeInfo>>,
     range_assignments: Option<Vec<RangeAssignment>>,
 }
 
 impl SimpleAssignmentComputation {
-    pub fn new(keyspace_id: KeyspaceId, base_ranges: Option<Vec<RangeInfo>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            keyspace_id,
             // TODO(purujit): Initialize base_ranges and range_assignments from database.
-            base_ranges,
+            base_ranges: None,
             range_assignments: None,
         }
     }
