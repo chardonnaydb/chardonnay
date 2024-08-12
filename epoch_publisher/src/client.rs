@@ -52,28 +52,25 @@ impl EpochPublisherClient {
 
     pub async fn read_epoch(&self) -> Result<u64, Error> {
         // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
-        // TODO: too much copying :(
         let req_id = Uuid::new_v4();
-        let mut fbb = FlatBufferBuilder::new();
-        let request_id = Some(Uuidu128::create(&mut fbb, &serialize_uuid(req_id)));
-        let fbb_root = ReadEpochRequest::create(&mut fbb, &ReadEpochRequestArgs { request_id });
-        fbb.finish(fbb_root, None);
+
+        // Register the RPC.
         let (tx, rx) = oneshot::channel();
         {
             let mut outstanding_requests = self.outstanding_requests.lock().await;
             outstanding_requests.insert(req_id, tx);
         }
-        let get_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
-        let mut envelope_fbb = FlatBufferBuilder::new();
-        let request_bytes =
-            self.create_msg_envelope(&mut envelope_fbb, MessageType::ReadEpoch, get_request_bytes);
+
+        // Send over the wire.
+        let request_bytes = self.create_and_serialize_read_epoch_request(&req_id);
         self.fast_network
-            .send(
-                self.range_server_info.address,
-                Bytes::copy_from_slice(request_bytes),
-            )
+            .send(self.range_server_info.address, request_bytes)
             .unwrap();
+
+        // Wait for response.
         let response = rx.await.unwrap();
+
+        // Parse the response.
         let msg = response.to_vec();
         let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
         match envelope.type_() {
@@ -86,6 +83,19 @@ impl EpochPublisherClient {
             }
             _ => return Err(Error::InvalidResponseFormat),
         }
+    }
+
+    fn create_and_serialize_read_epoch_request(&self, req_id: &Uuid) -> Bytes {
+        // TODO: too much copying :(
+        let mut fbb = FlatBufferBuilder::new();
+        let request_id = Some(Uuidu128::create(&mut fbb, &serialize_uuid(req_id.clone())));
+        let fbb_root = ReadEpochRequest::create(&mut fbb, &ReadEpochRequestArgs { request_id });
+        fbb.finish(fbb_root, None);
+        let get_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
+        let mut envelope_fbb = FlatBufferBuilder::new();
+        let request_bytes =
+            self.create_msg_envelope(&mut envelope_fbb, MessageType::ReadEpoch, get_request_bytes);
+        Bytes::copy_from_slice(request_bytes)
     }
 
     async fn network_loop(client: Arc<Self>, cancellation_token: CancellationToken) {
