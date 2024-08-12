@@ -8,6 +8,7 @@ table Uuidu128 {
 enum Status:byte {
   Ok = 0,
   InvalidRequestFormat,
+  Timeout,
   EpochUnknown,
 }
 

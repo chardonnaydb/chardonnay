@@ -207,6 +207,12 @@ impl Server {
         cancellation_token: CancellationToken,
     ) {
         server.initial_epoch_sync().await;
+        let ct_clone = cancellation_token.clone();
+        let server_clone = server.clone();
+        tokio::spawn(async move {
+            let _ = Self::network_server_loop(server_clone, fast_network, ct_clone).await;
+            println!("Network server loop exited!")
+        });
         let proto_server = ProtoServer {
             server: server.clone(),
         };
@@ -220,11 +226,6 @@ impl Server {
             {
                 println!("Unable to start proto server: {}", e);
             }
-        });
-
-        tokio::spawn(async move {
-            let _ = Self::network_server_loop(server, fast_network, cancellation_token).await;
-            println!("Network server loop exited!")
         });
     }
 }
