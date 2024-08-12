@@ -125,7 +125,7 @@ async fn setup(initial_epoch: u64) -> TestContext {
     let server_runtime =
         setup_server(server_socket, cancellation_token.clone(), epoch_address).await;
     // Give some delay so the server can setup its networking.
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     let (client, client_runtime) = setup_client(cancellation_token.clone(), server_address).await;
     TestContext {
         client,
