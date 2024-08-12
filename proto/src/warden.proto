@@ -48,5 +48,4 @@ message WardenUpdate {
 
 message RegisterRangeServerRequest {
     HostInfo range_server = 1;
-    string keyspace_id = 2;
 }

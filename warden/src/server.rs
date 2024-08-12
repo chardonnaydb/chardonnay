@@ -7,10 +7,8 @@ use std::{
 
 use common::{
     host_info::HostInfo,
-    keyspace_id::KeyspaceId,
     region::{Region, Zone},
 };
-use dashmap::DashMap;
 use pin_project_lite::pin_project;
 use proto::warden::{warden_server::Warden, RegisterRangeServerRequest, WardenUpdate};
 use tokio::sync::broadcast;
@@ -21,30 +19,11 @@ use tokio_stream::{
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, instrument};
 
-use crate::{
-    assignment_computation::{AssignmentComputation, SimpleAssignmentComputation},
-    persistence::RangeInfo,
-};
-
-pub type AssignmentComputationFactory = Box<
-    dyn Fn(
-            KeyspaceId,
-            Option<Vec<RangeInfo>>,
-        ) -> Arc<dyn AssignmentComputation + Sync + Send + 'static>
-        + Send
-        + Sync
-        + 'static,
->;
+use crate::assignment_computation::{AssignmentComputation, SimpleAssignmentComputation};
 
 /// Implementation of the Warden service.
-///
-/// The `WardenServer` struct maintains a map from keyspace IDs to `AssignmentComputation` instances.
-/// This allows the server to handle assignment computations for multiple keyspaces independently.
 pub struct WardenServer<'a> {
-    // A map from keyspace id to AssignmentComputation.
-    keyspace_id_to_assignment_computation:
-        DashMap<String, Arc<dyn AssignmentComputation + Sync + Send + 'a>>,
-    assignment_computation_factory: AssignmentComputationFactory,
+    assignment_computation: Arc<dyn AssignmentComputation + Sync + Send + 'a>,
 }
 
 #[tonic::async_trait]
@@ -66,43 +45,23 @@ impl Warden for WardenServer<'static> {
                 ))
             }
             Some(range_server) => {
-                info!(
-                    "Registering range server: {} for keyspace: {}",
-                    range_server.identity, register_request.keyspace_id
-                );
-                let keyspace_id = uuid::Uuid::parse_str(&register_request.keyspace_id);
-                if keyspace_id.is_err() {
-                    return Err(Status::invalid_argument("keyspace_id is not a valid UUID"));
-                }
-                // TODO(purujit): Consider adding another method to WardenServer to register new keyspaces with associated base ranges.
-                let assignment_computation = self
-                    .keyspace_id_to_assignment_computation
-                    .entry(keyspace_id.as_ref().unwrap().to_string())
-                    .or_insert_with(|| {
-                        (self.assignment_computation_factory)(
-                            KeyspaceId {
-                                id: keyspace_id.unwrap(),
-                            },
-                            None,
-                        )
-                    })
-                    .clone();
-
+                info!("Registering range server: {}", range_server.identity);
                 Ok(Response::new(AssignmentUpdateStream::new(
-                    assignment_computation.register_range_server(HostInfo {
-                        identity: range_server.identity,
-                        // todo(purujit): Get the address from the range server.
-                        address: SocketAddr::from(([0, 0, 0, 0], 0)),
-                        zone: Zone {
-                            name: range_server.zone,
-                            // TODO(purujit): Get the region from the range server.
-                            region: Region {
-                                cloud: None,
-                                name: "".to_string(),
+                    self.assignment_computation
+                        .register_range_server(HostInfo {
+                            identity: range_server.identity,
+                            // todo(purujit): Get the address from the range server.
+                            address: SocketAddr::from(([0, 0, 0, 0], 0)),
+                            zone: Zone {
+                                name: range_server.zone,
+                                // TODO(purujit): Get the region from the range server.
+                                region: Region {
+                                    cloud: None,
+                                    name: "".to_string(),
+                                },
                             },
-                        },
-                    })?,
-                    assignment_computation,
+                        })?,
+                    self.assignment_computation.clone(),
                 )))
             }
         }
@@ -110,10 +69,9 @@ impl Warden for WardenServer<'static> {
 }
 
 impl<'a> WardenServer<'a> {
-    pub fn new(assignment_computation_factory: AssignmentComputationFactory) -> Self {
+    pub fn new(assignment_computation: Arc<dyn AssignmentComputation + Sync + Send + 'a>) -> Self {
         Self {
-            keyspace_id_to_assignment_computation: DashMap::new(),
-            assignment_computation_factory,
+            assignment_computation,
         }
     }
 }
@@ -131,11 +89,7 @@ pub async fn run_warden_server(
     addr: impl AsRef<str> + std::net::ToSocketAddrs,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = addr.to_socket_addrs()?.next().ok_or("Invalid address")?;
-    let warden_server = WardenServer::new(Box::new(
-        |keyspace_id: KeyspaceId, base_ranges: Option<Vec<RangeInfo>>| {
-            Arc::new(SimpleAssignmentComputation::new(keyspace_id, base_ranges))
-        },
-    ));
+    let warden_server = WardenServer::new(Arc::new(SimpleAssignmentComputation::new()));
 
     info!("WardenServer listening on {}", addr);
 
@@ -286,9 +240,7 @@ mod tests {
     #[tokio::test]
     async fn test_warden_server_startup_and_client_updates() {
         let fake_map_producer = Arc::new(FakeMapProducer::new());
-        let to_move = fake_map_producer.clone();
-
-        let warden_server = WardenServer::new(Box::new(move |_, _| to_move.clone()));
+        let warden_server = WardenServer::new(fake_map_producer.clone());
 
         // Start the server in a separate task
         let server_task = tokio::spawn(async move {
@@ -314,7 +266,6 @@ mod tests {
 
         // Call register_range_server
         let request = tonic::Request::new(RegisterRangeServerRequest {
-            keyspace_id: uuid::Uuid::new_v4().to_string(),
             range_server: Some(proto::warden::HostInfo {
                 identity: "test_server".to_string(),
                 zone: "test_zone".to_string(),
