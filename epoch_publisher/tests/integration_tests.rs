@@ -60,16 +60,16 @@ async fn setup_server(
     let fast_network = Arc::new(UdpFastNetwork::new(server_socket));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
-        loop {
-            fast_network_clone.poll();
-            tokio::task::yield_now().await
-        }
-    });
-    runtime.spawn(async move {
         let config = get_config(epoch_address);
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
         let server = Server::new(config, bg_runtime.handle().clone());
         Server::start(server, fast_network, cancellation_token).await;
+    });
+    runtime.spawn(async move {
+        loop {
+            fast_network_clone.poll();
+            tokio::task::yield_now().await
+        }
     });
     runtime
 }
