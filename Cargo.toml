@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = [ "common", "epoch", "epoch_publisher", "flatbuf", "proto", "rangeclient", "rangeserver", "warden"]
+members = [ "common", "epoch", "epoch_publisher", "epoch_reader", "flatbuf", "proto", "rangeclient", "rangeserver", "warden"]

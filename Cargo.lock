@@ -358,6 +358,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "epoch_reader"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "common",
+ "epoch_publisher",
+ "flatbuf",
+ "flatbuffers",
+ "prost",
+ "proto",
+ "strum",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-build",
+ "uuid",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
