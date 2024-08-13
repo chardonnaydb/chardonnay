@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 pub struct EpochReader {
     clients: Vec<Arc<EpochPublisherClient>>,
     runtime: tokio::runtime::Handle,
-    majority: u64,
+    publisher_majority_count: u64,
 }
 
 impl EpochReader {
@@ -19,26 +19,29 @@ impl EpochReader {
         publisher_set: EpochPublisherSet,
         cancellation_token: CancellationToken,
     ) -> EpochReader {
-        let mut clients = Vec::new();
-        for publisher in publisher_set.publishers {
-            let host_info = HostInfo {
-                identity: publisher.name,
-                address: publisher.fast_network_addr,
-                zone: publisher_set.zone.clone(),
-            };
-            let client = EpochPublisherClient::new(
-                fast_network.clone(),
-                runtime.clone(),
-                host_info,
-                cancellation_token.clone(),
-            );
-            clients.push(client)
-        }
+        assert!(!publisher_set.publishers.is_empty());
+        let clients = publisher_set
+            .publishers
+            .iter()
+            .map(|publisher| {
+                let host_info = HostInfo {
+                    identity: publisher.name.clone(),
+                    address: publisher.fast_network_addr,
+                    zone: publisher_set.zone.clone(),
+                };
+                EpochPublisherClient::new(
+                    fast_network.clone(),
+                    runtime.clone(),
+                    host_info,
+                    cancellation_token.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
         let half_round_down = ((clients.len() as f64) / 2.0).floor() as u64;
         EpochReader {
             clients,
             runtime: runtime.clone(),
-            majority: half_round_down + 1,
+            publisher_majority_count: half_round_down + 1,
         }
     }
 
@@ -68,7 +71,7 @@ impl EpochReader {
                 Ok(epoch) => epoch,
             };
             let current_count = epoch_value_counts.get(&epoch).unwrap_or(&0);
-            if current_count + 1 >= self.majority {
+            if current_count + 1 >= self.publisher_majority_count {
                 return Ok(epoch);
             }
             epoch_value_counts.insert(epoch, current_count + 1);
