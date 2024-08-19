@@ -37,7 +37,6 @@ struct TestContext {
 }
 
 fn get_config(warden_address: SocketAddr, proto_server_address: SocketAddr) -> Config {
-    // TODO: should be read from file!
     let region = Region {
         cloud: None,
         name: "test-region".into(),
@@ -84,7 +83,7 @@ async fn setup_server(
     cancellation_token: CancellationToken,
     warden_address: SocketAddr,
     proto_server_listener: TcpListener,
-    epoch_provider: Arc<EpochProvider>,
+    epoch_supplier: Arc<EpochSupplier>,
     storage_context: &rangeserver::storage::cassandra::for_testing::TestContext,
 ) -> tokio::runtime::Runtime {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
@@ -163,7 +162,7 @@ async fn setup() -> TestContext {
         cancellation_token.clone(),
         warden_address,
         proto_server_listener,
-        epoch_provider.clone(),
+        epoch_supplier.clone(),
         &storage_context,
     )
     .await;

@@ -12,9 +12,8 @@ use common::{
     region::{Region, Zone},
 };
 use rangeserver::{
-    cache::memtabledb::MemTableDB, cache::memtabledb::MemTableDB,
-    for_testing::mock_warden::MockWarden, for_testing::mock_warden::MockWarden, server::Server,
-    server::Server, storage::cassandra::Cassandra, storage::cassandra::Cassandra,
+    cache::memtabledb::MemTableDB, for_testing::mock_warden::MockWarden, server::Server,
+    storage::cassandra::Cassandra,
 };
 use tokio::runtime::Builder;
 use tokio::{
@@ -39,8 +38,8 @@ fn main() {
         let mock_warden = MockWarden::new();
         let warden_address = mock_warden.start().await.unwrap();
         let storage = Arc::new(Cassandra::new("127.0.0.1:9042".to_string()).await);
-        let epoch_provider =
-            Arc::new(rangeserver::for_testing::epoch_provider::EpochProvider::new());
+        let epoch_supplier =
+            Arc::new(rangeserver::for_testing::epoch_supplier::EpochSupplier::new());
         let proto_server_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let config = get_config(warden_address, &proto_server_listener).await;
 
