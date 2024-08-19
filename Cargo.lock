@@ -273,6 +273,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "derivative",
  "flatbuf",
  "flatbuffers",
  "tokio",
@@ -308,6 +309,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derivative"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -325,12 +337,34 @@ dependencies = [
 ]
 
 [[package]]
-name = "epoch_broadcaster"
+name = "epoch_publisher"
 version = "0.1.0"
 dependencies = [
  "bytes",
  "chrono",
  "common",
+ "flatbuf",
+ "flatbuffers",
+ "prost",
+ "proto",
+ "strum",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tonic-build",
+ "uuid",
+]
+
+[[package]]
+name = "epoch_reader"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "common",
+ "epoch_publisher",
  "flatbuf",
  "flatbuffers",
  "prost",

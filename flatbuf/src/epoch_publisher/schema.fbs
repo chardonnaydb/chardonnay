@@ -1,4 +1,4 @@
-namespace EpochBroadcaster;
+namespace EpochPublisher;
 
 table Uuidu128 {
   lower:uint64;
@@ -8,6 +8,7 @@ table Uuidu128 {
 enum Status:byte {
   Ok = 0,
   InvalidRequestFormat,
+  Timeout,
   EpochUnknown,
 }
 

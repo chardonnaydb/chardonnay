@@ -42,6 +42,21 @@ impl PrefetchingBuffer {
         }
     }
 
+    /// Returns the value for a key from the prefetch_store
+    pub async fn get_from_buffer(&self, key: Bytes) -> Result<Option<Bytes>, ()> {
+        let cur_state = self.state.lock().await;
+        if let Some(KeyState::Fetched) = cur_state.key_state.get(&key.clone()) {
+            let val = cur_state.prefetch_store.get(&key);
+            if let Some(value) = val {
+                return Ok(Some(value.clone()));
+            } else {
+                return Err(());
+            }
+        } else {
+            return Ok(None);
+        }
+    }
+
     /// Processes prefetch request by adding transaction / key request to
     /// the appropriate data structures and returns the state of they key,
     /// which is either Requested, Loading, or Fetched. If Loading, the

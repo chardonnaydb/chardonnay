@@ -1,18 +1,20 @@
 use std::{
+    collections::HashSet,
     net::{SocketAddr, UdpSocket},
     sync::Arc,
     time,
 };
 
 use common::{
-    config::{Config, RangeServerConfig, RegionConfig},
+    config::{Config, EpochConfig, RangeServerConfig, RegionConfig},
     host_info::HostInfo,
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
     region::{Region, Zone},
 };
 use rangeserver::{
-    cache::memtabledb::MemTableDB, for_testing::mock_warden::MockWarden, server::Server,
-    storage::cassandra::Cassandra,
+    cache::memtabledb::MemTableDB, cache::memtabledb::MemTableDB,
+    for_testing::mock_warden::MockWarden, for_testing::mock_warden::MockWarden, server::Server,
+    server::Server, storage::cassandra::Cassandra, storage::cassandra::Cassandra,
 };
 use tokio::runtime::Builder;
 use tokio::{
@@ -49,7 +51,7 @@ fn main() {
             config,
             host_info,
             storage,
-            epoch_provider,
+            epoch_supplier,
             bg_runtime.handle().clone(),
         );
         let res = Server::start(
@@ -72,7 +74,11 @@ async fn get_config(warden_address: SocketAddr, proto_server_listener: &TcpListe
         name: "test-region".into(),
     };
     let region_config = RegionConfig {
-        warden_address: warden_address.to_string(),
+        warden_address: warden_address,
+        epoch_publishers: HashSet::new(),
+    };
+    let epoch = EpochConfig {
+        proto_server_addr: "127.0.0.1:50052".parse().unwrap(),
     };
 
     let mut config = Config {
@@ -81,6 +87,7 @@ async fn get_config(warden_address: SocketAddr, proto_server_listener: &TcpListe
             proto_server_addr: proto_server_listener.local_addr().unwrap(),
         },
         regions: std::collections::HashMap::new(),
+        epoch,
     };
     config.regions.insert(region, region_config);
     config

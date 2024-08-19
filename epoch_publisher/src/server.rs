@@ -1,4 +1,6 @@
+use common::config::Config;
 use flatbuffers::FlatBufferBuilder;
+use proto::epoch::epoch_client::EpochClient;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
@@ -7,19 +9,18 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
-use proto::epoch_broadcaster::epoch_broadcaster_server::{
-    EpochBroadcaster, EpochBroadcasterServer,
-};
-use proto::epoch_broadcaster::{SetEpochRequest, SetEpochResponse};
+use proto::epoch_publisher::epoch_publisher_server::{EpochPublisher, EpochPublisherServer};
+use proto::epoch_publisher::{SetEpochRequest, SetEpochResponse};
 use tokio_util::sync::CancellationToken;
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
-use flatbuf::epoch_broadcaster_flatbuffers::epoch_broadcaster::*;
+use flatbuf::epoch_publisher_flatbuffers::epoch_publisher::*;
 
 type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
 
 pub struct Server {
     epoch: AtomicUsize,
+    config: Config,
     bg_runtime: tokio::runtime::Handle,
 }
 
@@ -28,7 +29,7 @@ struct ProtoServer {
 }
 
 #[tonic::async_trait]
-impl EpochBroadcaster for ProtoServer {
+impl EpochPublisher for ProtoServer {
     async fn set_epoch(
         &self,
         request: Request<SetEpochRequest>,
@@ -37,8 +38,8 @@ impl EpochBroadcaster for ProtoServer {
         let current_epoch = self.server.epoch.load(SeqCst);
         if current_epoch == 0 {
             // Can't accept the RPC, since we don't know if it is stale.
-            // TODO(tamer): on startup, the broadcaster should sync with
-            // the epoch service and read the latest epoch.
+            // This should never happen since we always sync the epoch before
+            // enabling the server, but keeping the check defensively anyway.
             return Err(TStatus::new(
                 tonic::Code::FailedPrecondition,
                 "Epoch not yet initialized",
@@ -175,18 +176,43 @@ impl Server {
         }
     }
 
-    pub fn new(bg_runtime: tokio::runtime::Handle) -> Arc<Server> {
+    async fn initial_epoch_sync(&self) {
+        // TODO: catch retryable errors and reconnect to epoch.
+        let addr = format!("http://{}", self.config.epoch.proto_server_addr.clone());
+
+        let mut client = EpochClient::connect(addr).await.unwrap();
+        let request = proto::epoch::ReadEpochRequest {};
+
+        let epoch = client
+            .read_epoch(Request::new(request))
+            .await
+            .unwrap()
+            .into_inner()
+            .epoch as usize;
+
+        self.epoch.store(epoch, SeqCst);
+    }
+
+    pub fn new(config: Config, bg_runtime: tokio::runtime::Handle) -> Arc<Server> {
         Arc::new(Server {
             epoch: AtomicUsize::new(0),
             bg_runtime,
+            config,
         })
     }
 
-    pub fn start(
+    pub async fn start(
         server: Arc<Server>,
         fast_network: Arc<dyn FastNetwork>,
         cancellation_token: CancellationToken,
     ) {
+        server.initial_epoch_sync().await;
+        let ct_clone = cancellation_token.clone();
+        let server_clone = server.clone();
+        tokio::spawn(async move {
+            let _ = Self::network_server_loop(server_clone, fast_network, ct_clone).await;
+            println!("Network server loop exited!")
+        });
         let proto_server = ProtoServer {
             server: server.clone(),
         };
@@ -194,17 +220,12 @@ impl Server {
             // TODO(tamer): make this configurable.
             let addr = SocketAddr::from_str("127.0.0.1:10010").unwrap();
             if let Err(e) = TServer::builder()
-                .add_service(EpochBroadcasterServer::new(proto_server))
+                .add_service(EpochPublisherServer::new(proto_server))
                 .serve(addr)
                 .await
             {
                 println!("Unable to start proto server: {}", e);
             }
-        });
-
-        tokio::spawn(async move {
-            let _ = Self::network_server_loop(server, fast_network, cancellation_token).await;
-            println!("Network server loop exited!")
         });
     }
 }
