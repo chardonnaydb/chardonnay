@@ -327,7 +327,7 @@ async fn read_modify_write() {
 }
 
 #[tokio::test]
-async fn test_prefetch() {
+async fn test_prefetch_with_value() {
     let context = setup().await;
     let key1 = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
     let key2 = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
@@ -370,6 +370,27 @@ async fn test_prefetch() {
     let vals = context
         .client
         .prefetch(tx2, &range_id, keys, addr)
+        .await
+        .unwrap();
+    assert_eq!(vals, ());
+    tear_down(context).await;
+}
+
+#[tokio::test]
+async fn test_prefetch_no_value() {
+    let context = setup().await;
+    let key1 = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+    let key2 = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+    let tx = start_transaction();
+    let range_id = FullRangeId {
+        keyspace_id: context.storage_context.keyspace_id,
+        range_id: context.storage_context.range_id,
+    };
+    let keys = vec![key1.clone(), key2.clone()];
+    let addr = context.proto_server_address;
+    let vals = context
+        .client
+        .prefetch(tx, &range_id, keys, addr)
         .await
         .unwrap();
     assert_eq!(vals, ());
