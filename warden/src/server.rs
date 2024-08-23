@@ -22,12 +22,12 @@ use tracing::{debug, info, instrument};
 use crate::assignment_computation::{AssignmentComputation, SimpleAssignmentComputation};
 
 /// Implementation of the Warden service.
-pub struct WardenServer<'a> {
-    assignment_computation: Arc<dyn AssignmentComputation + Sync + Send + 'a>,
+pub struct WardenServer {
+    assignment_computation: Arc<dyn AssignmentComputation + Sync + Send>,
 }
 
 #[tonic::async_trait]
-impl Warden for WardenServer<'static> {
+impl Warden for WardenServer {
     type RegisterRangeServerStream = AssignmentUpdateStream<'static>;
 
     #[instrument(skip(self))]
@@ -68,8 +68,8 @@ impl Warden for WardenServer<'static> {
     }
 }
 
-impl<'a> WardenServer<'a> {
-    pub fn new(assignment_computation: Arc<dyn AssignmentComputation + Sync + Send + 'a>) -> Self {
+impl WardenServer {
+    pub fn new(assignment_computation: Arc<dyn AssignmentComputation + Sync + Send>) -> Self {
         Self {
             assignment_computation,
         }
