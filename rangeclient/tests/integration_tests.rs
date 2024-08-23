@@ -33,7 +33,6 @@ struct TestContext {
     server_runtime: tokio::runtime::Runtime,
     client_runtime: tokio::runtime::Runtime,
     storage_context: rangeserver::storage::cassandra::for_testing::TestContext,
-    proto_server_address: SocketAddr,
 }
 
 fn get_config(warden_address: SocketAddr, proto_server_address: SocketAddr) -> Config {
@@ -127,6 +126,7 @@ async fn setup_server(
 async fn setup_client(
     cancellation_token: CancellationToken,
     server_address: SocketAddr,
+    proto_server_address: SocketAddr,
 ) -> (Arc<RangeClient>, tokio::runtime::Runtime) {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
@@ -142,6 +142,7 @@ async fn setup_client(
         runtime.handle().clone(),
         get_server_host_info(server_address),
         cancellation_token.clone(),
+        proto_server_address,
     );
     return (client, runtime);
 }
@@ -166,7 +167,12 @@ async fn setup() -> TestContext {
         &storage_context,
     )
     .await;
-    let (client, client_runtime) = setup_client(cancellation_token.clone(), server_address).await;
+    let (client, client_runtime) = setup_client(
+        cancellation_token.clone(),
+        server_address,
+        proto_server_address,
+    )
+    .await;
     let range_id = FullRangeId {
         keyspace_id: storage_context.keyspace_id,
         range_id: storage_context.range_id,
@@ -185,7 +191,6 @@ async fn setup() -> TestContext {
         server_runtime,
         client_runtime,
         storage_context,
-        proto_server_address,
     }
 }
 
@@ -371,12 +376,7 @@ async fn test_prefetch_with_value() {
         .unwrap();
     let tx2 = start_transaction();
     let keys = vec![key1.clone(), key2.clone()];
-    let addr = context.proto_server_address;
-    let vals = context
-        .client
-        .prefetch(tx2, &range_id, keys, addr)
-        .await
-        .unwrap();
+    let vals = context.client.prefetch(tx2, &range_id, keys).await.unwrap();
     assert_eq!(vals, ());
     tear_down(context).await;
 }
@@ -392,12 +392,7 @@ async fn test_prefetch_no_value() {
         range_id: context.storage_context.range_id,
     };
     let keys = vec![key1.clone(), key2.clone()];
-    let addr = context.proto_server_address;
-    let vals = context
-        .client
-        .prefetch(tx, &range_id, keys, addr)
-        .await
-        .unwrap();
+    let vals = context.client.prefetch(tx, &range_id, keys).await.unwrap();
     assert_eq!(vals, ());
     tear_down(context).await;
 }

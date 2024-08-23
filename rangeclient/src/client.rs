@@ -17,6 +17,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
+use tonic::transport::Channel;
 use tonic::Request;
 use uuid::Uuid;
 
@@ -31,6 +32,7 @@ pub struct RangeClient {
     range_server_info: HostInfo,
     // TODO: make more typeful and store more information to e.g. allow timing out.
     outstanding_requests: Mutex<HashMap<Uuid, oneshot::Sender<Bytes>>>,
+    proto_client: Arc<Mutex<Option<RangeServerClient<Channel>>>>,
 }
 
 impl RangeClient {
@@ -39,11 +41,22 @@ impl RangeClient {
         runtime: tokio::runtime::Handle,
         host_info: HostInfo,
         cancellation_token: CancellationToken,
+        proto_server_addr: SocketAddr,
     ) -> Arc<RangeClient> {
+        let addr = format!("http://{}", proto_server_addr);
+        let proto_client = Arc::new(Mutex::new(None));
+        let proto_client_clone = proto_client.clone();
+        // Connect to the gRPC server
+        runtime.spawn(async move {
+            let client = RangeServerClient::connect(addr).await.unwrap();
+            *proto_client_clone.lock().await = Some(client);
+            println!("Proto server connected!")
+        });
         let rc = Arc::new(RangeClient {
             fast_network,
             range_server_info: host_info,
             outstanding_requests: Mutex::new(HashMap::new()),
+            proto_client,
         });
 
         let rc_clone = rc.clone();
@@ -426,12 +439,7 @@ impl RangeClient {
         tx: Arc<TransactionInfo>,
         range_id: &FullRangeId,
         keys: Vec<Bytes>,
-        proto_server_addr: SocketAddr,
     ) -> Result<(), RangeServerError> {
-        let addr = format!("http://{}", proto_server_addr);
-        // Connect to the gRPC server
-        let mut client = RangeServerClient::connect(addr).await.unwrap();
-
         // Create a PrefetchRequest
         let transaction_id = tx.id.to_string();
         let keyspace_id = range_id.keyspace_id.id.to_string();
@@ -454,17 +462,22 @@ impl RangeClient {
             transaction_id,
             range_key: range_keys,
         };
-
-        // Send the request
-        match client.prefetch(Request::new(request)).await {
-            Ok(response) => {
-                println!("RESPONSE={:?}", response);
-                Ok(())
+        // Pull the client
+        if let Some(client) = &mut *self.proto_client.lock().await {
+            // Send the request
+            match client.prefetch(Request::new(request)).await {
+                Ok(response) => {
+                    println!("RESPONSE={:?}", response);
+                    Ok(())
+                }
+                Err(e) => {
+                    println!("Failed prefetch: {:?}", e);
+                    Err(RangeServerError::PrefetchError)
+                }
             }
-            Err(e) => {
-                println!("Failed prefetch: {:?}", e);
-                Err(RangeServerError::PrefetchError)
-            }
+        } else {
+            println!("Client not connected");
+            Err(RangeServerError::PrefetchError)
         }
     }
 }
