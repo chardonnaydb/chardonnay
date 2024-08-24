@@ -8,7 +8,6 @@ use uuid::Uuid;
 
 pub struct RangeInfo {
     pub id: Uuid,
-    pub sub_range_id: String,
     pub key_range: KeyRange,
 }
 
