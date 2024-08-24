@@ -36,12 +36,7 @@ fn scylla_query_error_to_storage_error(qe: QueryError) -> Error {
         QueryError::TimeoutError | QueryError::DbError(DbError::WriteTimeout { .. }, _) => {
             Error::Timeout
         }
-        _ => {
-            // TODO: It is essential to correctly categorize timeout errors, since these could indicate an operation
-            // might still succeed and require extra care in dealing with. Having a catch-all is bad since we might
-            // break if a new timeout variant is added.
-            Error::InternalError(Arc::new(qe))
-        }
+        _ => Error::InternalError(Arc::new(qe)),
     }
 }
 
