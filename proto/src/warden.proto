@@ -2,6 +2,7 @@ syntax = "proto3";
 package warden;
 
 message RangeId {
+    // This is the Uuid of the keyspace.
     string keyspace_id = 1;
     string range_id = 2;
 }

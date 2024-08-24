@@ -9,7 +9,11 @@ use uuid::Uuid;
 pub struct RangeInfo {
     pub id: Uuid,
     pub key_range: KeyRange,
-    pub assignee: Option<String>,
+}
+
+pub struct RangeAssignment {
+    pub range: RangeInfo,
+    pub assignee: String,
 }
 
 #[derive(Clone, Debug, Error)]
@@ -21,7 +25,7 @@ pub trait Persistence: Send + Sync + 'static {
     fn get_keyspace_range_map(
         &self,
         keyspace_id: &KeyspaceId,
-    ) -> impl std::future::Future<Output = Result<Vec<RangeInfo>, Error>> + Send;
+    ) -> impl std::future::Future<Output = Result<Vec<RangeAssignment>, Error>> + Send;
 
     fn update_range_assignment(
         &self,
