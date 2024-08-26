@@ -432,7 +432,7 @@ where
                             .get(self.range_id, key.clone())
                             .await
                             .map_err(Error::from_storage_error)?;
-                      
+
                         get_result.val = val.clone();
                     }
                 }
@@ -689,7 +689,6 @@ mod tests {
     use common::util;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
-    use std::net::SocketAddr;
     use uuid::Uuid;
 
     use super::*;

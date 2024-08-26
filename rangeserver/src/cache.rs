@@ -18,18 +18,16 @@ pub enum Error {
 // Range cache options
 #[derive(Clone, Debug)]
 pub struct CacheOptions {
-    pub path: String,   /* disk path where the db is stored */
-    pub num_write_buffers: usize,   /* num memtables */
-    pub write_buffer_size: u64, /* memtable size */
+    pub path: String,             /* disk path where the db is stored */
+    pub num_write_buffers: usize, /* num memtables */
+    pub write_buffer_size: u64,   /* memtable size */
 }
 
 // callback from range cache to range server to garbage collect old epochs
 type GCCallback = fn(epoch: u64) -> ();
 pub trait Cache: Send + Sync + 'static {
     // constructor
-    fn new(
-        cache_options: CacheOptions,
-    ) -> impl std::future::Future<Output = Self> + Send;
+    fn new(cache_options: CacheOptions) -> impl std::future::Future<Output = Self> + Send;
 
     // inserts or updates a key
     fn upsert(
@@ -55,17 +53,11 @@ pub trait Cache: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = Result<(Option<Bytes>, u64), Error>> + Send;
 
     // clears the cache entries upto a given epoch
-    fn clear(
-        &mut self,
-        epoch: u64,
-    ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
+    fn clear(&mut self, epoch: u64) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 
     // clients can register a callback to garbage collect old cache entries
     fn register_gc_callback(
         &mut self,
         cb: GCCallback,
     ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
-
 }
-
-
