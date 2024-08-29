@@ -32,11 +32,11 @@ pub struct RangeClient {
     range_server_info: HostInfo,
     // TODO: make more typeful and store more information to e.g. allow timing out.
     outstanding_requests: Mutex<HashMap<Uuid, oneshot::Sender<Bytes>>>,
-    proto_client: Arc<Mutex<Option<RangeServerClient<Channel>>>>,
+    proto_client: Arc<RangeServerClient<Channel>>,
 }
 
 impl RangeClient {
-    pub fn new(
+    pub async fn new(
         fast_network: Arc<dyn FastNetwork>,
         runtime: tokio::runtime::Handle,
         host_info: HostInfo,
@@ -44,14 +44,7 @@ impl RangeClient {
         proto_server_addr: SocketAddr,
     ) -> Arc<RangeClient> {
         let addr = format!("http://{}", proto_server_addr);
-        let proto_client = Arc::new(Mutex::new(None));
-        let proto_client_clone = proto_client.clone();
-        // Connect to the gRPC server
-        runtime.spawn(async move {
-            let client = RangeServerClient::connect(addr).await.unwrap();
-            *proto_client_clone.lock().await = Some(client);
-            println!("Proto server connected!")
-        });
+        let proto_client = Arc::new(RangeServerClient::connect(addr).await.unwrap());
         let rc = Arc::new(RangeClient {
             fast_network,
             range_server_info: host_info,
@@ -463,21 +456,17 @@ impl RangeClient {
             range_key: range_keys,
         };
         // Pull the client
-        if let Some(client) = &mut *self.proto_client.lock().await {
-            // Send the request
-            match client.prefetch(Request::new(request)).await {
-                Ok(response) => {
-                    println!("RESPONSE={:?}", response);
-                    Ok(())
-                }
-                Err(e) => {
-                    println!("Failed prefetch: {:?}", e);
-                    Err(RangeServerError::PrefetchError)
-                }
+        let mut client = (*self.proto_client).clone();
+        // Send the request
+        match client.prefetch(Request::new(request)).await {
+            Ok(response) => {
+                println!("RESPONSE={:?}", response);
+                Ok(())
             }
-        } else {
-            println!("Client not connected");
-            Err(RangeServerError::PrefetchError)
+            Err(e) => {
+                println!("Failed prefetch: {:?}", e);
+                Err(RangeServerError::PrefetchError)
+            }
         }
     }
 }

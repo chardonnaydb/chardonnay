@@ -143,7 +143,8 @@ async fn setup_client(
         get_server_host_info(server_address),
         cancellation_token.clone(),
         proto_server_address,
-    );
+    )
+    .await;
     return (client, runtime);
 }
 
