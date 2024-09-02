@@ -2,7 +2,6 @@ use std::{collections::HashMap, sync::Arc};
 
 use common::{config::EpochPublisherSet, host_info::HostInfo, network::fast_network::FastNetwork};
 use epoch_publisher::{client::EpochPublisherClient, error::Error};
-use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
