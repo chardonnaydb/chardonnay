@@ -397,9 +397,11 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "common",
+ "proto",
  "scylla 0.13.2",
  "thiserror",
  "tokio",
+ "tonic",
  "uuid 0.8.2",
 ]
 
