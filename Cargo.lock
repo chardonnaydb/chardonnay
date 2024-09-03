@@ -401,6 +401,7 @@ dependencies = [
  "scylla 0.13.2",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tonic",
  "uuid 0.8.2",
 ]
