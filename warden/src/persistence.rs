@@ -6,12 +6,19 @@ use common::{full_range_id::FullRangeId, key_range::KeyRange, keyspace_id::Keysp
 use thiserror::Error;
 use uuid::Uuid;
 
+#[derive(Clone, Debug)]
 pub struct RangeInfo {
     pub id: Uuid,
-    pub sub_range_id: String,
     pub key_range: KeyRange,
 }
 
+impl PartialEq for RangeInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.key_range == other.key_range
+    }
+}
+
+#[derive(Debug)]
 pub struct RangeAssignment {
     pub range: RangeInfo,
     pub assignee: String,

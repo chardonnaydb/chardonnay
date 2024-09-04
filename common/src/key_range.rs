@@ -1,8 +1,16 @@
 use bytes::Bytes;
 
+#[derive(Clone, Debug)]
 pub struct KeyRange {
     pub lower_bound_inclusive: Option<Bytes>,
     pub upper_bound_exclusive: Option<Bytes>,
+}
+
+impl PartialEq for KeyRange {
+    fn eq(&self, other: &Self) -> bool {
+        self.lower_bound_inclusive == other.lower_bound_inclusive
+            && self.upper_bound_exclusive == other.upper_bound_exclusive
+    }
 }
 
 impl KeyRange {

@@ -16,18 +16,19 @@ use tokio_stream::{
     wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
     Stream,
 };
+use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, instrument};
 
-use crate::assignment_computation::{AssignmentComputation, SimpleAssignmentComputation};
+use crate::assignment_computation::{AssignmentComputation, AssignmentComputationImpl};
 
 /// Implementation of the Warden service.
-pub struct WardenServer<'a> {
-    assignment_computation: Arc<dyn AssignmentComputation + Sync + Send + 'a>,
+pub struct WardenServer {
+    assignment_computation: Arc<dyn AssignmentComputation + Sync + Send>,
 }
 
 #[tonic::async_trait]
-impl Warden for WardenServer<'static> {
+impl Warden for WardenServer {
     type RegisterRangeServerStream = AssignmentUpdateStream<'static>;
 
     #[instrument(skip(self))]
@@ -68,8 +69,8 @@ impl Warden for WardenServer<'static> {
     }
 }
 
-impl<'a> WardenServer<'a> {
-    pub fn new(assignment_computation: Arc<dyn AssignmentComputation + Sync + Send + 'a>) -> Self {
+impl WardenServer {
+    pub fn new(assignment_computation: Arc<dyn AssignmentComputation + Sync + Send>) -> Self {
         Self {
             assignment_computation,
         }
@@ -87,9 +88,12 @@ impl<'a> WardenServer<'a> {
 /// starting the Warden server.
 pub async fn run_warden_server(
     addr: impl AsRef<str> + std::net::ToSocketAddrs,
+    runtime: tokio::runtime::Handle,
+    cancellation_token: CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = addr.to_socket_addrs()?.next().ok_or("Invalid address")?;
-    let warden_server = WardenServer::new(Arc::new(SimpleAssignmentComputation::new()));
+    let warden_server =
+        WardenServer::new(AssignmentComputationImpl::new(runtime, cancellation_token));
 
     info!("WardenServer listening on {}", addr);
 
