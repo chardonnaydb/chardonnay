@@ -16,6 +16,10 @@ use crate::persistence::{RangeAssignment, RangeInfo};
 // TODO(purujit): Convert this to a configuration.
 const MIN_NUM_RANGE_SERVERS: usize = 1;
 
+/// We need to implement Eq, Ord and Hash for Range Server identities in
+/// HostInfo.  Since that type is in another crate and may have a different
+/// implementation of these traits, we need to wrap it. This is utilizing the
+/// `NewType` pattern from chapter 19 of the Rust book.
 #[derive(Clone, Debug)]
 struct HostInfoWrapper(HostInfo);
 impl Deref for HostInfoWrapper {
