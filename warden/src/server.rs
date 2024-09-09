@@ -16,10 +16,11 @@ use tokio_stream::{
     wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
     Stream,
 };
+use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, instrument};
 
-use crate::assignment_computation::{AssignmentComputation, SimpleAssignmentComputation};
+use crate::assignment_computation::{AssignmentComputation, AssignmentComputationImpl};
 
 /// Implementation of the Warden service.
 pub struct WardenServer {
@@ -87,9 +88,12 @@ impl WardenServer {
 /// starting the Warden server.
 pub async fn run_warden_server(
     addr: impl AsRef<str> + std::net::ToSocketAddrs,
+    runtime: tokio::runtime::Handle,
+    cancellation_token: CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = addr.to_socket_addrs()?.next().ok_or("Invalid address")?;
-    let warden_server = WardenServer::new(Arc::new(SimpleAssignmentComputation::new()));
+    let warden_server =
+        WardenServer::new(AssignmentComputationImpl::new(runtime, cancellation_token));
 
     info!("WardenServer listening on {}", addr);
 

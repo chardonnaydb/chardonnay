@@ -1,4 +1,5 @@
 use server::run_warden_server;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 mod assignment_computation;
@@ -12,6 +13,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Hello, Warden!");
     // TODO(purujit): set up map computation and plug it in.
     let addr = "[::1]:50051";
-    run_warden_server(addr).await?;
+    let token = CancellationToken::new();
+    run_warden_server(addr, tokio::runtime::Handle::current(), token).await?;
     Ok(())
 }

@@ -1,5 +1,6 @@
 use bytes::Bytes;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct KeyRange {
     pub lower_bound_inclusive: Option<Bytes>,
     pub upper_bound_exclusive: Option<Bytes>,
