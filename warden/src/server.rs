@@ -6,10 +6,15 @@ use std::{
 };
 
 use common::{
-    host_info::HostInfo,
+    host_info::{self, HostInfo},
     region::{Region, Zone},
 };
-use pin_project_lite::pin_project;
+// TODO: Cannot use pin_project_lite because we need a drop implementation.
+// We need a custom drop implementation because we need to detect gRCP disconnects
+// See: https://github.com/hyperium/tonic/issues/196
+// https://docs.rs/pin-project/latest/pin_project/attr.pinned_drop.html
+// https://dtantsur.github.io/rust-openstack/pin_project_lite/index.html
+use pin_project::{pin_project, pinned_drop};
 use proto::warden::{warden_server::Warden, RegisterRangeServerRequest, WardenUpdate};
 use tokio::sync::broadcast;
 use tokio_stream::{
@@ -47,22 +52,24 @@ impl Warden for WardenServer {
             }
             Some(range_server) => {
                 info!("Registering range server: {}", range_server.identity);
+                let host_info = HostInfo {
+                    identity: range_server.identity,
+                    // todo(purujit): Get the address from the range server.
+                    address: SocketAddr::from(([0, 0, 0, 0], 0)),
+                    zone: Zone {
+                        name: range_server.zone,
+                        // TODO(purujit): Get the region from the range server.
+                        region: Region {
+                            cloud: None,
+                            name: "".to_string(),
+                        },
+                    },
+                };
                 Ok(Response::new(AssignmentUpdateStream::new(
                     self.assignment_computation
-                        .register_range_server(HostInfo {
-                            identity: range_server.identity,
-                            // todo(purujit): Get the address from the range server.
-                            address: SocketAddr::from(([0, 0, 0, 0], 0)),
-                            zone: Zone {
-                                name: range_server.zone,
-                                // TODO(purujit): Get the region from the range server.
-                                region: Region {
-                                    cloud: None,
-                                    name: "".to_string(),
-                                },
-                            },
-                        })?,
+                        .register_range_server(host_info.clone())?,
                     self.assignment_computation.clone(),
+                    host_info,
                 )))
             }
         }
@@ -107,7 +114,6 @@ pub async fn run_warden_server(
     Ok(())
 }
 
-pin_project! {
 /// A stream that provides updates to assignment versions.
 ///
 /// This stream is created by the `WardenServer` to provide updates to registered range servers.
@@ -117,22 +123,25 @@ pin_project! {
 /// The stream will send a full update on the first message, and then only send incremental
 /// updates after that. If the channel buffer is exhausted, the stream will return an error
 /// indicating that the client should reopen the channel.
+#[pin_project(PinnedDrop)]
 pub struct AssignmentUpdateStream<'a> {
     sent_full_update: bool,
     update_stream: BroadcastStream<i64>,
     assignment_computation: Arc<dyn AssignmentComputation + Sync + Send + 'a>,
-}
+    host_info: HostInfo,
 }
 
 impl<'a> AssignmentUpdateStream<'a> {
     pub fn new(
         version_update_receiver: broadcast::Receiver<i64>,
         assignment_computation: Arc<dyn AssignmentComputation + Sync + Send + 'a>,
+        host_info: HostInfo,
     ) -> Self {
         AssignmentUpdateStream {
             sent_full_update: false,
             update_stream: version_update_receiver.into(),
             assignment_computation,
+            host_info,
         }
     }
 }
@@ -146,9 +155,11 @@ impl<'a> Stream for AssignmentUpdateStream<'a> {
             Poll::Ready(update) => match update {
                 Some(result) => match result {
                     Ok(version) => {
-                        let update = self
-                            .assignment_computation
-                            .get_assignment(version, !self.sent_full_update);
+                        let update = self.assignment_computation.get_assignment_update(
+                            &self.host_info,
+                            version,
+                            !self.sent_full_update,
+                        );
                         self.sent_full_update = true;
                         match update {
                             Some(update) => Poll::Ready(Some(Ok(update))),
@@ -169,6 +180,14 @@ impl<'a> Stream for AssignmentUpdateStream<'a> {
             },
             Poll::Pending => Poll::Pending,
         }
+    }
+}
+
+#[pinned_drop]
+impl PinnedDrop for AssignmentUpdateStream<'_> {
+    fn drop(self: Pin<&mut Self>) {
+        self.assignment_computation
+            .notify_range_server_unavailable(&self.host_info);
     }
 }
 
@@ -227,7 +246,12 @@ mod tests {
     }
 
     impl AssignmentComputation for FakeMapProducer {
-        fn get_assignment(&self, _version: i64, full_update: bool) -> Option<WardenUpdate> {
+        fn get_assignment_update(
+            &self,
+            host_info: &HostInfo,
+            _version: i64,
+            full_update: bool,
+        ) -> Option<WardenUpdate> {
             if full_update {
                 Some(self.full_update.clone())
             } else {
@@ -239,6 +263,10 @@ mod tests {
             _: common::host_info::HostInfo,
         ) -> Result<Receiver<i64>, Status> {
             Ok(self.update_sender.subscribe())
+        }
+
+        fn notify_range_server_unavailable(&self, host_info: &HostInfo) {
+            todo!()
         }
     }
     #[tokio::test]
@@ -273,6 +301,7 @@ mod tests {
             range_server: Some(proto::warden::HostInfo {
                 identity: "test_server".to_string(),
                 zone: "test_zone".to_string(),
+                epoch: 1,
             }),
         });
         let response = client.register_range_server(request).await.unwrap();

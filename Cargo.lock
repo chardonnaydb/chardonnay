@@ -2087,7 +2087,7 @@ dependencies = [
  "chrono",
  "common",
  "once_cell",
- "pin-project-lite",
+ "pin-project",
  "proto",
  "scylla 0.3.1",
  "strum",

@@ -6,7 +6,7 @@ use common::host_info::HostInfo;
 use proto::warden::WardenUpdate;
 use std::cmp::{Ordering, Reverse};
 use std::hash::{Hash, Hasher};
-use tokio::sync::broadcast::Receiver;
+use tokio::sync::broadcast::{channel, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 use tracing::{debug, info};
@@ -57,13 +57,21 @@ impl Hash for HostInfoWrapper {
 
 pub trait AssignmentComputation {
     fn register_range_server(&self, host_info: HostInfo) -> Result<Receiver<i64>, Status>;
-    fn get_assignment(&self, version: i64, full_update: bool) -> Option<WardenUpdate>;
+    fn notify_range_server_unavailable(&self, host_info: &HostInfo);
+    fn get_assignment_update(
+        &self,
+        host_info: &HostInfo,
+        version: i64,
+        full_update: bool,
+    ) -> Option<WardenUpdate>;
 }
+
 pub struct AssignmentComputationImpl {
     base_ranges: Option<Vec<RangeInfo>>,
     range_assignments: Mutex<Vec<RangeAssignment>>,
     ready_range_servers: Mutex<HashSet<HostInfoWrapper>>,
     unassigned_base_ranges: Mutex<Vec<RangeInfo>>,
+    assignment_update_sender: Sender<i64>,
 }
 
 impl AssignmentComputationImpl {
@@ -77,6 +85,8 @@ impl AssignmentComputationImpl {
             range_assignments: Mutex::new(vec![]),
             ready_range_servers: Mutex::new(HashSet::new()),
             unassigned_base_ranges: Mutex::new(vec![]),
+            // Using capacity 1 here because receivers will resync if they lag.
+            assignment_update_sender: channel(1).0,
         });
         let computation_clone = s.clone();
         runtime.spawn(async move {
@@ -203,11 +213,29 @@ impl AssignmentComputationImpl {
 }
 
 impl AssignmentComputation for AssignmentComputationImpl {
-    fn register_range_server(&self, _host_info: HostInfo) -> Result<Receiver<i64>, Status> {
+    fn register_range_server(&self, host_info: HostInfo) -> Result<Receiver<i64>, Status> {
+        debug!("Registering range server: {:?}.", host_info);
+        // Note that if this is a re-registration, the old receiver will
+        // eventually be dropped when the gRPC stream for the old connection is
+        // closed. gRPC will detect the disconnect when it tries to send an
+        // update on the old connection.
+        self.ready_range_servers
+            .lock()
+            .unwrap()
+            .insert(HostInfoWrapper(host_info.clone()));
+        Ok(self.assignment_update_sender.subscribe())
+    }
+
+    fn get_assignment_update(
+        &self,
+        host_info: &HostInfo,
+        version: i64,
+        full_update: bool,
+    ) -> Option<WardenUpdate> {
         todo!()
     }
 
-    fn get_assignment(&self, _version: i64, _full_update: bool) -> Option<WardenUpdate> {
+    fn notify_range_server_unavailable(&self, host_info: &HostInfo) {
         todo!()
     }
 }
