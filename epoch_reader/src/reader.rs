@@ -46,6 +46,7 @@ impl EpochReader {
     }
 
     pub async fn read_epoch(&self) -> Result<u64, Error> {
+        // TODO(tamer): add timeout and retries.
         // Fire off a request to read the epoch from each publisher in the set in parallel.
         let mut join_set = JoinSet::new();
         for c in &self.clients {

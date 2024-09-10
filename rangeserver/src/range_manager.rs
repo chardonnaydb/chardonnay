@@ -214,7 +214,7 @@ where
             .epoch_supplier
             .read_epoch()
             .await
-            .map_err(Error::from_epoch_provider_error)?;
+            .map_err(Error::from_epoch_supplier_error)?;
         let range_info = self
             .storage
             .take_ownership_and_load_range(self.range_id)
@@ -224,9 +224,9 @@ where
         // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
         // we just wait for the epoch to advance once.
         self.epoch_supplier
-            .wait_until_epoch(epoch + 1)
+            .wait_until_epoch(epoch + 1, chrono::Duration::seconds(10))
             .await
-            .map_err(Error::from_epoch_provider_error)?;
+            .map_err(Error::from_epoch_supplier_error)?;
         // Get a new epoch lease.
         let highest_known_epoch = epoch + 1;
         let new_epoch_lease_lower_bound =
@@ -268,7 +268,7 @@ where
             let epoch = epoch_supplier
                 .read_epoch()
                 .await
-                .map_err(Error::from_epoch_provider_error)?;
+                .map_err(Error::from_epoch_supplier_error)?;
             let highest_known_epoch = epoch + 1;
             if let State::Loaded(state) = state.read().await.deref() {
                 old_lease = state.range_info.epoch_lease;

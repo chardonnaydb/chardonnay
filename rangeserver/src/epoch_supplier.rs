@@ -1,10 +1,5 @@
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("Unknown")]
-    Unknown,
-}
+pub mod reader;
+use epoch_publisher::error::Error;
 
 pub trait EpochSupplier: Send + Sync + 'static {
     // Values returned must satisfy the Global Epoch Invariant:
@@ -17,5 +12,6 @@ pub trait EpochSupplier: Send + Sync + 'static {
     fn wait_until_epoch(
         &self,
         epoch: u64,
+        timeout: chrono::Duration,
     ) -> impl std::future::Future<Output = Result<(), Error>> + Send;
 }
