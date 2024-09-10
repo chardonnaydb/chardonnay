@@ -153,17 +153,16 @@ enum State {
     Loaded(LoadedState),
 }
 
-pub struct RangeManager<S, E, W, C>
+pub struct RangeManager<S, W, C>
 where
     S: Storage,
-    E: EpochSupplier,
     W: Wal,
     C: Cache,
 {
     range_id: FullRangeId,
     config: Config,
     storage: Arc<S>,
-    epoch_supplier: Arc<E>,
+    epoch_supplier: Arc<dyn EpochSupplier>,
     wal: Mutex<W>,
     cache: Arc<RwLock<C>>,
     state: Arc<RwLock<State>>,
@@ -180,10 +179,9 @@ pub struct PrepareResult {
     pub epoch_lease: (u64, u64),
 }
 
-impl<S, E, W, C> RangeManager<S, E, W, C>
+impl<S, W, C> RangeManager<S, W, C>
 where
     S: Storage,
-    E: EpochSupplier,
     W: Wal,
     C: Cache,
 {
@@ -191,7 +189,7 @@ where
         range_id: FullRangeId,
         config: Config,
         storage: Arc<S>,
-        epoch_supplier: Arc<E>,
+        epoch_supplier: Arc<dyn EpochSupplier>,
         wal: W,
         cache: C,
         prefetching_buffer: Arc<PrefetchingBuffer>,
@@ -257,7 +255,7 @@ where
 
     async fn renew_epoch_lease_task(
         range_id: FullRangeId,
-        epoch_supplier: Arc<E>,
+        epoch_supplier: Arc<dyn EpochSupplier>,
         storage: Arc<S>,
         state: Arc<RwLock<State>>,
         lease_renewal_interval: std::time::Duration,
@@ -694,12 +692,11 @@ mod tests {
     use super::*;
     use crate::cache::memtabledb::MemTableDB;
     use crate::cache::CacheOptions;
-    use crate::epoch_supplier::EpochSupplier as EpochSupplierTrait;
     use crate::for_testing::epoch_supplier::EpochSupplier;
     use crate::for_testing::in_memory_wal::InMemoryWal;
     use crate::storage::cassandra::Cassandra;
     use crate::transaction_info::TransactionInfo;
-    type RM = RangeManager<Cassandra, EpochSupplier, InMemoryWal, MemTableDB>;
+    type RM = RangeManager<Cassandra, InMemoryWal, MemTableDB>;
 
     impl RM {
         async fn abort_transaction(&self, tx: Arc<TransactionInfo>) {
@@ -846,13 +843,12 @@ mod tests {
             storage: cassandra,
             wal,
             cache,
-            epoch_supplier,
+            epoch_supplier: epoch_supplier.clone(),
             state: Arc::new(RwLock::new(State::Unloaded)),
             prefetching_buffer,
         });
         let rm_copy = rm.clone();
         let init_handle = tokio::spawn(async move { rm_copy.load().await.unwrap() });
-        let epoch_supplier = rm.epoch_supplier.clone();
         // Give some delay so the RM can see the epoch advancing.
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         epoch_supplier.set_epoch(1).await;

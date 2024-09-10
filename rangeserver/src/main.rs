@@ -40,7 +40,7 @@ fn main() {
         let host_info = get_host_info();
         // TODO: set number of threads and pin to cores.
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-        let server = Server::<_, _, MemTableDB>::new(
+        let server = Server::<_, MemTableDB>::new(
             config,
             host_info,
             storage,
