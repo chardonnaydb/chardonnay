@@ -12,7 +12,6 @@ pub struct RangeInfo {
     pub key_range: KeyRange,
 }
 
-
 #[derive(Debug)]
 pub struct RangeAssignment {
     pub range: RangeInfo,

@@ -1,8 +1,8 @@
 use crate::{
-    cache::Error as CacheError, epoch_supplier::Error as EpochSupplierError,
-    storage::Error as StorageError, transaction_abort_reason::TransactionAbortReason,
-    wal::Error as WalError,
+    cache::Error as CacheError, storage::Error as StorageError,
+    transaction_abort_reason::TransactionAbortReason, wal::Error as WalError,
 };
+use epoch_publisher::error::Error as EpochSupplierError;
 
 use flatbuf::rangeserver_flatbuffers::range_server::Status;
 
@@ -47,10 +47,8 @@ impl Error {
         }
     }
 
-    pub fn from_epoch_provider_error(e: EpochSupplierError) -> Self {
-        match e {
-            EpochSupplierError::Unknown => Self::InternalError(Arc::new(e)),
-        }
+    pub fn from_epoch_supplier_error(e: EpochSupplierError) -> Self {
+        Self::InternalError(Arc::new(e))
     }
 
     pub fn to_flatbuf_status(&self) -> Status {
