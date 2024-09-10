@@ -1,4 +1,5 @@
 use crate::epoch_supplier::EpochSupplier as Trait;
+use async_trait::async_trait;
 use epoch_publisher::error::Error;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -60,6 +61,7 @@ impl EpochSupplier {
     }
 }
 
+#[async_trait]
 impl Trait for EpochSupplier {
     async fn read_epoch(&self) -> Result<u64, Error> {
         let state = self.state.read().unwrap();

@@ -26,6 +26,7 @@ tokio-stream = {version = "0.1.15", features = ["net"]}
 prost = "0.12"
 skiplist = "0.5.1"
 rand = "0.8.5"
+async-trait = "0.1.82"
 
 [build-dependencies]
 tonic-build = "0.11"

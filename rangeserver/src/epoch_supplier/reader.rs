@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::*;
+use async_trait::async_trait;
 use common::{config::EpochPublisherSet, network::fast_network::FastNetwork};
 use epoch_publisher::error::Error;
 use epoch_reader::reader::EpochReader;
@@ -29,6 +30,7 @@ impl Reader {
     }
 }
 
+#[async_trait]
 impl EpochSupplier for Reader {
     async fn read_epoch(&self) -> Result<u64, Error> {
         self.epoch_reader.read_epoch().await
