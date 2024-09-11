@@ -10,6 +10,7 @@ use std::str::FromStr;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
+use tracing::{error, info, instrument};
 
 pub struct Server<S>
 where
@@ -31,13 +32,14 @@ impl<S> Epoch for ProtoServer<S>
 where
     S: Storage,
 {
+    #[instrument(skip(self))]
     async fn read_epoch(
         &self,
         _request: Request<ReadEpochRequest>,
     ) -> Result<Response<ReadEpochResponse>, TStatus> {
         match self.server.storage.read_latest().await {
-            Err(_) => {
-                // TODO: log error.
+            Err(e) => {
+                error!("read epoch RPC failed with={}", e);
                 let status = TStatus::new(tonic::Code::Internal, "Failed to read latest epoch");
                 Err(status)
             }
@@ -95,13 +97,22 @@ where
         tokio::spawn(async move {
             'outer: loop {
                 if cancellation_token.is_cancelled() {
+                    info!("Update loop cancelled, exiting.");
                     return ();
                 }
+                info!("Starting an update epoch iteration.");
                 let read_result = server.storage.read_latest().await;
                 let epoch = match read_result {
-                    Err(_) => continue, // TODO: log error
+                    Err(e) => {
+                        error!(
+                            "Failed to read latest epoch value from storage. Error:{}",
+                            e
+                        );
+                        continue;
+                    }
                     Ok(epoch) => epoch,
                 };
+                info!("Got current epoch: {}", epoch);
                 // Fire off a request to update the epoch at each of the sets in parallel.
                 let mut join_set = JoinSet::new();
                 for s in server.publisher_sets.iter() {
@@ -112,17 +123,24 @@ where
                 // If all succeeded, we can advance the epoch.
                 while let Some(res) = join_set.join_next().await {
                     let res = match res {
-                        Err(_) => continue 'outer, // TODO: maybe log the error here
+                        Err(e) => {
+                            error!("Updating a publisher set failed, abandoning epoch update. Error: {}", e);
+                            continue 'outer;
+                        }
                         Ok(res) => res,
                     };
                     match res {
-                        Err(_) => continue 'outer, // TODO: maybe log the error here
+                        Err(e) => {
+                            error!("Updating a publisher set failed, abandoning epoch update. Error: {}", e);
+                            continue 'outer;
+                        }
                         Ok(()) => (),
                     };
                 }
                 // If we got here then we updated all the broadcaster sets, we can advance the epoch.
-                // TODO: log the error if any
-                let _ = server.storage.conditional_update(epoch + 1, epoch).await;
+                if let Err(e) = server.storage.conditional_update(epoch + 1, epoch).await {
+                    error!("Failed to increment epoch. Error: {}", e);
+                }
             }
         });
     }
