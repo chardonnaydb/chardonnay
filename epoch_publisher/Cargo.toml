@@ -20,6 +20,7 @@ tonic = "0.11.0"
 tokio-util = "0.7.10"
 tokio-stream = {version = "0.1.15", features = ["net"]}
 prost = "0.12"
+tracing = "0.1.40"
 
 [build-dependencies]
 tonic-build = "0.11"
