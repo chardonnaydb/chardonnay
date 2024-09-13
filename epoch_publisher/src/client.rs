@@ -215,18 +215,19 @@ impl EpochPublisherClient {
                 return;
             }
 
-            loop {
+            'inner: loop {
                 let expired_req_id = {
                     let mut timeout_queue = client.timeout_queue.lock().await;
-                    if let Some(item) = timeout_queue.pop() {
-                        let (expiration_time, req_id) = item;
-                        if expiration_time < chrono::Utc::now() {
+                    if let Some(item) = timeout_queue.peek() {
+                        let (expiration_time, _) = item;
+                        if (*expiration_time) < chrono::Utc::now() {
+                            let (_, req_id) = timeout_queue.pop().unwrap();
                             req_id
                         } else {
-                            break;
+                            break 'inner;
                         }
                     } else {
-                        break;
+                        break 'inner;
                     }
                 };
                 // This RPC is past expiration time, let's remove it from outstanding request
@@ -246,6 +247,7 @@ impl EpochPublisherClient {
             }
 
             // TODO(tamer): make this configurable.
+            // Also, consider sleeping until the next expiration time.
             tokio::time::sleep(core::time::Duration::from_millis(10)).await;
         }
     }
