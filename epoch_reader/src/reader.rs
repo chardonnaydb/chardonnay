@@ -53,7 +53,11 @@ impl EpochReader {
         let mut join_set = JoinSet::new();
         for c in &self.clients {
             let client = c.clone();
-            join_set.spawn_on(async move { client.read_epoch().await }, &self.runtime);
+            join_set.spawn_on(
+                // TODO(tamer): pass timeout in as a parameter.
+                async move { client.read_epoch(chrono::Duration::seconds(1)).await },
+                &self.runtime,
+            );
         }
 
         // Now see if any value is returned by a majority of publishers, and return it.

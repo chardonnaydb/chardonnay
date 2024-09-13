@@ -69,7 +69,7 @@ impl EpochPublisherClient {
     }
 
     #[instrument(skip(self))]
-    pub async fn read_epoch(&self) -> Result<u64, Error> {
+    pub async fn read_epoch(&self, timeout: chrono::Duration) -> Result<u64, Error> {
         // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
         let req_id = Uuid::new_v4();
         trace!(
@@ -82,8 +82,7 @@ impl EpochPublisherClient {
         let (tx, rx) = oneshot::channel();
         let rpc = RpcInfo {
             time_sent: chrono::Utc::now(),
-            // TODO(tamer): pass timeout in as a parameter.
-            timeout: chrono::Duration::seconds(1),
+            timeout,
             response_sender: tx,
         };
         let expiration_time = rpc.time_sent + rpc.timeout;
