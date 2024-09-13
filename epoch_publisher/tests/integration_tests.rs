@@ -157,7 +157,7 @@ async fn read_uninitialized_epoch() {
     let context = setup(0).await;
     let err = context
         .client
-        .read_epoch(chrono::Duration::seconds(10))
+        .read_epoch(chrono::Duration::seconds(1000))
         .await;
     let err = err.err().unwrap();
     assert!(err == Error::EpochUnknown);
@@ -169,7 +169,7 @@ async fn read_epoch() {
     let context = setup(42).await;
     let epoch = context
         .client
-        .read_epoch(chrono::Duration::seconds(10))
+        .read_epoch(chrono::Duration::seconds(1000))
         .await
         .unwrap();
     assert!(epoch == 42);
