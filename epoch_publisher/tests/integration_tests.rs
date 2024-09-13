@@ -23,6 +23,7 @@ struct TestContext {
     cancellation_token: CancellationToken,
     server_runtime: tokio::runtime::Runtime,
     client_runtime: tokio::runtime::Runtime,
+    client_bg_runtime: tokio::runtime::Runtime,
 }
 
 fn get_config(epoch_address: SocketAddr) -> Config {
@@ -94,8 +95,13 @@ fn get_server_host_info(address: SocketAddr) -> HostInfo {
 async fn setup_client(
     cancellation_token: CancellationToken,
     server_address: SocketAddr,
-) -> (Arc<EpochPublisherClient>, tokio::runtime::Runtime) {
+) -> (
+    Arc<EpochPublisherClient>,
+    tokio::runtime::Runtime,
+    tokio::runtime::Runtime,
+) {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+    let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
@@ -107,10 +113,11 @@ async fn setup_client(
     let client = EpochPublisherClient::new(
         fast_network,
         runtime.handle().clone(),
+        bg_runtime.handle().clone(),
         get_server_host_info(server_address),
         cancellation_token.clone(),
     );
-    return (client, runtime);
+    return (client, runtime, bg_runtime);
 }
 
 async fn setup(initial_epoch: u64) -> TestContext {
@@ -126,12 +133,14 @@ async fn setup(initial_epoch: u64) -> TestContext {
         setup_server(server_socket, cancellation_token.clone(), epoch_address).await;
     // Give some delay so the server can setup its networking.
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-    let (client, client_runtime) = setup_client(cancellation_token.clone(), server_address).await;
+    let (client, client_runtime, client_bg_runtime) =
+        setup_client(cancellation_token.clone(), server_address).await;
     TestContext {
         client,
         cancellation_token,
         server_runtime,
         client_runtime,
+        client_bg_runtime,
     }
 }
 
@@ -140,6 +149,7 @@ async fn tear_down(context: TestContext) {
     // TODO: investigate why shutdown isn't clean.
     context.server_runtime.shutdown_background();
     context.client_runtime.shutdown_background();
+    context.client_bg_runtime.shutdown_background();
 }
 
 #[tokio::test]

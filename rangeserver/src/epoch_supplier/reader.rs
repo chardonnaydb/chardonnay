@@ -16,6 +16,7 @@ impl Reader {
     pub fn new(
         fast_network: Arc<dyn FastNetwork>,
         runtime: tokio::runtime::Handle,
+        bg_runtime: tokio::runtime::Handle,
         publisher_set: EpochPublisherSet,
         cancellation_token: CancellationToken,
     ) -> Self {
@@ -23,6 +24,7 @@ impl Reader {
             epoch_reader: EpochReader::new(
                 fast_network,
                 runtime,
+                bg_runtime,
                 publisher_set,
                 cancellation_token,
             ),

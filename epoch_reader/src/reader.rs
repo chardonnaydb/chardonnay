@@ -16,6 +16,7 @@ impl EpochReader {
     pub fn new(
         fast_network: Arc<dyn FastNetwork>,
         runtime: tokio::runtime::Handle,
+        bg_runtime: tokio::runtime::Handle,
         publisher_set: EpochPublisherSet,
         cancellation_token: CancellationToken,
     ) -> EpochReader {
@@ -32,6 +33,7 @@ impl EpochReader {
                 EpochPublisherClient::new(
                     fast_network.clone(),
                     runtime.clone(),
+                    bg_runtime.clone(),
                     host_info,
                     cancellation_token.clone(),
                 )
