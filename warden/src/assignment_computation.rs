@@ -56,8 +56,8 @@ impl Hash for HostInfoWrapper {
 }
 
 pub trait AssignmentComputation {
-    fn register_range_server(&self, host_info: HostInfo) -> Result<Receiver<i64>, Status>;
-    fn notify_range_server_unavailable(&self, host_info: &HostInfo);
+    fn register_range_server(&self, host_info: HostInfo) -> Receiver<i64>;
+    fn notify_range_server_unavailable(&self, host_info: HostInfo);
     fn get_assignment_update(
         &self,
         host_info: &HostInfo,
@@ -213,7 +213,7 @@ impl AssignmentComputationImpl {
 }
 
 impl AssignmentComputation for AssignmentComputationImpl {
-    fn register_range_server(&self, host_info: HostInfo) -> Result<Receiver<i64>, Status> {
+    fn register_range_server(&self, host_info: HostInfo) -> Receiver<i64> {
         debug!("Registering range server: {:?}.", host_info);
         // Note that if this is a re-registration, the old receiver will
         // eventually be dropped when the gRPC stream for the old connection is
@@ -223,7 +223,7 @@ impl AssignmentComputation for AssignmentComputationImpl {
             .lock()
             .unwrap()
             .insert(HostInfoWrapper(host_info.clone()));
-        Ok(self.assignment_update_sender.subscribe())
+        self.assignment_update_sender.subscribe()
     }
 
     fn get_assignment_update(
@@ -235,8 +235,13 @@ impl AssignmentComputation for AssignmentComputationImpl {
         todo!()
     }
 
-    fn notify_range_server_unavailable(&self, host_info: &HostInfo) {
-        todo!()
+    fn notify_range_server_unavailable(&self, host_info: HostInfo) {
+        // TODO(purujit): Implement Quarantine.
+        debug!("Notifying range server {:?} is unavailable.", host_info);
+        self.ready_range_servers
+            .lock()
+            .unwrap()
+            .remove(&HostInfoWrapper(host_info));
     }
 }
 #[cfg(test)]
@@ -461,5 +466,39 @@ mod tests {
             assigned_servers,
             HashSet::from_iter(vec!["server1".to_string(), "server2".to_string()])
         );
+    }
+
+    #[tokio::test]
+    async fn test_register_new_range_server() {
+        let computation = setup();
+        let server = HostInfo {
+            identity: "new_server".to_string(),
+            address: "127.0.0.1:8080".parse().unwrap(),
+            zone: make_zone(),
+        };
+
+        computation.register_range_server(server.clone());
+
+        let ready_servers = computation.ready_range_servers.lock().unwrap();
+        assert!(ready_servers.contains(&HostInfoWrapper(server)));
+    }
+
+    #[tokio::test]
+    async fn test_notify_range_server_unavailability() {
+        let computation = setup();
+        let server = HostInfo {
+            identity: "server1".to_string(),
+            address: "127.0.0.1:8080".parse().unwrap(),
+            zone: make_zone(),
+        };
+
+        computation.register_range_server(server.clone());
+        {
+            let ready_servers = computation.ready_range_servers.lock().unwrap();
+            assert!(ready_servers.contains(&HostInfoWrapper(server.clone())));
+        }
+        computation.notify_range_server_unavailable(server.clone());
+        let ready_servers = computation.ready_range_servers.lock().unwrap();
+        assert!(!ready_servers.contains(&HostInfoWrapper(server)));
     }
 }

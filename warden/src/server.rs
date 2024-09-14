@@ -9,11 +9,6 @@ use common::{
     host_info::{self, HostInfo},
     region::{Region, Zone},
 };
-// TODO: Cannot use pin_project_lite because we need a drop implementation.
-// We need a custom drop implementation because we need to detect gRCP disconnects
-// See: https://github.com/hyperium/tonic/issues/196
-// https://docs.rs/pin-project/latest/pin_project/attr.pinned_drop.html
-// https://dtantsur.github.io/rust-openstack/pin_project_lite/index.html
 use pin_project::{pin_project, pinned_drop};
 use proto::warden::{warden_server::Warden, RegisterRangeServerRequest, WardenUpdate};
 use tokio::sync::broadcast;
@@ -67,7 +62,7 @@ impl Warden for WardenServer {
                 };
                 Ok(Response::new(AssignmentUpdateStream::new(
                     self.assignment_computation
-                        .register_range_server(host_info.clone())?,
+                        .register_range_server(host_info.clone()),
                     self.assignment_computation.clone(),
                     host_info,
                 )))
@@ -123,6 +118,9 @@ pub async fn run_warden_server(
 /// The stream will send a full update on the first message, and then only send incremental
 /// updates after that. If the channel buffer is exhausted, the stream will return an error
 /// indicating that the client should reopen the channel.
+// Cannot use pin_project_lite because we need a drop implementation.
+// https://docs.rs/pin-project/latest/pin_project/attr.pinned_drop.html
+// https://dtantsur.github.io/rust-openstack/pin_project_lite/index.html mentions that custom drop is not supported.
 #[pin_project(PinnedDrop)]
 pub struct AssignmentUpdateStream<'a> {
     sent_full_update: bool,
@@ -184,15 +182,21 @@ impl<'a> Stream for AssignmentUpdateStream<'a> {
 }
 
 #[pinned_drop]
+// We need a custom drop implementation because we need to detect gRCP disconnects
+// See: https://github.com/hyperium/tonic/issues/196
+// TODO(purujit): Verify that this gets invoked when the client goes away.
 impl PinnedDrop for AssignmentUpdateStream<'_> {
     fn drop(self: Pin<&mut Self>) {
+        let host_info = self.host_info.clone();
         self.assignment_computation
-            .notify_range_server_unavailable(&self.host_info);
+            .notify_range_server_unavailable(host_info);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
     use proto::warden::warden_client::WardenClient;
     use tokio::sync::broadcast::Receiver;
@@ -205,6 +209,7 @@ mod tests {
         full_update: WardenUpdate,
         incremental_update: WardenUpdate,
         update_sender: broadcast::Sender<i64>,
+        dropped_clients: Mutex<Vec<HostInfo>>,
     }
 
     impl FakeMapProducer {
@@ -235,6 +240,7 @@ mod tests {
                     )),
                 },
                 update_sender: broadcast::channel(1).0,
+                dropped_clients: Mutex::new(vec![]),
             }
         }
         pub fn send_full_update(&self) -> () {
@@ -258,15 +264,12 @@ mod tests {
                 Some(self.incremental_update.clone())
             }
         }
-        fn register_range_server(
-            &self,
-            _: common::host_info::HostInfo,
-        ) -> Result<Receiver<i64>, Status> {
-            Ok(self.update_sender.subscribe())
+        fn register_range_server(&self, _: common::host_info::HostInfo) -> Receiver<i64> {
+            self.update_sender.subscribe()
         }
 
-        fn notify_range_server_unavailable(&self, host_info: &HostInfo) {
-            todo!()
+        fn notify_range_server_unavailable(&self, host_info: HostInfo) {
+            self.dropped_clients.lock().unwrap().push(host_info)
         }
     }
     #[tokio::test]
@@ -320,7 +323,6 @@ mod tests {
             fake_map_producer.incremental_update
         );
 
-        // Clean up
         server_task.abort();
     }
 }
