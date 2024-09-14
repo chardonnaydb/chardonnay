@@ -46,3 +46,13 @@ CREATE TABLE records (
   AND COMPACTION = {
      'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
 };
+
+CREATE TABLE wal (
+    wal_id    uuid,
+    offset    bigint,
+    content   blob,
+    PRIMARY KEY  ((wal_id), offset)
+) WITH CLUSTERING ORDER BY (offset ASC)
+  AND COMPACTION = {
+     'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
+};

@@ -35,6 +35,8 @@ impl Error {
 
     pub fn from_wal_error(e: WalError) -> Self {
         match e {
+            WalError::Timeout => Self::Timeout,
+            WalError::NotSynced => Self::RangeOwnershipLost,
             WalError::Unknown => Self::InternalError(Arc::new(e)),
         }
     }

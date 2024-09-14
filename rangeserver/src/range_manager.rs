@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::prefetching_buffer::KeyState;
 use crate::prefetching_buffer::PrefetchingBuffer;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -144,6 +145,8 @@ struct LoadedState {
     range_info: RangeInfo,
     highest_known_epoch: u64,
     lock_table: Mutex<LockTable>,
+    // TODO: need more efficient representation of prepares than raw bytes.
+    pending_prepare_records: Mutex<HashMap<Uuid, Bytes>>,
     lease_renewal_task: tokio::task::JoinHandle<Result<(), Error>>,
 }
 
@@ -163,7 +166,7 @@ where
     config: Config,
     storage: Arc<S>,
     epoch_supplier: Arc<dyn EpochSupplier>,
-    wal: Mutex<W>,
+    wal: W,
     cache: Arc<RwLock<C>>,
     state: Arc<RwLock<State>>,
     prefetching_buffer: Arc<PrefetchingBuffer>,
@@ -199,7 +202,7 @@ where
             config,
             storage,
             epoch_supplier,
-            wal: Mutex::new(wal),
+            wal,
             cache: Arc::new(RwLock::new(cache)),
             state: Arc::new(RwLock::new(State::Unloaded)),
             prefetching_buffer,
@@ -238,6 +241,7 @@ where
             )
             .await
             .map_err(Error::from_storage_error)?;
+        self.wal.sync().await.map_err(Error::from_wal_error)?;
         // Create a recurrent task to renew.
         let lease_renewal_interval = self.config.range_server.range_maintenance_duration;
         // TODO: Check on the task handle to see if it errored out.
@@ -249,6 +253,7 @@ where
             range_info,
             highest_known_epoch,
             lock_table: Mutex::new(LockTable::new()),
+            pending_prepare_records: Mutex::new(HashMap::new()),
             lease_renewal_task: lease_renewal_task,
         })
     }
@@ -483,12 +488,19 @@ where
                     }
                 };
                 self.acquire_range_lock(state, tx.clone()).await?;
+
                 {
-                    let mut wal = self.wal.lock().await;
-                    wal.append_prepare(prepare)
+                    // TODO: probably don't need holding that latch while writing to the WAL.
+                    // but needs careful thinking.
+                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    self.wal
+                        .append_prepare(prepare)
                         .await
                         .map_err(Error::from_wal_error)?;
-                };
+
+                    pending_prepare_records
+                        .insert(tx.id, Bytes::copy_from_slice(prepare._tab.buf()));
+                }
 
                 Ok(PrepareResult {
                     highest_known_epoch: state.highest_known_epoch,
@@ -513,10 +525,10 @@ where
                 }
                 {
                     // TODO: We can skip aborting to the log if we never appended a prepare record.
-                    let mut wal = self.wal.lock().await;
                     // TODO: It's possible the WAL already contains this record in case this is a retry
                     // so avoid re-inserting in that case.
-                    wal.append_abort(abort)
+                    self.wal
+                        .append_abort(abort)
                         .await
                         .map_err(Error::from_wal_error)?;
                 }
@@ -552,74 +564,70 @@ where
                 }
                 state.highest_known_epoch =
                     std::cmp::max(state.highest_known_epoch, commit.epoch() as u64);
-                {
-                    let mut wal = self.wal.lock().await;
-                    wal.append_commit(commit)
-                        .await
-                        .map_err(Error::from_wal_error)?;
-                    // Find the corresponding prepare entry in the WAL to get the writes.
-                    // This is quite inefficient, we should cache a copy in memory instead, but for now
-                    // it's convenient to also test WAL iteration.
-                    let prepare_record_bytes = wal
-                        .find_prepare_record(tx.id.clone())
-                        .await
-                        .map_err(Error::from_wal_error)?
-                        .unwrap();
-                    let prepare_record =
-                        flatbuffers::root::<PrepareRequest>(&prepare_record_bytes).unwrap();
-                    let version = KeyVersion {
-                        epoch: commit.epoch() as u64,
-                        // TODO: version counter should be an internal counter per range.
-                        // Remove from the commit message.
-                        version_counter: commit.vid() as u64,
-                    };
-                    // TODO: we shouldn't be doing a storage operation per individual key put or delete.
-                    // Instead we should write them in batches, and whenever we do multiple operations they
-                    // should go in parallel not sequentially.
-                    // We should also add retries in case of intermittent failures. Note that all our
-                    // storage operations here are idempotent and safe to retry any number of times.
-                    for put in prepare_record.puts().iter() {
-                        let mut cache_wg = self.cache.write().await;
-                        for put in put.iter() {
-                            // TODO: too much copying :(
-                            let key =
-                                Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
-                            let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
+                // TODO: handle potential duplicates here.
+                self.wal
+                    .append_commit(commit)
+                    .await
+                    .map_err(Error::from_wal_error)?;
+                let prepare_record_bytes = {
+                    let mut pending_prepare_records = state.pending_prepare_records.lock().await;
+                    // TODO: handle prior removals.
+                    pending_prepare_records.remove(&tx.id).unwrap().clone()
+                };
 
-                            // TODO: we should do the storage writes lazily in the background
-                            self.storage
-                                .upsert(self.range_id, key.clone(), val.clone(), version)
-                                .await
-                                .map_err(Error::from_storage_error)?;
+                let prepare_record =
+                    flatbuffers::root::<PrepareRequest>(&prepare_record_bytes).unwrap();
+                let version = KeyVersion {
+                    epoch: commit.epoch() as u64,
+                    // TODO: version counter should be an internal counter per range.
+                    // Remove from the commit message.
+                    version_counter: commit.vid() as u64,
+                };
+                // TODO: we shouldn't be doing a storage operation per individual key put or delete.
+                // Instead we should write them in batches, and whenever we do multiple operations they
+                // should go in parallel not sequentially.
+                // We should also add retries in case of intermittent failures. Note that all our
+                // storage operations here are idempotent and safe to retry any number of times.
+                for put in prepare_record.puts().iter() {
+                    let mut cache_wg = self.cache.write().await;
+                    for put in put.iter() {
+                        // TODO: too much copying :(
+                        let key = Bytes::copy_from_slice(put.key().unwrap().k().unwrap().bytes());
+                        let val = Bytes::copy_from_slice(put.value().unwrap().bytes());
 
-                            cache_wg
-                                .upsert(key.clone(), val.clone(), version.epoch)
-                                .await
-                                .map_err(Error::from_cache_error)?;
+                        // TODO: we should do the storage writes lazily in the background
+                        self.storage
+                            .upsert(self.range_id, key.clone(), val.clone(), version)
+                            .await
+                            .map_err(Error::from_storage_error)?;
 
-                            // Update the prefetch buffer if this key has been requested by a prefetch call
-                            self.prefetching_buffer.upsert(key, val).await;
-                        }
+                        cache_wg
+                            .upsert(key.clone(), val.clone(), version.epoch)
+                            .await
+                            .map_err(Error::from_cache_error)?;
+
+                        // Update the prefetch buffer if this key has been requested by a prefetch call
+                        self.prefetching_buffer.upsert(key, val).await;
                     }
-                    for del in prepare_record.deletes().iter() {
-                        let mut cache_wg = self.cache.write().await;
-                        for del in del.iter() {
-                            let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
+                }
+                for del in prepare_record.deletes().iter() {
+                    let mut cache_wg = self.cache.write().await;
+                    for del in del.iter() {
+                        let key = Bytes::copy_from_slice(del.k().unwrap().bytes());
 
-                            // TODO: we should do the storage writes lazily in the background
-                            self.storage
-                                .delete(self.range_id, key.clone(), version)
-                                .await
-                                .map_err(Error::from_storage_error)?;
+                        // TODO: we should do the storage writes lazily in the background
+                        self.storage
+                            .delete(self.range_id, key.clone(), version)
+                            .await
+                            .map_err(Error::from_storage_error)?;
 
-                            cache_wg
-                                .delete(key.clone(), version.epoch)
-                                .await
-                                .map_err(Error::from_cache_error)?;
+                        cache_wg
+                            .delete(key.clone(), version.epoch)
+                            .await
+                            .map_err(Error::from_cache_error)?;
 
-                            // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
-                            self.prefetching_buffer.delete(key).await;
-                        }
+                        // Delete the key from the prefetch buffer if this key has been requested by a prefetch call
+                        self.prefetching_buffer.delete(key).await;
                     }
                 }
 
@@ -815,7 +823,6 @@ mod tests {
 
     async fn init() -> TestContext {
         let epoch_supplier = Arc::new(EpochSupplier::new());
-        let wal = Mutex::new(InMemoryWal::new());
         let storage_context: crate::storage::cassandra::for_testing::TestContext =
             crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
@@ -841,7 +848,7 @@ mod tests {
             range_id,
             config,
             storage: cassandra,
-            wal,
+            wal: InMemoryWal::new(),
             cache,
             epoch_supplier: epoch_supplier.clone(),
             state: Arc::new(RwLock::new(State::Unloaded)),
