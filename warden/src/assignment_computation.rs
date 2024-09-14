@@ -8,7 +8,6 @@ use std::cmp::{Ordering, Reverse};
 use std::hash::{Hash, Hasher};
 use tokio::sync::broadcast::{channel, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
-use tonic::Status;
 use tracing::{debug, info};
 
 use crate::persistence::{RangeAssignment, RangeInfo};
@@ -222,7 +221,7 @@ impl AssignmentComputation for AssignmentComputationImpl {
         self.ready_range_servers
             .lock()
             .unwrap()
-            .insert(HostInfoWrapper(host_info.clone()));
+            .replace(HostInfoWrapper(host_info.clone()));
         self.assignment_update_sender.subscribe()
     }
 
@@ -238,10 +237,15 @@ impl AssignmentComputation for AssignmentComputationImpl {
     fn notify_range_server_unavailable(&self, host_info: HostInfo) {
         // TODO(purujit): Implement Quarantine.
         debug!("Notifying range server {:?} is unavailable.", host_info);
-        self.ready_range_servers
-            .lock()
-            .unwrap()
-            .remove(&HostInfoWrapper(host_info));
+
+        let mut ready_servers = self.ready_range_servers.lock().unwrap();
+        if let Some(existing) = ready_servers.get(&HostInfoWrapper(host_info.clone())) {
+            // Disconnect could come after a new connection is established.
+            // We should not drop the new connection in that case.
+            if existing.0.epoch <= host_info.epoch {
+                ready_servers.remove(&HostInfoWrapper(host_info));
+            }
+        }
     }
 }
 #[cfg(test)]
@@ -318,6 +322,7 @@ mod tests {
                 identity: "server1".to_string(),
                 address: "1.2.3.4:8080".parse().unwrap(),
                 zone: make_zone(),
+                epoch: 1,
             }));
 
         computation_clone
@@ -353,11 +358,13 @@ mod tests {
                 identity: "server1".to_string(),
                 address: "1.2.3.4:8080".parse().unwrap(),
                 zone: make_zone(),
+                epoch: 1,
             }),
             HostInfoWrapper(HostInfo {
                 identity: "server2".to_string(),
                 address: "5.6.7.8:8081".parse().unwrap(),
                 zone: make_zone(),
+                epoch: 1,
             }),
         ];
         computation
@@ -406,11 +413,13 @@ mod tests {
                 identity: "server1".to_string(),
                 address: "1.2.3.4:8080".parse().unwrap(),
                 zone: make_zone(),
+                epoch: 1,
             }),
             HostInfoWrapper(HostInfo {
                 identity: "server2".to_string(),
                 address: "5.6.7.8:8081".parse().unwrap(),
                 zone: make_zone(),
+                epoch: 1,
             }),
         ];
 
@@ -438,6 +447,7 @@ mod tests {
                 identity: "unavailable_server".to_string(),
                 address: "0.0.0.0:0".parse().unwrap(),
                 zone: make_zone(),
+                epoch: 1,
             }),
             servers[0].clone(),
         ]);
@@ -475,6 +485,7 @@ mod tests {
             identity: "new_server".to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),
             zone: make_zone(),
+            epoch: 1,
         };
 
         computation.register_range_server(server.clone());
@@ -490,6 +501,7 @@ mod tests {
             identity: "server1".to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),
             zone: make_zone(),
+            epoch: 1,
         };
 
         computation.register_range_server(server.clone());
@@ -500,5 +512,33 @@ mod tests {
         computation.notify_range_server_unavailable(server.clone());
         let ready_servers = computation.ready_range_servers.lock().unwrap();
         assert!(!ready_servers.contains(&HostInfoWrapper(server)));
+    }
+    #[tokio::test]
+    async fn test_notify_range_server_unavailability_older_epoch() {
+        let computation = setup();
+        let server = HostInfo {
+            identity: "server1".to_string(),
+            address: "127.0.0.1:8080".parse().unwrap(),
+            zone: make_zone(),
+            epoch: 2,
+        };
+
+        computation.register_range_server(server.clone());
+        {
+            let ready_servers = computation.ready_range_servers.lock().unwrap();
+            assert!(ready_servers.contains(&HostInfoWrapper(server.clone())));
+        }
+
+        // Notify with an older epoch
+        let older_epoch_server = HostInfo {
+            identity: "server1".to_string(),
+            address: "127.0.0.1:8080".parse().unwrap(),
+            zone: make_zone(),
+            epoch: 1,
+        };
+        computation.notify_range_server_unavailable(older_epoch_server);
+
+        let ready_servers = computation.ready_range_servers.lock().unwrap();
+        assert!(ready_servers.contains(&HostInfoWrapper(server)));
     }
 }
