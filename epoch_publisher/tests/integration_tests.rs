@@ -16,6 +16,7 @@ use common::{
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
     region::{Region, Zone},
 };
+use test_log::test;
 use tokio::runtime::Builder;
 
 struct TestContext {
@@ -23,6 +24,7 @@ struct TestContext {
     cancellation_token: CancellationToken,
     server_runtime: tokio::runtime::Runtime,
     client_runtime: tokio::runtime::Runtime,
+    client_bg_runtime: tokio::runtime::Runtime,
 }
 
 fn get_config(epoch_address: SocketAddr) -> Config {
@@ -59,18 +61,24 @@ async fn setup_server(
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     let fast_network = Arc::new(UdpFastNetwork::new(server_socket));
     let fast_network_clone = fast_network.clone();
+    let runtime_clone = runtime.handle().clone();
+    let (server_ready_tx, server_ready_rx) = tokio::sync::oneshot::channel();
     runtime.spawn(async move {
         let config = get_config(epoch_address);
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
         let server = Server::new(config, bg_runtime.handle().clone());
-        Server::start(server, fast_network, cancellation_token).await;
+        Server::start(server, fast_network, runtime_clone, cancellation_token).await;
+        server_ready_tx.send(()).unwrap();
     });
     runtime.spawn(async move {
         loop {
-            fast_network_clone.poll();
-            tokio::task::yield_now().await
+            for _ in 1..5 {
+                fast_network_clone.poll();
+            }
+            tokio::time::sleep(core::time::Duration::from_millis(1)).await;
         }
     });
+    server_ready_rx.await.unwrap();
     runtime
 }
 
@@ -94,23 +102,31 @@ fn get_server_host_info(address: SocketAddr) -> HostInfo {
 async fn setup_client(
     cancellation_token: CancellationToken,
     server_address: SocketAddr,
-) -> (Arc<EpochPublisherClient>, tokio::runtime::Runtime) {
+) -> (
+    Arc<EpochPublisherClient>,
+    tokio::runtime::Runtime,
+    tokio::runtime::Runtime,
+) {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+    let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
         loop {
-            fast_network_clone.poll();
-            tokio::task::yield_now().await
+            for _ in 1..5 {
+                fast_network_clone.poll();
+            }
+            tokio::time::sleep(core::time::Duration::from_millis(1)).await;
         }
     });
     let client = EpochPublisherClient::new(
         fast_network,
         runtime.handle().clone(),
+        bg_runtime.handle().clone(),
         get_server_host_info(server_address),
         cancellation_token.clone(),
     );
-    return (client, runtime);
+    return (client, runtime, bg_runtime);
 }
 
 async fn setup(initial_epoch: u64) -> TestContext {
@@ -119,19 +135,17 @@ async fn setup(initial_epoch: u64) -> TestContext {
     let mock_epoch = MockEpoch::new();
     let epoch_address = mock_epoch.start().await.unwrap();
     mock_epoch.set_epoch(initial_epoch).await;
-    // Give some delay so the server can connect to the epoch service to sync its epoch.
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     let cancellation_token = CancellationToken::new();
     let server_runtime =
         setup_server(server_socket, cancellation_token.clone(), epoch_address).await;
-    // Give some delay so the server can setup its networking.
-    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-    let (client, client_runtime) = setup_client(cancellation_token.clone(), server_address).await;
+    let (client, client_runtime, client_bg_runtime) =
+        setup_client(cancellation_token.clone(), server_address).await;
     TestContext {
         client,
         cancellation_token,
         server_runtime,
         client_runtime,
+        client_bg_runtime,
     }
 }
 
@@ -140,21 +154,29 @@ async fn tear_down(context: TestContext) {
     // TODO: investigate why shutdown isn't clean.
     context.server_runtime.shutdown_background();
     context.client_runtime.shutdown_background();
+    context.client_bg_runtime.shutdown_background();
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn read_uninitialized_epoch() {
     let context = setup(0).await;
-    let err = context.client.read_epoch().await;
+    let err = context
+        .client
+        .read_epoch(chrono::Duration::seconds(30))
+        .await;
     let err = err.err().unwrap();
     assert!(err == Error::EpochUnknown);
     tear_down(context).await
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn read_epoch() {
     let context = setup(42).await;
-    let epoch = context.client.read_epoch().await.unwrap();
+    let epoch = context
+        .client
+        .read_epoch(chrono::Duration::seconds(30))
+        .await
+        .unwrap();
     assert!(epoch == 42);
     tear_down(context).await
 }

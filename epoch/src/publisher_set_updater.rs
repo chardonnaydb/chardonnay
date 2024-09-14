@@ -3,8 +3,10 @@ use proto::epoch_publisher::epoch_publisher_client::EpochPublisherClient;
 use proto::epoch_publisher::SetEpochRequest;
 use tokio::task::JoinSet;
 use tonic::Status as TStatus;
+use tracing::{error, info, instrument};
 
 /// PublisherSetUpdater can be used to update the epoch on EpochPublisherSet.
+#[derive(Debug)]
 pub struct PublisherSetUpdater {
     publisher_set: EpochPublisherSet,
     publisher_majority_count: u64,
@@ -19,23 +21,38 @@ impl PublisherSetUpdater {
             publisher_majority_count: half_round_down + 1,
         }
     }
+
+    #[instrument]
     pub async fn update_epoch(
         &self,
         epoch: u64,
     ) -> Result<(), Box<dyn std::error::Error + Sync + Send + 'static>> {
+        info!("Updating epoch");
+        //TODO(tamer): retries and timeout.
+
         // Fire off a request to update the epoch at each publisher in the set in parallel.
         let mut join_set = JoinSet::new();
         for p in &self.publisher_set.publishers {
+            let p = p.clone();
             let addr = format!("http://{}", p.backend_addr.to_string());
             join_set.spawn(async move {
                 let mut client = EpochPublisherClient::connect(addr).await.map_err(|_| {
+                    error!("Failed to connect to epoch publisher {}", p.name.clone());
                     TStatus::new(
                         tonic::Code::FailedPrecondition,
-                        "Failed to connect to epoch publisher",
+                        format!("Failed to connect to epoch publisher {}", p.name.clone()),
                     )
                 })?;
                 let request = SetEpochRequest { epoch };
-                client.set_epoch(request).await
+                let res = client.set_epoch(request).await;
+                if let Err(e) = &res {
+                    error!(
+                        "Failed to set epoch on publisher {}. Error: {}",
+                        p.name.clone(),
+                        e
+                    );
+                };
+                res
             });
         }
 
@@ -43,19 +60,22 @@ impl PublisherSetUpdater {
         let mut num_success = 0;
         while let Some(res) = join_set.join_next().await {
             let res = match res {
-                Err(_) => continue, // TODO: maybe log the error here
+                Err(e) => {
+                    error!("Failed to set epoch on publisher. Error: {}", e);
+                    continue;
+                }
                 Ok(res) => res,
             };
-            let _ = match res {
-                Err(_) => continue, // TODO: maybe log the error here
-                Ok(epoch) => epoch,
+            match res {
+                Err(_) => continue,
+                Ok(_) => (),
             };
             num_success += 1;
             if num_success >= self.publisher_majority_count {
                 return Ok(());
             }
         }
-
+        error!("failed to update epoch on a majority of publishers");
         Err("failed to update epoch".into())
     }
 }

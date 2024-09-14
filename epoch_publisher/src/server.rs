@@ -6,6 +6,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 
 use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
@@ -13,6 +14,7 @@ use proto::epoch_publisher::epoch_publisher_server::{EpochPublisher, EpochPublis
 use proto::epoch_publisher::{SetEpochRequest, SetEpochResponse};
 use tokio_util::sync::CancellationToken;
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
+use tracing::{error, info, instrument, trace};
 
 use flatbuf::epoch_publisher_flatbuffers::epoch_publisher::*;
 
@@ -30,10 +32,12 @@ struct ProtoServer {
 
 #[tonic::async_trait]
 impl EpochPublisher for ProtoServer {
+    #[instrument(skip(self))]
     async fn set_epoch(
         &self,
         request: Request<SetEpochRequest>,
     ) -> Result<Response<SetEpochResponse>, TStatus> {
+        info!("Setting epoch");
         let reply = SetEpochResponse {};
         let current_epoch = self.server.epoch.load(SeqCst);
         if current_epoch == 0 {
@@ -57,12 +61,14 @@ impl EpochPublisher for ProtoServer {
 }
 
 impl Server {
+    #[instrument(skip(self, network))]
     async fn read_epoch(
         &self,
         network: Arc<dyn FastNetwork>,
         sender: SocketAddr,
         request: ReadEpochRequest<'_>,
     ) -> Result<(), DynamicErr> {
+        trace!("received read_epoch");
         let mut fbb = FlatBufferBuilder::new();
         let fbb_root = match request.request_id() {
             None => ReadEpochResponse::create(
@@ -117,7 +123,7 @@ impl Server {
                 let req = flatbuffers::root::<ReadEpochRequest>(envelope.bytes().unwrap().bytes())?;
                 server.read_epoch(fast_network.clone(), sender, req).await?
             }
-            _ => (), // TODO: return and log unknown message type error.
+            _ => error!("Received a message of an unknown type: {:#?}", envelope),
         };
         Ok(())
     }
@@ -147,9 +153,10 @@ impl Server {
     async fn network_server_loop(
         server: Arc<Self>,
         fast_network: Arc<dyn FastNetwork>,
+        network_receiver: tokio::sync::mpsc::UnboundedReceiver<(SocketAddr, Bytes)>,
         cancellation_token: CancellationToken,
     ) {
-        let mut network_receiver = fast_network.listen_default();
+        let mut network_receiver = network_receiver;
         loop {
             let () = tokio::select! {
                 () = cancellation_token.cancelled() => {
@@ -158,15 +165,16 @@ impl Server {
                 maybe_message = network_receiver.recv() => {
                     match maybe_message {
                         None => {
-                            println!("fast network closed unexpectedly!");
+                            error!("fast network closed unexpectedly!");
                             cancellation_token.cancel()
                         }
                         Some((sender, msg)) => {
                             let server = server.clone();
                             let fast_network = fast_network.clone();
                             tokio::spawn(async move{
-                                let _ = Self::handle_message(server, fast_network, sender, msg).await;
-                                // TODO log any error here.
+                                if let Err(e) = Self::handle_message(server, fast_network, sender, msg).await {
+                                    error!("error handling a network message: {}", e);
+                                }
                             });
 
                         }
@@ -177,6 +185,7 @@ impl Server {
     }
 
     async fn initial_epoch_sync(&self) {
+        info!("initial epoch sync");
         // TODO: catch retryable errors and reconnect to epoch.
         let addr = format!("http://{}", self.config.epoch.proto_server_addr.clone());
 
@@ -204,15 +213,23 @@ impl Server {
     pub async fn start(
         server: Arc<Server>,
         fast_network: Arc<dyn FastNetwork>,
+        runtime: tokio::runtime::Handle,
         cancellation_token: CancellationToken,
     ) {
         server.initial_epoch_sync().await;
         let ct_clone = cancellation_token.clone();
         let server_clone = server.clone();
-        tokio::spawn(async move {
-            let _ = Self::network_server_loop(server_clone, fast_network, ct_clone).await;
-            println!("Network server loop exited!")
+        let (listener_tx, listener_rx) = oneshot::channel();
+        runtime.spawn(async move {
+            let network_receiver = fast_network.listen_default();
+            info!("Listening to fast network");
+            listener_tx.send(()).unwrap();
+            let _ =
+                Self::network_server_loop(server_clone, fast_network, network_receiver, ct_clone)
+                    .await;
+            info!("Network server loop exited!")
         });
+        listener_rx.await.unwrap();
         let proto_server = ProtoServer {
             server: server.clone(),
         };
@@ -224,7 +241,7 @@ impl Server {
                 .serve(addr)
                 .await
             {
-                println!("Unable to start proto server: {}", e);
+                panic!("Unable to start proto server: {}", e);
             }
         });
     }

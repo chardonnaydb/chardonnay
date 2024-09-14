@@ -6,7 +6,11 @@ use common::host_info::HostInfo;
 use proto::warden::WardenUpdate;
 use std::cmp::{Ordering, Reverse};
 use std::hash::{Hash, Hasher};
+<<<<<<< HEAD
 use tokio::sync::broadcast::{channel, Receiver, Sender};
+=======
+use tokio::sync::broadcast::Receiver;
+>>>>>>> origin/main
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 use tracing::{debug, info};
@@ -27,6 +31,7 @@ impl Deref for HostInfoWrapper {
     fn deref(&self) -> &Self::Target {
         &self.0
     }
+<<<<<<< HEAD
 }
 
 impl Eq for HostInfoWrapper {}
@@ -74,6 +79,47 @@ pub struct AssignmentComputationImpl {
     assignment_update_sender: Sender<i64>,
 }
 
+=======
+}
+
+impl Eq for HostInfoWrapper {}
+
+impl PartialEq for HostInfoWrapper {
+    fn eq(&self, other: &Self) -> bool {
+        self.identity == other.identity
+    }
+}
+
+impl PartialOrd for HostInfoWrapper {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for HostInfoWrapper {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.identity.cmp(&other.identity)
+    }
+}
+
+impl Hash for HostInfoWrapper {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.identity.hash(state);
+    }
+}
+
+pub trait AssignmentComputation {
+    fn register_range_server(&self, host_info: HostInfo) -> Result<Receiver<i64>, Status>;
+    fn get_assignment(&self, version: i64, full_update: bool) -> Option<WardenUpdate>;
+}
+pub struct AssignmentComputationImpl {
+    base_ranges: Option<Vec<RangeInfo>>,
+    range_assignments: Mutex<Vec<RangeAssignment>>,
+    ready_range_servers: Mutex<HashSet<HostInfoWrapper>>,
+    unassigned_base_ranges: Mutex<Vec<RangeInfo>>,
+}
+
+>>>>>>> origin/main
 impl AssignmentComputationImpl {
     pub fn new(
         runtime: tokio::runtime::Handle,
@@ -85,8 +131,11 @@ impl AssignmentComputationImpl {
             range_assignments: Mutex::new(vec![]),
             ready_range_servers: Mutex::new(HashSet::new()),
             unassigned_base_ranges: Mutex::new(vec![]),
+<<<<<<< HEAD
             // Using capacity 1 here because receivers will resync if they lag.
             assignment_update_sender: channel(1).0,
+=======
+>>>>>>> origin/main
         });
         let computation_clone = s.clone();
         runtime.spawn(async move {
@@ -213,6 +262,7 @@ impl AssignmentComputationImpl {
 }
 
 impl AssignmentComputation for AssignmentComputationImpl {
+<<<<<<< HEAD
     fn register_range_server(&self, host_info: HostInfo) -> Receiver<i64> {
         debug!("Registering range server: {:?}.", host_info);
         // Note that if this is a re-registration, the old receiver will
@@ -232,6 +282,9 @@ impl AssignmentComputation for AssignmentComputationImpl {
         version: i64,
         full_update: bool,
     ) -> Option<WardenUpdate> {
+=======
+    fn register_range_server(&self, _host_info: HostInfo) -> Result<Receiver<i64>, Status> {
+>>>>>>> origin/main
         todo!()
     }
 
@@ -500,5 +553,229 @@ mod tests {
         computation.notify_range_server_unavailable(server.clone());
         let ready_servers = computation.ready_range_servers.lock().unwrap();
         assert!(!ready_servers.contains(&HostInfoWrapper(server)));
+    }
+}
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use common::{
+        key_range::KeyRange,
+        region::{Region, Zone},
+    };
+    use once_cell::sync::Lazy;
+    use uuid::Uuid;
+
+    use super::*;
+    use std::sync::Arc;
+    fn make_zone() -> Zone {
+        Zone {
+            region: Region {
+                cloud: None,
+                name: "test".to_string(),
+            },
+            name: "test_zone".to_string(),
+        }
+    }
+
+    fn make_range(start: u8, end: u8) -> RangeInfo {
+        RangeInfo {
+            key_range: KeyRange {
+                lower_bound_inclusive: Some(Bytes::from(vec![start])),
+                upper_bound_exclusive: Some(Bytes::from(vec![end])),
+            },
+            id: Uuid::new_v4(),
+        }
+    }
+
+    static RUNTIME: Lazy<tokio::runtime::Runtime> =
+        Lazy::new(|| tokio::runtime::Runtime::new().unwrap());
+    fn setup() -> Arc<AssignmentComputationImpl> {
+        let cancellation_token = CancellationToken::new();
+        let computation =
+            AssignmentComputationImpl::new(RUNTIME.handle().clone(), cancellation_token);
+        computation
+    }
+
+    #[tokio::test]
+    async fn test_run_assignment_computation_empty() {
+        let computation = setup();
+        let computation_clone = computation.clone();
+        computation_clone
+            .run_assignment_computation(HashSet::new())
+            .await;
+
+        let range_assignments = computation.range_assignments.lock().unwrap();
+        assert!(range_assignments.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_run_assignment_computation_single_server() {
+        let computation = setup();
+        let computation_clone = computation.clone();
+
+        // Populate unassigned_base_ranges with one range and have one server to assign.
+        let range = make_range(0, 127);
+        computation
+            .unassigned_base_ranges
+            .lock()
+            .unwrap()
+            .push(range.clone());
+
+        computation
+            .ready_range_servers
+            .lock()
+            .unwrap()
+            .insert(HostInfoWrapper(HostInfo {
+                identity: "server1".to_string(),
+                address: "1.2.3.4:8080".parse().unwrap(),
+                zone: make_zone(),
+            }));
+
+        computation_clone
+            .run_assignment_computation(HashSet::new())
+            .await;
+
+        let range_assignments = computation.range_assignments.lock().unwrap();
+        assert_eq!(range_assignments.len(), 1);
+
+        assert_eq!(range_assignments[0].assignee.to_string(), "server1");
+        assert_eq!(range_assignments[0].range, range);
+    }
+
+    #[tokio::test]
+    async fn test_run_assignment_computation_multiple_servers() {
+        let computation = setup();
+        let computation_clone = computation.clone();
+
+        // Populate unassigned_base_ranges with 3 ranges and have 2 servers to assign.
+        let ranges = vec![
+            make_range(0, 127),
+            make_range(128, 211),
+            make_range(212, 255),
+        ];
+        let expected_ranges = ranges.clone();
+        computation
+            .unassigned_base_ranges
+            .lock()
+            .unwrap()
+            .extend(ranges);
+        let servers = vec![
+            HostInfoWrapper(HostInfo {
+                identity: "server1".to_string(),
+                address: "1.2.3.4:8080".parse().unwrap(),
+                zone: make_zone(),
+            }),
+            HostInfoWrapper(HostInfo {
+                identity: "server2".to_string(),
+                address: "5.6.7.8:8081".parse().unwrap(),
+                zone: make_zone(),
+            }),
+        ];
+        computation
+            .ready_range_servers
+            .lock()
+            .unwrap()
+            .extend(servers);
+
+        computation_clone
+            .run_assignment_computation(HashSet::new())
+            .await;
+
+        let range_assignments = computation.range_assignments.lock().unwrap();
+        assert_eq!(range_assignments.len(), 3);
+
+        let mut assigned_ranges: Vec<RangeInfo> =
+            range_assignments.iter().map(|a| a.range.clone()).collect();
+        let assigned_servers: HashSet<String> = range_assignments
+            .iter()
+            .map(|a| a.assignee.to_string())
+            .collect();
+
+        assigned_ranges.sort_by(|a, b| {
+            a.key_range
+                .lower_bound_inclusive
+                .cmp(&b.key_range.lower_bound_inclusive)
+        });
+        assert_eq!(assigned_ranges, expected_ranges);
+
+        assert_eq!(
+            assigned_servers,
+            HashSet::from_iter(vec!["server1".to_string(), "server2".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_assignment_computation_reassign_unavailable_server() {
+        let computation = setup();
+        let computation_clone = computation.clone();
+
+        // Populate unassigned_base_ranges with 2 ranges and have 2 servers to assign.
+        let ranges = vec![make_range(0, 127), make_range(128, 255)];
+
+        let servers = vec![
+            HostInfoWrapper(HostInfo {
+                identity: "server1".to_string(),
+                address: "1.2.3.4:8080".parse().unwrap(),
+                zone: make_zone(),
+            }),
+            HostInfoWrapper(HostInfo {
+                identity: "server2".to_string(),
+                address: "5.6.7.8:8081".parse().unwrap(),
+                zone: make_zone(),
+            }),
+        ];
+
+        // Add a previous assignment for an unavailable server
+        computation.range_assignments.lock().unwrap().extend(vec![
+            RangeAssignment {
+                range: ranges[0].clone(),
+                assignee: "unavailable_server".to_string(),
+            },
+            RangeAssignment {
+                range: ranges[1].clone(),
+                assignee: "server1".to_string(),
+            },
+        ]);
+
+        // Only add server2 to ready_range_servers
+        computation
+            .ready_range_servers
+            .lock()
+            .unwrap()
+            .insert(servers[1].clone());
+
+        let prev_servers: HashSet<HostInfoWrapper> = HashSet::from_iter(vec![
+            HostInfoWrapper(HostInfo {
+                identity: "unavailable_server".to_string(),
+                address: "0.0.0.0:0".parse().unwrap(),
+                zone: make_zone(),
+            }),
+            servers[0].clone(),
+        ]);
+        computation_clone
+            .run_assignment_computation(prev_servers)
+            .await;
+
+        let range_assignments = computation.range_assignments.lock().unwrap();
+
+        assert_eq!(range_assignments.len(), 2);
+        let mut assigned_ranges: Vec<RangeInfo> =
+            range_assignments.iter().map(|a| a.range.clone()).collect();
+        let assigned_servers: HashSet<String> = range_assignments
+            .iter()
+            .map(|a| a.assignee.to_string())
+            .collect();
+
+        assigned_ranges.sort_by(|a, b| {
+            a.key_range
+                .lower_bound_inclusive
+                .cmp(&b.key_range.lower_bound_inclusive)
+        });
+        assert_eq!(assigned_ranges, ranges);
+
+        assert_eq!(
+            assigned_servers,
+            HashSet::from_iter(vec!["server1".to_string(), "server2".to_string()])
+        );
     }
 }

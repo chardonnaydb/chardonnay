@@ -1,20 +1,29 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
+use std::{collections::BinaryHeap, collections::HashMap};
 
 use crate::error::Error;
 use bytes::Bytes;
+use chrono::DateTime;
 use common::{host_info::HostInfo, network::fast_network::FastNetwork};
 use flatbuf::epoch_publisher_flatbuffers::epoch_publisher::*;
 use flatbuffers::FlatBufferBuilder;
 use tokio::sync::{oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, instrument, trace};
 use uuid::Uuid;
 
 /// Provides an async rpc interface to a specific epoch publisher.
 pub struct EpochPublisherClient {
     fast_network: Arc<dyn FastNetwork>,
     range_server_info: HostInfo,
-    // TODO: make more typeful and store more information to e.g. allow timing out.
-    outstanding_requests: Mutex<HashMap<Uuid, oneshot::Sender<Bytes>>>,
+    outstanding_requests: Mutex<HashMap<Uuid, RpcInfo>>,
+    timeout_queue: Mutex<BinaryHeap<(DateTime<chrono::Utc>, Uuid)>>,
+}
+
+struct RpcInfo {
+    time_sent: DateTime<chrono::Utc>,
+    timeout: chrono::Duration,
+    response_sender: oneshot::Sender<Result<Bytes, Error>>,
 }
 
 pub fn serialize_uuid(uuid: Uuid) -> Uuidu128Args {
@@ -33,6 +42,7 @@ impl EpochPublisherClient {
     pub fn new(
         fast_network: Arc<dyn FastNetwork>,
         runtime: tokio::runtime::Handle,
+        bg_runtime: tokio::runtime::Handle,
         host_info: HostInfo,
         cancellation_token: CancellationToken,
     ) -> Arc<EpochPublisherClient> {
@@ -40,25 +50,49 @@ impl EpochPublisherClient {
             fast_network,
             range_server_info: host_info,
             outstanding_requests: Mutex::new(HashMap::new()),
+            timeout_queue: Mutex::new(BinaryHeap::new()),
         });
 
         let pc_clone = pc.clone();
+        let ct_clone = cancellation_token.clone();
         runtime.spawn(async move {
-            let _ = Self::network_loop(pc_clone, cancellation_token).await;
-            println!("Network loop exited!")
+            let _ = Self::network_loop(pc_clone, ct_clone).await;
+            info!("Epoch Publisher Client: Network loop exited!")
+        });
+        let pc_clone = pc.clone();
+        let ct_clone = cancellation_token.clone();
+        bg_runtime.spawn(async move {
+            Self::background_loop(pc_clone, ct_clone).await;
+            info!("Epoch Publisher Client: Background loop exited!")
         });
         pc
     }
 
-    pub async fn read_epoch(&self) -> Result<u64, Error> {
+    #[instrument(skip(self))]
+    pub async fn read_epoch(&self, timeout: chrono::Duration) -> Result<u64, Error> {
         // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
         let req_id = Uuid::new_v4();
+        trace!(
+            "issuing read_epoch rpc. Epoch Publisher: {}. req_id: {}",
+            self.range_server_info.identity,
+            req_id
+        );
 
         // Register the RPC.
         let (tx, rx) = oneshot::channel();
+        let rpc = RpcInfo {
+            time_sent: chrono::Utc::now(),
+            timeout,
+            response_sender: tx,
+        };
+        let expiration_time = rpc.time_sent + rpc.timeout;
         {
             let mut outstanding_requests = self.outstanding_requests.lock().await;
-            outstanding_requests.insert(req_id, tx);
+            outstanding_requests.insert(req_id, rpc);
+        }
+        {
+            let mut timeout_queue = self.timeout_queue.lock().await;
+            timeout_queue.push((expiration_time, req_id));
         }
 
         // Send over the wire.
@@ -68,7 +102,9 @@ impl EpochPublisherClient {
             .unwrap();
 
         // Wait for response.
-        let response = rx.await.unwrap();
+        let response = rx.await.unwrap()?;
+
+        trace!("Got response for read_epoch rpc. req_id: {}", req_id);
 
         // Parse the response.
         let msg = response.to_vec();
@@ -110,14 +146,26 @@ impl EpochPublisherClient {
                 maybe_message = network_receiver.recv() => {
                     match maybe_message {
                         None => {
-                            println!("fast network closed unexpectedly!");
+                            error!("Epoch Publisher Client: fast network closed unexpectedly!");
                             cancellation_token.cancel()
                         }
                         Some(msg) => {
                             let req_id = Self::get_request_id_from_response(msg.clone());
-                            let mut outstanding_requests = client.outstanding_requests.lock().await;
-                            let sender = outstanding_requests.remove(&req_id).unwrap();
-                            sender.send(msg).unwrap()
+                            if let Some(req_id) = req_id {
+                                let mut outstanding_requests = client.outstanding_requests.lock().await;
+                                let rpc_info = outstanding_requests.remove(&req_id);
+                                match rpc_info {
+                                    None => debug!("received response for unknown rpc, could be a \
+                                        duplicate or have timed out. Dropping. req_id: {}", req_id),
+                                    Some(rpc_info) => if let Err(e) = rpc_info.response_sender.send(Ok(msg)) {
+                                        error!("failed to send response on onseshot channel for \
+                                            req_id: {}. Error {:?}", req_id, e)
+                                    }
+                                }
+                            } else {
+                                error!("Epoch Client received a message with an unknown request id. \
+                                    Epoch Publisher: {}", client.range_server_info.identity)
+                            }
                         }
                     }
                 }
@@ -125,7 +173,7 @@ impl EpochPublisherClient {
         }
     }
 
-    fn get_request_id_from_response(msg: Bytes) -> Uuid {
+    fn get_request_id_from_response(msg: Bytes) -> Option<Uuid> {
         let msg = msg.to_vec();
         let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
         let req_id = match envelope.type_() {
@@ -134,9 +182,12 @@ impl EpochPublisherClient {
                     .unwrap();
                 msg.request_id()
             }
-            _ => panic!("unknown response message type"), // TODO: return and log unknown message type error.
+            _ => {
+                error!("Received a message of an unknown type: {:#?}", envelope);
+                return None;
+            }
         };
-        deserialize_uuid(req_id.unwrap())
+        Some(deserialize_uuid(req_id.unwrap()))
     }
 
     fn create_msg_envelope<'a>(
@@ -155,5 +206,48 @@ impl EpochPublisherClient {
         );
         fbb.finish(fbb_root, None);
         fbb.finished_data()
+    }
+
+    async fn background_loop(client: Arc<Self>, cancellation_token: CancellationToken) {
+        loop {
+            if cancellation_token.is_cancelled() {
+                return;
+            }
+
+            'inner: loop {
+                let expired_req_id = {
+                    let mut timeout_queue = client.timeout_queue.lock().await;
+                    if let Some(item) = timeout_queue.peek() {
+                        let (expiration_time, _) = item;
+                        if (*expiration_time) < chrono::Utc::now() {
+                            let (_, req_id) = timeout_queue.pop().unwrap();
+                            req_id
+                        } else {
+                            break 'inner;
+                        }
+                    } else {
+                        break 'inner;
+                    }
+                };
+                // This RPC is past expiration time, let's remove it from outstanding request
+                // and return an error if it has not completed.
+                let rpc_info = {
+                    let mut outstanding_requests = client.outstanding_requests.lock().await;
+                    outstanding_requests.remove(&expired_req_id)
+                };
+                if let Some(rpc) = rpc_info {
+                    if let Err(e) = rpc.response_sender.send(Err(Error::Timeout)) {
+                        error!(
+                            "failed to send response on onseshot channel for req_id: {}. Error {:?}",
+                            expired_req_id, e
+                        )
+                    }
+                }
+            }
+
+            // TODO(tamer): make this configurable.
+            // Also, consider sleeping until the next expiration time.
+            tokio::time::sleep(core::time::Duration::from_millis(10)).await;
+        }
     }
 }
