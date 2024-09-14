@@ -59,7 +59,7 @@ impl Warden for WardenServer {
                             name: "".to_string(),
                         },
                     },
-                    epoch: range_server.epoch,
+                    warden_connection_epoch: range_server.epoch,
                 };
                 Ok(Response::new(AssignmentUpdateStream::new(
                     self.assignment_computation

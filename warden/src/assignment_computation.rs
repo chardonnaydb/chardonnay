@@ -242,7 +242,7 @@ impl AssignmentComputation for AssignmentComputationImpl {
         if let Some(existing) = ready_servers.get(&HostInfoWrapper(host_info.clone())) {
             // Disconnect could come after a new connection is established.
             // We should not drop the new connection in that case.
-            if existing.0.epoch <= host_info.epoch {
+            if existing.0.warden_connection_epoch <= host_info.warden_connection_epoch {
                 ready_servers.remove(&HostInfoWrapper(host_info));
             }
         }
@@ -322,7 +322,7 @@ mod tests {
                 identity: "server1".to_string(),
                 address: "1.2.3.4:8080".parse().unwrap(),
                 zone: make_zone(),
-                epoch: 1,
+                warden_connection_epoch: 1,
             }));
 
         computation_clone
@@ -358,13 +358,13 @@ mod tests {
                 identity: "server1".to_string(),
                 address: "1.2.3.4:8080".parse().unwrap(),
                 zone: make_zone(),
-                epoch: 1,
+                warden_connection_epoch: 1,
             }),
             HostInfoWrapper(HostInfo {
                 identity: "server2".to_string(),
                 address: "5.6.7.8:8081".parse().unwrap(),
                 zone: make_zone(),
-                epoch: 1,
+                warden_connection_epoch: 1,
             }),
         ];
         computation
@@ -413,13 +413,13 @@ mod tests {
                 identity: "server1".to_string(),
                 address: "1.2.3.4:8080".parse().unwrap(),
                 zone: make_zone(),
-                epoch: 1,
+                warden_connection_epoch: 1,
             }),
             HostInfoWrapper(HostInfo {
                 identity: "server2".to_string(),
                 address: "5.6.7.8:8081".parse().unwrap(),
                 zone: make_zone(),
-                epoch: 1,
+                warden_connection_epoch: 1,
             }),
         ];
 
@@ -447,7 +447,7 @@ mod tests {
                 identity: "unavailable_server".to_string(),
                 address: "0.0.0.0:0".parse().unwrap(),
                 zone: make_zone(),
-                epoch: 1,
+                warden_connection_epoch: 1,
             }),
             servers[0].clone(),
         ]);
@@ -485,7 +485,7 @@ mod tests {
             identity: "new_server".to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),
             zone: make_zone(),
-            epoch: 1,
+            warden_connection_epoch: 1,
         };
 
         computation.register_range_server(server.clone());
@@ -501,7 +501,7 @@ mod tests {
             identity: "server1".to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),
             zone: make_zone(),
-            epoch: 1,
+            warden_connection_epoch: 1,
         };
 
         computation.register_range_server(server.clone());
@@ -520,7 +520,7 @@ mod tests {
             identity: "server1".to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),
             zone: make_zone(),
-            epoch: 2,
+            warden_connection_epoch: 2,
         };
 
         computation.register_range_server(server.clone());
@@ -534,7 +534,7 @@ mod tests {
             identity: "server1".to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),
             zone: make_zone(),
-            epoch: 1,
+            warden_connection_epoch: 1,
         };
         computation.notify_range_server_unavailable(older_epoch_server);
 
