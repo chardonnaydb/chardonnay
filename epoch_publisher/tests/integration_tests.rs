@@ -112,7 +112,7 @@ async fn setup_client(
     runtime.spawn(async move {
         loop {
             fast_network_clone.poll();
-            tokio::task::yield_now().await
+            tokio::time::sleep(core::time::Duration::from_millis(10)).await;
         }
     });
     let client = EpochPublisherClient::new(
