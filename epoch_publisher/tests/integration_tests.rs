@@ -60,11 +60,14 @@ async fn setup_server(
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     let fast_network = Arc::new(UdpFastNetwork::new(server_socket));
     let fast_network_clone = fast_network.clone();
+    let runtime_clone = runtime.handle().clone();
+    let (server_ready_tx, server_ready_rx) = tokio::sync::oneshot::channel();
     runtime.spawn(async move {
         let config = get_config(epoch_address);
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
         let server = Server::new(config, bg_runtime.handle().clone());
-        Server::start(server, fast_network, cancellation_token).await;
+        Server::start(server, fast_network, runtime_clone, cancellation_token).await;
+        server_ready_tx.send(()).unwrap();
     });
     runtime.spawn(async move {
         loop {
@@ -72,6 +75,7 @@ async fn setup_server(
             tokio::task::yield_now().await
         }
     });
+    server_ready_rx.await.unwrap();
     runtime
 }
 
@@ -126,13 +130,9 @@ async fn setup(initial_epoch: u64) -> TestContext {
     let mock_epoch = MockEpoch::new();
     let epoch_address = mock_epoch.start().await.unwrap();
     mock_epoch.set_epoch(initial_epoch).await;
-    // Give some delay so the server can connect to the epoch service to sync its epoch.
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     let cancellation_token = CancellationToken::new();
     let server_runtime =
         setup_server(server_socket, cancellation_token.clone(), epoch_address).await;
-    // Give some delay so the server can setup its networking.
-    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
     let (client, client_runtime, client_bg_runtime) =
         setup_client(cancellation_token.clone(), server_address).await;
     TestContext {
