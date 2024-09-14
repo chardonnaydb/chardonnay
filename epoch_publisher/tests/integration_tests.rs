@@ -72,8 +72,10 @@ async fn setup_server(
     });
     runtime.spawn(async move {
         loop {
-            fast_network_clone.poll();
-            tokio::task::yield_now().await
+            for _ in 1..5 {
+                fast_network_clone.poll();
+            }
+            tokio::time::sleep(core::time::Duration::from_millis(1)).await;
         }
     });
     server_ready_rx.await.unwrap();
@@ -111,8 +113,10 @@ async fn setup_client(
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
         loop {
-            fast_network_clone.poll();
-            tokio::time::sleep(core::time::Duration::from_millis(10)).await;
+            for _ in 1..5 {
+                fast_network_clone.poll();
+            }
+            tokio::time::sleep(core::time::Duration::from_millis(1)).await;
         }
     });
     let client = EpochPublisherClient::new(
