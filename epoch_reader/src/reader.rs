@@ -16,6 +16,7 @@ impl EpochReader {
     pub fn new(
         fast_network: Arc<dyn FastNetwork>,
         runtime: tokio::runtime::Handle,
+        bg_runtime: tokio::runtime::Handle,
         publisher_set: EpochPublisherSet,
         cancellation_token: CancellationToken,
     ) -> EpochReader {
@@ -32,6 +33,7 @@ impl EpochReader {
                 EpochPublisherClient::new(
                     fast_network.clone(),
                     runtime.clone(),
+                    bg_runtime.clone(),
                     host_info,
                     cancellation_token.clone(),
                 )
@@ -51,7 +53,11 @@ impl EpochReader {
         let mut join_set = JoinSet::new();
         for c in &self.clients {
             let client = c.clone();
-            join_set.spawn_on(async move { client.read_epoch().await }, &self.runtime);
+            join_set.spawn_on(
+                // TODO(tamer): pass timeout in as a parameter.
+                async move { client.read_epoch(chrono::Duration::seconds(1)).await },
+                &self.runtime,
+            );
         }
 
         // Now see if any value is returned by a majority of publishers, and return it.
