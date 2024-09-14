@@ -1,0 +1,42 @@
+syntax = "proto3";
+package universe;
+
+service Universe {
+    rpc CreateKeyspace (CreateKeyspaceRequest) returns (CreateKeyspaceResponse);
+    rpc ListKeyspaces (ListKeyspacesRequest) returns (ListKeyspacesResponse);
+}
+
+message Region {
+    string cloud = 1;
+    string name = 2;
+}
+
+message Zone {
+    Region region = 1;
+    string name = 2;
+}
+
+message CreateKeyspaceRequest {
+    string namespace = 1;
+    string name = 2;
+    Zone primary_zone = 3;
+}
+
+message CreateKeyspaceResponse {
+    string keyspace_id = 1;
+}
+
+message KeyspaceInfo {
+    string keyspace_id = 1;
+    string namespace = 2;
+    string name = 3;
+    Zone primary_zone = 4;
+}
+
+message ListKeyspacesRequest {
+    Region region = 1;
+}
+
+message ListKeyspacesResponse {
+    repeated KeyspaceInfo keyspaces = 1;
+}
