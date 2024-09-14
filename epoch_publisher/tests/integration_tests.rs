@@ -16,6 +16,7 @@ use common::{
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
     region::{Region, Zone},
 };
+use test_log::test;
 use tokio::runtime::Builder;
 
 struct TestContext {
@@ -152,24 +153,24 @@ async fn tear_down(context: TestContext) {
     context.client_bg_runtime.shutdown_background();
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn read_uninitialized_epoch() {
     let context = setup(0).await;
     let err = context
         .client
-        .read_epoch(chrono::Duration::seconds(1000))
+        .read_epoch(chrono::Duration::seconds(30))
         .await;
     let err = err.err().unwrap();
     assert!(err == Error::EpochUnknown);
     tear_down(context).await
 }
 
-#[tokio::test]
+#[test(tokio::test)]
 async fn read_epoch() {
     let context = setup(42).await;
     let epoch = context
         .client
-        .read_epoch(chrono::Duration::seconds(1000))
+        .read_epoch(chrono::Duration::seconds(30))
         .await
         .unwrap();
     assert!(epoch == 42);
