@@ -6,6 +6,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 
 use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
@@ -152,9 +153,10 @@ impl Server {
     async fn network_server_loop(
         server: Arc<Self>,
         fast_network: Arc<dyn FastNetwork>,
+        network_receiver: tokio::sync::mpsc::UnboundedReceiver<(SocketAddr, Bytes)>,
         cancellation_token: CancellationToken,
     ) {
-        let mut network_receiver = fast_network.listen_default();
+        let mut network_receiver = network_receiver;
         loop {
             let () = tokio::select! {
                 () = cancellation_token.cancelled() => {
@@ -183,6 +185,7 @@ impl Server {
     }
 
     async fn initial_epoch_sync(&self) {
+        info!("initial epoch sync");
         // TODO: catch retryable errors and reconnect to epoch.
         let addr = format!("http://{}", self.config.epoch.proto_server_addr.clone());
 
@@ -210,15 +213,23 @@ impl Server {
     pub async fn start(
         server: Arc<Server>,
         fast_network: Arc<dyn FastNetwork>,
+        runtime: tokio::runtime::Handle,
         cancellation_token: CancellationToken,
     ) {
         server.initial_epoch_sync().await;
         let ct_clone = cancellation_token.clone();
         let server_clone = server.clone();
-        tokio::spawn(async move {
-            let _ = Self::network_server_loop(server_clone, fast_network, ct_clone).await;
+        let (listener_tx, listener_rx) = oneshot::channel();
+        runtime.spawn(async move {
+            let network_receiver = fast_network.listen_default();
+            info!("Listening to fast network");
+            listener_tx.send(()).unwrap();
+            let _ =
+                Self::network_server_loop(server_clone, fast_network, network_receiver, ct_clone)
+                    .await;
             info!("Network server loop exited!")
         });
+        listener_rx.await.unwrap();
         let proto_server = ProtoServer {
             server: server.clone(),
         };
