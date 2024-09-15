@@ -95,5 +95,6 @@ fn get_host_info() -> HostInfo {
         identity: identity.clone(),
         address: "127.0.0.1:10001".parse().unwrap(),
         zone,
+        warden_connection_epoch: 0,
     }
 }

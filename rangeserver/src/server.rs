@@ -121,7 +121,7 @@ where
         epoch_supplier: Arc<dyn EpochSupplier>,
         bg_runtime: tokio::runtime::Handle,
     ) -> Arc<Self> {
-        let warden_handler = WardenHandler::new(&config, &host_info);
+        let warden_handler = WardenHandler::new(&config, &host_info, epoch_supplier.clone());
         Arc::new(Server {
             config,
             storage,
@@ -727,6 +727,7 @@ where
 #[cfg(test)]
 pub mod tests {
     use crate::cache::memtabledb::MemTableDB;
+    use crate::epoch_supplier::EpochSupplier as Trait;
     use common::config::{EpochConfig, RangeServerConfig, RegionConfig};
     use common::network::for_testing::udp_fast_network::UdpFastNetwork;
     use common::region::{Region, Zone};
@@ -794,6 +795,7 @@ pub mod tests {
             identity: identity.clone(),
             address: "127.0.0.1:10001".parse().unwrap(),
             zone,
+            warden_connection_epoch: epoch_supplier.read_epoch().await.unwrap(),
         };
         let server = Server::new(
             config,

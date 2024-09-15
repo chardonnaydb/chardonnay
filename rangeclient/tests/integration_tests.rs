@@ -73,6 +73,7 @@ fn get_server_host_info(address: SocketAddr) -> HostInfo {
         identity: identity.clone(),
         address,
         zone,
+        warden_connection_epoch: 0,
     }
 }
 

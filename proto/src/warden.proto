@@ -10,6 +10,12 @@ message RangeId {
 message HostInfo {
     string identity = 1;
     string zone = 2;
+    // The epoch is used to handle out of order registration/deregistration.
+    // Imagine the case where a range server is restarted and registers with the
+    // warden. Warden might see the new registration request before it sees the gRPC
+    // connection for the old instance error out. The epoch helps to ensure that Warden
+    // can properly handle this case by ignoring the error for the old instance.
+    uint64 epoch = 3;
 }
 
 service Warden {

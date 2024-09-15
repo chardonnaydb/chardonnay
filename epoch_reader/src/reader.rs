@@ -29,6 +29,7 @@ impl EpochReader {
                     identity: publisher.name.clone(),
                     address: publisher.fast_network_addr,
                     zone: publisher_set.zone.clone(),
+                    warden_connection_epoch: 0,
                 };
                 EpochPublisherClient::new(
                     fast_network.clone(),
