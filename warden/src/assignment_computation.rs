@@ -8,7 +8,8 @@ use std::cmp::{Ordering, Reverse};
 use std::hash::{Hash, Hasher};
 use tokio::sync::broadcast::{channel, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info};
+use tonic::Status;
+use tracing::{debug, error, info};
 
 use crate::persistence::{RangeAssignment, RangeInfo};
 
@@ -55,7 +56,7 @@ impl Hash for HostInfoWrapper {
 }
 
 pub trait AssignmentComputation {
-    fn register_range_server(&self, host_info: HostInfo) -> Receiver<i64>;
+    fn register_range_server(&self, host_info: HostInfo) -> Result<Receiver<i64>, Status>;
     fn notify_range_server_unavailable(&self, host_info: HostInfo);
     fn get_assignment_update(
         &self,
@@ -212,17 +213,24 @@ impl AssignmentComputationImpl {
 }
 
 impl AssignmentComputation for AssignmentComputationImpl {
-    fn register_range_server(&self, host_info: HostInfo) -> Receiver<i64> {
-        debug!("Registering range server: {:?}.", host_info);
+    fn register_range_server(&self, host_info: HostInfo) -> Result<Receiver<i64>, Status> {
+        info!("Registering range server: {:?}.", host_info);
         // Note that if this is a re-registration, the old receiver will
         // eventually be dropped when the gRPC stream for the old connection is
         // closed. gRPC will detect the disconnect when it tries to send an
         // update on the old connection.
-        self.ready_range_servers
-            .lock()
-            .unwrap()
-            .replace(HostInfoWrapper(host_info.clone()));
-        self.assignment_update_sender.subscribe()
+        let mut ready_servers = self.ready_range_servers.lock().unwrap();
+        if let Some(existing) = ready_servers.get(&HostInfoWrapper(host_info.clone())) {
+            if existing.0.warden_connection_epoch >= host_info.warden_connection_epoch {
+                // Reject because we need increasing epoch for reconnects.
+                error!("Rejecting re-registration of range server {:?}.", host_info);
+                return Err(Status::already_exists(
+                    "Connection with a newer epoch already exists",
+                ));
+            }
+        }
+        ready_servers.replace(HostInfoWrapper(host_info.clone()));
+        Ok(self.assignment_update_sender.subscribe())
     }
 
     fn get_assignment_update(
@@ -256,6 +264,7 @@ mod tests {
         region::{Region, Zone},
     };
     use once_cell::sync::Lazy;
+    use tonic::Code;
     use uuid::Uuid;
 
     use super::*;
@@ -488,10 +497,20 @@ mod tests {
             warden_connection_epoch: 1,
         };
 
-        computation.register_range_server(server.clone());
+        let _ = computation.register_range_server(server.clone());
 
-        let ready_servers = computation.ready_range_servers.lock().unwrap();
-        assert!(ready_servers.contains(&HostInfoWrapper(server)));
+        {
+            let ready_servers = computation.ready_range_servers.lock().unwrap();
+            assert!(ready_servers.contains(&HostInfoWrapper(server.clone())));
+        }
+        assert_eq!(
+            computation
+                .register_range_server(server.clone())
+                .err()
+                .unwrap()
+                .code(),
+            Code::AlreadyExists
+        );
     }
 
     #[tokio::test]
@@ -504,7 +523,7 @@ mod tests {
             warden_connection_epoch: 1,
         };
 
-        computation.register_range_server(server.clone());
+        let _ = computation.register_range_server(server.clone());
         {
             let ready_servers = computation.ready_range_servers.lock().unwrap();
             assert!(ready_servers.contains(&HostInfoWrapper(server.clone())));
@@ -523,7 +542,7 @@ mod tests {
             warden_connection_epoch: 2,
         };
 
-        computation.register_range_server(server.clone());
+        let _ = computation.register_range_server(server.clone());
         {
             let ready_servers = computation.ready_range_servers.lock().unwrap();
             assert!(ready_servers.contains(&HostInfoWrapper(server.clone())));

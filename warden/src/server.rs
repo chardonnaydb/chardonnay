@@ -61,12 +61,17 @@ impl Warden for WardenServer {
                     },
                     warden_connection_epoch: range_server.epoch,
                 };
-                Ok(Response::new(AssignmentUpdateStream::new(
-                    self.assignment_computation
-                        .register_range_server(host_info.clone()),
-                    self.assignment_computation.clone(),
-                    host_info,
-                )))
+                match self
+                    .assignment_computation
+                    .register_range_server(host_info.clone())
+                {
+                    Ok(update_receiver) => Ok(Response::new(AssignmentUpdateStream::new(
+                        update_receiver,
+                        self.assignment_computation.clone(),
+                        host_info,
+                    ))),
+                    Err(e) => Err(e),
+                }
             }
         }
     }
@@ -265,8 +270,11 @@ mod tests {
                 Some(self.incremental_update.clone())
             }
         }
-        fn register_range_server(&self, _: common::host_info::HostInfo) -> Receiver<i64> {
-            self.update_sender.subscribe()
+        fn register_range_server(
+            &self,
+            _: common::host_info::HostInfo,
+        ) -> Result<Receiver<i64>, Status> {
+            Ok(self.update_sender.subscribe())
         }
 
         fn notify_range_server_unavailable(&self, host_info: HostInfo) {
