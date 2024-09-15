@@ -6,9 +6,18 @@ service Universe {
     rpc ListKeyspaces (ListKeyspacesRequest) returns (ListKeyspacesResponse);
 }
 
+enum Cloud {
+    AWS = 0;
+    AZURE = 1;
+    GCP = 2;
+}
+
 message Region {
-    string cloud = 1;
-    string name = 2;
+    oneof cloud {
+        Cloud public_cloud = 1;
+        string other_cloud = 2;
+    }
+    string name = 3;
 }
 
 message Zone {
