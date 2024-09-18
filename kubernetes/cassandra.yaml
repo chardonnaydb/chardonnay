@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cassandra
+  namespace: chardonnay
+  labels:
+    app: cassandra
+spec:
+  serviceName: "cassandra"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cassandra
+  template:
+    metadata:
+      labels:
+        app: cassandra
+    spec:
+      containers:
+      - name: cassandra
+        image: cassandra:5
+        ports:
+        - containerPort: 7000
+          name: intra-node
+        - containerPort: 7001
+          name: tls-intra-node
+        - containerPort: 7199
+          name: jmx
+        - containerPort: 9042
+          name: cql
+        volumeMounts:
+        - name: cassandra-data
+          mountPath: /var/lib/cassandra
+  volumeClaimTemplates:
+  - metadata:
+      name: cassandra-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 2Gi
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: cassandra
+  namespace: chardonnay
+  labels:
+    app: cassandra
+spec:
+  clusterIP: None
+  selector:
+    app: cassandra
+  ports:
+    - port: 9042
+      name: cql
+    - port: 7000
+      name: intra-node
+    - port: 7001
+      name: tls-intra-node
+    - port: 7199
+      name: jmx
+
