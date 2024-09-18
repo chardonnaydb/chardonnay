@@ -48,9 +48,12 @@ CREATE TABLE records (
 };
 
 CREATE TABLE wal (
-    wal_id    uuid,
-    offset    bigint,
-    content   blob,
+    wal_id          uuid,
+    first_offset    bigint,
+    next_offset     bigint,
+    offset          bigint,
+    write_id        uuid,
+    content         blob,
     PRIMARY KEY  ((wal_id), offset)
 ) WITH CLUSTERING ORDER BY (offset ASC)
   AND COMPACTION = {
