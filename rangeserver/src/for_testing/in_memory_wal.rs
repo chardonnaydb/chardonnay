@@ -3,18 +3,16 @@ use crate::wal::*;
 use std::collections::VecDeque;
 
 use async_trait::async_trait;
-use common::util;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use flatbuffers::FlatBufferBuilder;
 use tokio::sync::Mutex;
-use uuid::Uuid;
 
 pub struct InMemoryWal {
     state: Mutex<State>,
 }
 
 struct State {
-    first_offset: u64,
+    first_offset: Option<u64>,
     entries: VecDeque<Vec<u8>>,
     flatbuf_builder: FlatBufferBuilder<'static>,
 }
@@ -38,13 +36,18 @@ pub struct InMemIterator<'a> {
 impl<'a> Iterator<'a> for InMemIterator<'a> {
     async fn next_offset(&self) -> Result<u64, Error> {
         let wal = self.wal.state.lock().await;
-        let offset = wal.first_offset + self.index;
-        Ok(offset)
+        match wal.first_offset {
+            None => Ok(0),
+            Some(first_offset) => {
+                let offset = first_offset + self.index;
+                Ok(offset)
+            }
+        }
     }
 
     async fn next(&mut self) -> Option<LogEntry<'_>> {
         let wal = self.wal.state.lock().await;
-        let ind = (wal.first_offset + self.index) as usize;
+        let ind = (wal.first_offset.unwrap() + self.index) as usize;
         if ind >= wal.entries.len() {
             return None;
         }
@@ -62,7 +65,7 @@ impl InMemoryWal {
     pub fn new() -> Self {
         InMemoryWal {
             state: Mutex::new(State {
-                first_offset: 0,
+                first_offset: None,
                 entries: VecDeque::new(),
                 flatbuf_builder: FlatBufferBuilder::new(),
             }),
@@ -76,7 +79,7 @@ impl Wal for InMemoryWal {
         Ok(())
     }
 
-    async fn first_offset(&self) -> Result<u64, Error> {
+    async fn first_offset(&self) -> Result<Option<u64>, Error> {
         let wal = self.state.lock().await;
         Ok(wal.first_offset)
     }
@@ -84,14 +87,14 @@ impl Wal for InMemoryWal {
     async fn next_offset(&self) -> Result<u64, Error> {
         let wal = self.state.lock().await;
         let len_u64 = wal.entries.len() as u64;
-        Ok(wal.first_offset + len_u64)
+        Ok(wal.first_offset.unwrap_or(0) + len_u64)
     }
 
     async fn trim_before_offset(&self, offset: u64) -> Result<(), Error> {
         let mut wal = self.state.lock().await;
-        while wal.entries.len() > 0 && wal.first_offset < offset {
+        while wal.entries.len() > 0 && wal.first_offset.unwrap_or(0) < offset {
             wal.entries.pop_front();
-            wal.first_offset += 1;
+            wal.first_offset = Some(wal.first_offset.unwrap_or(0) + 1);
         }
         Ok(())
     }
