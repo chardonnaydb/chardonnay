@@ -17,7 +17,7 @@ use scylla::SessionBuilder;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-pub struct Cassandra {
+pub struct CassandraWal {
     session: Session,
     wal_id: Uuid,
     state: RwLock<State>,
@@ -78,14 +78,14 @@ static RETRIEVE_LOG_ENTRY: &str = r#"
 
 static METADATA_OFFSET: i64 = i64::MAX;
 
-impl Cassandra {
-    pub async fn new(known_node: String, wal_id: Uuid) -> Cassandra {
+impl CassandraWal {
+    pub async fn new(known_node: String, wal_id: Uuid) -> CassandraWal {
         let session = SessionBuilder::new()
             .known_node(known_node)
             .build()
             .await
             .unwrap();
-        Cassandra {
+        CassandraWal {
             session,
             wal_id,
             state: RwLock::new(State::NotSynced),
@@ -155,7 +155,7 @@ impl Cassandra {
 }
 
 #[async_trait]
-impl Wal for Cassandra {
+impl Wal for CassandraWal {
     async fn sync(&self) -> Result<(), Error> {
         let mut state = self.state.write().await;
         (*state) = State::NotSynced;
@@ -262,9 +262,9 @@ pub mod tests {
     use super::*;
     use common::util;
 
-    impl Cassandra {
-        async fn create_test() -> Cassandra {
-            let cassandra = Cassandra::new("127.0.0.1:9042".to_string(), Uuid::new_v4()).await;
+    impl CassandraWal {
+        async fn create_test() -> CassandraWal {
+            let cassandra = CassandraWal::new("127.0.0.1:9042".to_string(), Uuid::new_v4()).await;
             let mut query = Query::new(
                 "INSERT INTO chardonnay.wal (wal_id, offset, next_offset) VALUES (?, ?, ?)",
             );
@@ -286,7 +286,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn initial_sync() {
-        let cassandra = Cassandra::create_test().await;
+        let cassandra = CassandraWal::create_test().await;
         cassandra.sync().await.unwrap();
         let first_offset = cassandra.first_offset().await.unwrap();
         assert!(first_offset.is_none());
@@ -297,7 +297,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn basic_append_and_trim() {
-        let cassandra = Cassandra::create_test().await;
+        let cassandra = CassandraWal::create_test().await;
         cassandra.sync().await.unwrap();
         let mut fbb = FlatBufferBuilder::new();
         let transaction_id = Some(Uuidu128::create(

@@ -47,7 +47,7 @@ impl<'a> Iterator<'a> for InMemIterator<'a> {
 
     async fn next(&mut self) -> Option<LogEntry<'_>> {
         let wal = self.wal.state.lock().await;
-        let ind = (wal.first_offset.unwrap() + self.index) as usize;
+        let ind = (wal.first_offset.unwrap_or(0) + self.index) as usize;
         if ind >= wal.entries.len() {
             return None;
         }
