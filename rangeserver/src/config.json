@@ -1,0 +1,31 @@
+{
+    "range_server": {
+        "range_maintenance_duration": {
+            "secs": 1,
+            "nanos": 0
+        },
+        "proto_server_port": 50054,
+        "fast_network_port": 50055
+    },
+    "epoch": {
+        "proto_server_addr": "127.0.0.1:50050"
+    },
+    "regions": {
+        "test-region": {
+            "warden_address": "127.0.0.1:50053",
+            "epoch_publishers": [
+                {
+                    "name": "ps1",
+                    "zone": "test-region/a",
+                    "publishers": [
+                        {
+                            "name": "ep1",
+                            "backend_addr": "127.0.0.1:50051",
+                            "fast_network_addr": "127.0.0.1:50052"
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}

@@ -50,7 +50,8 @@ fn get_config(warden_address: SocketAddr) -> Config {
     let mut config = Config {
         range_server: RangeServerConfig {
             range_maintenance_duration: time::Duration::from_secs(1),
-            proto_server_addr: "127.0.0.1:50051".parse().unwrap(),
+            proto_server_port: 50054,
+            fast_network_port: 50055,
         },
         regions: std::collections::HashMap::new(),
         epoch: epoch_config,
@@ -142,7 +143,7 @@ async fn setup() -> TestContext {
     let server_address = server_socket.local_addr().unwrap();
     let epoch_supplier = Arc::new(rangeserver::for_testing::epoch_supplier::EpochSupplier::new());
     let mock_warden = MockWarden::new();
-    let warden_address = mock_warden.start().await.unwrap();
+    let warden_address = mock_warden.start(None).await.unwrap();
     let cancellation_token = CancellationToken::new();
     let storage_context: rangeserver::storage::cassandra::for_testing::TestContext =
         rangeserver::storage::cassandra::for_testing::init().await;
