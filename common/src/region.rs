@@ -11,6 +11,18 @@ pub enum Cloud {
     Other(String),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+pub struct Region {
+    pub cloud: Option<Cloud>,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+pub struct Zone {
+    pub region: Region,
+    pub name: String,
+}
+
 impl fmt::Display for Cloud {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let str = match self {
@@ -34,18 +46,6 @@ impl FromStr for Cloud {
             _ => Ok(Self::Other(s.to_string())),
         }
     }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
-pub struct Region {
-    pub cloud: Option<Cloud>,
-    pub name: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
-pub struct Zone {
-    pub region: Region,
-    pub name: String,
 }
 
 impl fmt::Display for Region {
