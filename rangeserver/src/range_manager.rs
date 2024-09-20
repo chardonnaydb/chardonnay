@@ -839,7 +839,8 @@ mod tests {
         let config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
-                proto_server_addr: "127.0.0.1:50051".parse().unwrap(),
+                proto_server_port: 50054,
+                fast_network_port: 50055,
             },
             regions: std::collections::HashMap::new(),
             epoch: epoch_config,

@@ -693,7 +693,10 @@ where
         });
 
         // Pull the gRPC server address and define the service
-        let addr = server.config.range_server.proto_server_addr;
+        let addr: SocketAddr =
+            format!("127.0.0.1:{}", server.config.range_server.proto_server_port)
+                .parse()
+                .unwrap();
 
         let prefetch = ProtoServer {
             parent_server: server.clone(),
@@ -764,7 +767,7 @@ pub mod tests {
             crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
         let mock_warden = MockWarden::new();
-        let warden_address = mock_warden.start().await.unwrap();
+        let warden_address = mock_warden.start(None).await.unwrap();
         let region = Region {
             cloud: None,
             name: "test-region".into(),
@@ -784,7 +787,8 @@ pub mod tests {
         let mut config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
-                proto_server_addr: "127.0.0.1:50051".parse().unwrap(),
+                proto_server_port: 50054,
+                fast_network_port: 50055,
             },
             regions: std::collections::HashMap::new(),
             epoch: epoch_config,
@@ -793,7 +797,7 @@ pub mod tests {
         let identity: String = "test_server".into();
         let host_info = HostInfo {
             identity: identity.clone(),
-            address: "127.0.0.1:10001".parse().unwrap(),
+            address: "127.0.0.1:50054".parse().unwrap(),
             zone,
             warden_connection_epoch: epoch_supplier.read_epoch().await.unwrap(),
         };

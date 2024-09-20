@@ -352,6 +352,7 @@ dependencies = [
  "derivative",
  "flatbuf",
  "flatbuffers",
+ "serde",
  "tokio",
  "uuid 0.8.2",
 ]
@@ -1517,6 +1518,8 @@ dependencies = [
  "proto",
  "rand 0.8.5",
  "scylla 0.3.1",
+ "serde",
+ "serde_json",
  "skiplist",
  "strum",
  "thiserror",
@@ -1525,6 +1528,7 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tonic-build",
+ "tracing-subscriber",
  "uuid 0.8.2",
 ]
 
@@ -1620,6 +1624,12 @@ name = "rustversion"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "955d28af4278de8121b7ebeb796b6a45735dc01436d898801014aced2773a3d6"
+
+[[package]]
+name = "ryu"
+version = "1.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3cb5ba0dc43242ce17de99c180e96db90b235b8a9fdc9543c96d2209116bd9f"
 
 [[package]]
 name = "scopeguard"
@@ -1749,6 +1759,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.77",
+]
+
+[[package]]
+name = "serde_json"
+version = "1.0.128"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ff5456707a1de34e7e37f2a6fd3d3f808c318259cbd01ab6377795054b483d8"
+dependencies = [
+ "itoa",
+ "memchr",
+ "ryu",
+ "serde",
 ]
 
 [[package]]
