@@ -5,13 +5,17 @@ use epoch_publisher::server::Server;
 use std::{
     collections::HashSet,
     net::{SocketAddr, UdpSocket},
+    str::FromStr,
     sync::Arc,
     time,
 };
 use tokio_util::sync::CancellationToken;
 
 use common::{
-    config::{Config, EpochConfig, RangeServerConfig, RegionConfig},
+    config::{
+        Config, EpochConfig, EpochPublisher as EpochPublisherConfig, RangeServerConfig,
+        RegionConfig,
+    },
     host_info::HostInfo,
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
     region::{Region, Zone},
@@ -54,12 +58,22 @@ fn get_config(epoch_address: SocketAddr) -> Config {
     config
 }
 
+fn get_publisher_config(fast_network_addr: SocketAddr) -> EpochPublisherConfig {
+    let backend_addr = SocketAddr::from_str("127.0.0.1:10010").unwrap();
+    EpochPublisherConfig {
+        name: "ep1".to_string(),
+        backend_addr,
+        fast_network_addr,
+    }
+}
+
 async fn setup_server(
     server_socket: UdpSocket,
     cancellation_token: CancellationToken,
     epoch_address: SocketAddr,
 ) -> tokio::runtime::Runtime {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+    let fast_network_addr = server_socket.local_addr().unwrap().clone();
     let fast_network = Arc::new(UdpFastNetwork::new(server_socket));
     let fast_network_clone = fast_network.clone();
     let runtime_clone = runtime.handle().clone();
@@ -67,7 +81,11 @@ async fn setup_server(
     runtime.spawn(async move {
         let config = get_config(epoch_address);
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-        let server = Server::new(config, bg_runtime.handle().clone());
+        let server = Server::new(
+            config,
+            get_publisher_config(fast_network_addr),
+            bg_runtime.handle().clone(),
+        );
         Server::start(server, fast_network, runtime_clone, cancellation_token).await;
         server_ready_tx.send(()).unwrap();
     });
@@ -111,7 +129,8 @@ async fn setup_client(
 ) {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-    let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
+    let udp_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let fast_network = Arc::new(UdpFastNetwork::new(udp_socket));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
         loop {

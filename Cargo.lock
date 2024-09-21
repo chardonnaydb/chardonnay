@@ -500,6 +500,7 @@ dependencies = [
  "flatbuffers",
  "prost",
  "proto",
+ "serde_json",
  "strum",
  "test-log",
  "thiserror",
@@ -509,6 +510,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tracing",
+ "tracing-subscriber",
  "uuid 0.8.2",
 ]
 
