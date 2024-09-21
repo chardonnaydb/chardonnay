@@ -16,13 +16,8 @@ use tokio_util::sync::CancellationToken;
 fn main() {
     tracing_subscriber::fmt::init();
     // TODO(tamer): take the config path as an argument.
-    let config: Config = serde_json::from_str(
-        &std::fs::read_to_string(
-            "/Users/tamereldeeb/vscode/chardonnay/rangeserver/src/config.json",
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    let config: Config =
+        serde_json::from_str(&std::fs::read_to_string("config.json").unwrap()).unwrap();
     //TODO(tamer): the name, zone etc should be passed in as an argument or environment.
     let region = Region {
         cloud: None,
