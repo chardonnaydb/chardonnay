@@ -479,11 +479,13 @@ dependencies = [
  "common",
  "proto",
  "scylla 0.13.2",
+ "serde_json",
  "thiserror",
  "tokio",
  "tokio-util",
  "tonic",
  "tracing",
+ "tracing-subscriber",
  "uuid 0.8.2",
 ]
 
