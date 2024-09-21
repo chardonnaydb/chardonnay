@@ -1,8 +1,8 @@
 use common::config::Config;
+use common::config::EpochPublisher as EpochPublisherConfig;
 use flatbuffers::FlatBufferBuilder;
 use proto::epoch::epoch_client::EpochClient;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
@@ -23,6 +23,7 @@ type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
 pub struct Server {
     epoch: AtomicUsize,
     config: Config,
+    publisher_config: EpochPublisherConfig,
     bg_runtime: tokio::runtime::Handle,
 }
 
@@ -200,13 +201,19 @@ impl Server {
             .epoch as usize;
 
         self.epoch.store(epoch, SeqCst);
+        info!("synced initial epoch");
     }
 
-    pub fn new(config: Config, bg_runtime: tokio::runtime::Handle) -> Arc<Server> {
+    pub fn new(
+        config: Config,
+        publisher_config: EpochPublisherConfig,
+        bg_runtime: tokio::runtime::Handle,
+    ) -> Arc<Server> {
         Arc::new(Server {
             epoch: AtomicUsize::new(0),
             bg_runtime,
             config,
+            publisher_config,
         })
     }
 
@@ -233,12 +240,12 @@ impl Server {
         let proto_server = ProtoServer {
             server: server.clone(),
         };
+        let server_clone = server.clone();
         server.bg_runtime.spawn(async move {
             // TODO(tamer): make this configurable.
-            let addr = SocketAddr::from_str("127.0.0.1:10010").unwrap();
             if let Err(e) = TServer::builder()
                 .add_service(EpochPublisherServer::new(proto_server))
-                .serve(addr)
+                .serve(server_clone.publisher_config.backend_addr.clone())
                 .await
             {
                 panic!("Unable to start proto server: {}", e);
