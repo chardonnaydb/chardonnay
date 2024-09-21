@@ -17,6 +17,7 @@ where
     S: Storage,
 {
     storage: S,
+    config: Config,
     publisher_sets: Vec<Arc<PublisherSetUpdater>>,
 }
 
@@ -71,18 +72,21 @@ where
             .collect();
         Server {
             storage,
+            config,
             publisher_sets,
         }
     }
 
     pub async fn start(server: Arc<Server<S>>, cancellation_token: CancellationToken) {
+        info!("Starting epoch service.");
         // TODO: log errors
         server.storage.initialize_epoch().await.unwrap();
         let proto_server = ProtoServer {
             server: server.clone(),
         };
+        Server::<S>::start_update_loop(server.clone(), cancellation_token);
         // TODO(tamer): make this configurable.
-        let addr = SocketAddr::from_str("127.0.0.1:10015").unwrap();
+        let addr = server.config.epoch.proto_server_addr;
         if let Err(e) = TServer::builder()
             .add_service(EpochServer::new(proto_server))
             .serve(addr)
@@ -90,10 +94,9 @@ where
         {
             panic!("Unable to start proto server: {}", e);
         }
-        Server::<S>::start_update_loop(server, cancellation_token).await;
     }
 
-    async fn start_update_loop(server: Arc<Server<S>>, cancellation_token: CancellationToken) {
+    fn start_update_loop(server: Arc<Server<S>>, cancellation_token: CancellationToken) {
         tokio::spawn(async move {
             'outer: loop {
                 if cancellation_token.is_cancelled() {
