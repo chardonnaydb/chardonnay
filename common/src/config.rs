@@ -12,6 +12,12 @@ pub struct EpochConfig {
     pub proto_server_addr: SocketAddr,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CassandraConfig {
+    // Can't be SocketAddr because we want to use a DNS name.
+    pub cql_addr: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct EpochPublisher {
     pub name: String,
@@ -45,5 +51,6 @@ pub struct RegionConfig {
 pub struct Config {
     pub range_server: RangeServerConfig,
     pub epoch: EpochConfig,
+    pub cassandra: CassandraConfig,
     pub regions: HashMap<Region, RegionConfig>,
 }

@@ -749,7 +749,7 @@ where
 pub mod tests {
     use crate::cache::memtabledb::MemTableDB;
     use crate::epoch_supplier::EpochSupplier as Trait;
-    use common::config::{EpochConfig, RangeServerConfig, RegionConfig};
+    use common::config::{CassandraConfig, EpochConfig, RangeServerConfig, RegionConfig};
     use common::network::for_testing::udp_fast_network::UdpFastNetwork;
     use common::region::{Region, Zone};
     use core::time;
@@ -807,6 +807,9 @@ pub mod tests {
                 range_maintenance_duration: time::Duration::from_secs(1),
                 proto_server_port: 50054,
                 fast_network_port: 50055,
+            },
+            cassandra: CassandraConfig {
+                cql_addr: "127.0.0.1:9042".parse().unwrap(),
             },
             regions: std::collections::HashMap::new(),
             epoch: epoch_config,
