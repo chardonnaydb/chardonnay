@@ -2,7 +2,6 @@ use std::{collections::HashMap, sync::Arc};
 
 use common::{config::EpochPublisherSet, host_info::HostInfo, network::fast_network::FastNetwork};
 use epoch_publisher::{client::EpochPublisherClient, error::Error};
-use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -17,6 +16,7 @@ impl EpochReader {
     pub fn new(
         fast_network: Arc<dyn FastNetwork>,
         runtime: tokio::runtime::Handle,
+        bg_runtime: tokio::runtime::Handle,
         publisher_set: EpochPublisherSet,
         cancellation_token: CancellationToken,
     ) -> EpochReader {
@@ -29,10 +29,12 @@ impl EpochReader {
                     identity: publisher.name.clone(),
                     address: publisher.fast_network_addr,
                     zone: publisher_set.zone.clone(),
+                    warden_connection_epoch: 0,
                 };
                 EpochPublisherClient::new(
                     fast_network.clone(),
                     runtime.clone(),
+                    bg_runtime.clone(),
                     host_info,
                     cancellation_token.clone(),
                 )
@@ -47,11 +49,16 @@ impl EpochReader {
     }
 
     pub async fn read_epoch(&self) -> Result<u64, Error> {
+        // TODO(tamer): add timeout and retries.
         // Fire off a request to read the epoch from each publisher in the set in parallel.
         let mut join_set = JoinSet::new();
         for c in &self.clients {
             let client = c.clone();
-            join_set.spawn_on(async move { client.read_epoch().await }, &self.runtime);
+            join_set.spawn_on(
+                // TODO(tamer): pass timeout in as a parameter.
+                async move { client.read_epoch(chrono::Duration::seconds(1)).await },
+                &self.runtime,
+            );
         }
 
         // Now see if any value is returned by a majority of publishers, and return it.

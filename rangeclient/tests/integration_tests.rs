@@ -35,7 +35,7 @@ struct TestContext {
     storage_context: rangeserver::storage::cassandra::for_testing::TestContext,
 }
 
-fn get_config(warden_address: SocketAddr, proto_server_address: SocketAddr) -> Config {
+fn get_config(warden_address: SocketAddr) -> Config {
     let region = Region {
         cloud: None,
         name: "test-region".into(),
@@ -51,7 +51,8 @@ fn get_config(warden_address: SocketAddr, proto_server_address: SocketAddr) -> C
     let mut config = Config {
         range_server: RangeServerConfig {
             range_maintenance_duration: time::Duration::from_secs(1),
-            proto_server_addr: proto_server_address,
+            proto_server_port: 50054,
+            fast_network_port: 50055,
         },
         regions: std::collections::HashMap::new(),
         epoch: epoch_config,
@@ -74,6 +75,7 @@ fn get_server_host_info(address: SocketAddr) -> HostInfo {
         identity: identity.clone(),
         address,
         zone,
+        warden_connection_epoch: 0,
     }
 }
 
@@ -98,10 +100,10 @@ async fn setup_server(
     let storage = storage_context.cassandra.clone();
 
     runtime.spawn(async move {
-        let config = get_config(warden_address, proto_server_listener.local_addr().unwrap());
+        let config = get_config(warden_address);
         let host_info = get_server_host_info(server_address);
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-        let server = Server::<_, _, MemTableDB>::new(
+        let server = Server::<_, MemTableDB>::new(
             config,
             host_info,
             storage,
@@ -153,7 +155,7 @@ async fn setup() -> TestContext {
     let server_address = server_socket.local_addr().unwrap();
     let epoch_supplier = Arc::new(rangeserver::for_testing::epoch_supplier::EpochSupplier::new());
     let mock_warden = MockWarden::new();
-    let warden_address = mock_warden.start().await.unwrap();
+    let warden_address = mock_warden.start(None).await.unwrap();
     let proto_server_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proto_server_address = proto_server_listener.local_addr().unwrap();
     let cancellation_token = CancellationToken::new();

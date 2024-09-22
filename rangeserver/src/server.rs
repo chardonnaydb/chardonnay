@@ -16,11 +16,13 @@ use tokio_util::sync::CancellationToken;
 
 use uuid::Uuid;
 
+use crate::range_manager::r#impl::RangeManager;
+use crate::range_manager::RangeManager as RangeManagerTrait;
 use crate::transaction_info::TransactionInfo;
 use crate::warden_handler::WardenHandler;
 use crate::{
     cache::Cache, cache::CacheOptions, epoch_supplier::EpochSupplier, error::Error,
-    for_testing::in_memory_wal::InMemoryWal, range_manager::RangeManager, storage::Storage,
+    for_testing::in_memory_wal::InMemoryWal, storage::Storage,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
@@ -31,20 +33,18 @@ use proto::rangeserver::{PrefetchRequest, PrefetchResponse};
 use crate::prefetching_buffer::PrefetchingBuffer;
 
 #[derive(Clone)]
-struct ProtoServer<S, E, C>
+struct ProtoServer<S, C>
 where
     S: Storage,
-    E: EpochSupplier,
     C: Cache,
 {
-    parent_server: Arc<Server<S, E, C>>,
+    parent_server: Arc<Server<S, C>>,
 }
 
 #[tonic::async_trait]
-impl<S, E, C> RangeServer for ProtoServer<S, E, C>
+impl<S, C> RangeServer for ProtoServer<S, C>
 where
     S: Storage,
-    E: EpochSupplier,
     C: Cache,
 {
     async fn prefetch(
@@ -94,39 +94,37 @@ where
     }
 }
 
-pub struct Server<S, E, C>
+pub struct Server<S, C>
 where
     S: Storage,
-    E: EpochSupplier,
     C: Cache,
 {
     config: Config,
     storage: Arc<S>,
-    epoch_supplier: Arc<E>,
+    epoch_supplier: Arc<dyn EpochSupplier>,
     warden_handler: WardenHandler,
     bg_runtime: tokio::runtime::Handle,
     // TODO: parameterize the WAL implementation too.
-    loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, E, InMemoryWal, C>>>>,
+    loaded_ranges: RwLock<HashMap<Uuid, Arc<RangeManager<S, InMemoryWal, C>>>>,
     transaction_table: RwLock<HashMap<Uuid, Arc<TransactionInfo>>>,
     prefetching_buffer: Arc<PrefetchingBuffer>,
 }
 
 type DynamicErr = Box<dyn std::error::Error + Sync + Send + 'static>;
 
-impl<S, E, C> Server<S, E, C>
+impl<S, C> Server<S, C>
 where
     S: Storage,
-    E: EpochSupplier,
     C: Cache,
 {
     pub fn new(
         config: Config,
         host_info: HostInfo,
         storage: Arc<S>,
-        epoch_supplier: Arc<E>,
+        epoch_supplier: Arc<dyn EpochSupplier>,
         bg_runtime: tokio::runtime::Handle,
     ) -> Arc<Self> {
-        let warden_handler = WardenHandler::new(&config, &host_info);
+        let warden_handler = WardenHandler::new(&config, &host_info, epoch_supplier.clone());
         Arc::new(Server {
             config,
             storage,
@@ -184,7 +182,7 @@ where
 
     async fn load_range_in_bg_runtime(
         &self,
-        rm: Arc<RangeManager<S, E, InMemoryWal, C>>,
+        rm: Arc<RangeManager<S, InMemoryWal, C>>,
     ) -> Result<(), Error> {
         self.bg_runtime
             .spawn(async move { rm.load().await })
@@ -194,7 +192,7 @@ where
     async fn maybe_load_and_get_range(
         &self,
         id: &FullRangeId,
-    ) -> Result<Arc<RangeManager<S, E, InMemoryWal, C>>, Error> {
+    ) -> Result<Arc<RangeManager<S, InMemoryWal, C>>, Error> {
         {
             // Fast path when range has already been loaded.
             let range_table = self.loaded_ranges.read().await;
@@ -732,6 +730,7 @@ where
 #[cfg(test)]
 pub mod tests {
     use crate::cache::memtabledb::MemTableDB;
+    use crate::epoch_supplier::EpochSupplier as Trait;
     use common::config::{EpochConfig, RangeServerConfig, RegionConfig};
     use common::network::for_testing::udp_fast_network::UdpFastNetwork;
     use common::region::{Region, Zone};
@@ -744,7 +743,7 @@ pub mod tests {
     use crate::for_testing::epoch_supplier::EpochSupplier;
     use crate::for_testing::mock_warden::MockWarden;
     use crate::storage::cassandra::Cassandra;
-    type Server = super::Server<Cassandra, EpochSupplier, MemTableDB>;
+    type Server = super::Server<Cassandra, MemTableDB>;
 
     impl Server {
         async fn is_assigned(&self, range_id: &FullRangeId) -> bool {
@@ -769,7 +768,7 @@ pub mod tests {
             crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
         let mock_warden = MockWarden::new();
-        let warden_address = mock_warden.start().await.unwrap();
+        let warden_address = mock_warden.start(None).await.unwrap();
         let proto_server_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let region = Region {
             cloud: None,
@@ -790,7 +789,9 @@ pub mod tests {
         let mut config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
-                proto_server_addr: proto_server_listener.local_addr().unwrap(),
+                proto_server_port: 50054,
+                fast_network_port: 50055,
+                // proto_server_addr: proto_server_listener.local_addr().unwrap(),
             },
             regions: std::collections::HashMap::new(),
             epoch: epoch_config,
@@ -799,8 +800,9 @@ pub mod tests {
         let identity: String = "test_server".into();
         let host_info = HostInfo {
             identity: identity.clone(),
-            address: "127.0.0.1:10001".parse().unwrap(),
+            address: "127.0.0.1:50054".parse().unwrap(),
             zone,
+            warden_connection_epoch: epoch_supplier.read_epoch().await.unwrap(),
         };
         let server = Server::new(
             config,

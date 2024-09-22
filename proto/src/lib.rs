@@ -4,5 +4,7 @@ pub mod epoch;
 pub mod epoch_publisher;
 #[path = "../target/rangeserver/rangeserver.rs"]
 pub mod rangeserver;
+#[path = "../target/universe/universe.rs"]
+pub mod universe;
 #[path = "../target/warden/warden.rs"]
 pub mod warden;

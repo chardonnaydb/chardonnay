@@ -6,11 +6,13 @@ use common::{full_range_id::FullRangeId, key_range::KeyRange, keyspace_id::Keysp
 use thiserror::Error;
 use uuid::Uuid;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct RangeInfo {
     pub id: Uuid,
     pub key_range: KeyRange,
 }
 
+#[derive(Debug)]
 pub struct RangeAssignment {
     pub range: RangeInfo,
     pub assignee: String,

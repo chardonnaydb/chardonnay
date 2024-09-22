@@ -15,6 +15,8 @@ use tokio_util::sync::CancellationToken;
 use tonic::Request;
 use uuid::Uuid;
 
+use crate::epoch_supplier::EpochSupplier;
+
 type WardenErr = Box<dyn std::error::Error + Sync + Send + 'static>;
 struct StartedState {
     stopper: CancellationToken,
@@ -36,14 +38,20 @@ pub struct WardenHandler {
     state: RwLock<State>,
     config: Config,
     host_info: HostInfo,
+    epoch_supplier: Arc<dyn EpochSupplier>,
 }
 
 impl WardenHandler {
-    pub fn new(config: &Config, host_info: &HostInfo) -> WardenHandler {
+    pub fn new(
+        config: &Config,
+        host_info: &HostInfo,
+        epoch_supplier: Arc<dyn EpochSupplier>,
+    ) -> WardenHandler {
         WardenHandler {
             state: RwLock::new(State::NotStarted),
             config: config.clone(),
             host_info: host_info.clone(),
+            epoch_supplier,
         }
     }
 
@@ -121,6 +129,7 @@ impl WardenHandler {
         config: common::config::RegionConfig,
         updates_sender: mpsc::UnboundedSender<WardenUpdate>,
         state: Arc<StartedState>,
+        epoch_supplier: Arc<dyn EpochSupplier>,
     ) -> Result<(), WardenErr> {
         loop {
             let addr = format!("http://{}", config.warden_address.clone());
@@ -130,6 +139,7 @@ impl WardenHandler {
                 range_server: Some(proto::warden::HostInfo {
                     identity: host_info.identity.clone(),
                     zone: host_info.zone.name.clone(),
+                    epoch: epoch_supplier.read_epoch().await.unwrap(),
                 }),
             };
 
@@ -182,12 +192,14 @@ impl WardenHandler {
                     });
                     *state = State::Started(started_state.clone());
                     drop(state);
+                    let ec_clone = self.epoch_supplier.clone();
                     let _ = tokio::spawn(async move {
                         let exit_result = Self::continuously_connect_and_register(
                             host_info,
                             config.clone(),
                             updates_sender,
                             started_state,
+                            ec_clone,
                         )
                         .await;
                         done_tx.send(exit_result).unwrap();

@@ -2,51 +2,22 @@ use crate::wal::*;
 
 use std::collections::VecDeque;
 
-use common::util;
+use async_trait::async_trait;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use flatbuffers::FlatBufferBuilder;
-use uuid::Uuid;
+use tokio::sync::Mutex;
 
 pub struct InMemoryWal {
-    first_offset: u64,
+    state: Mutex<State>,
+}
+
+struct State {
+    first_offset: Option<u64>,
     entries: VecDeque<Vec<u8>>,
     flatbuf_builder: FlatBufferBuilder<'static>,
 }
 
-pub struct InMemIterator<'a> {
-    index: u64,
-    wal: &'a InMemoryWal,
-    current_entry: Option<LogEntry<'a>>,
-}
-
-impl<'a> Iterator<'a> for InMemIterator<'a> {
-    async fn next_offset(&self) -> Result<u64, Error> {
-        let offset = self.wal.first_offset + self.index;
-        Ok(offset)
-    }
-
-    async fn next(&mut self) -> Option<&LogEntry<'_>> {
-        let ind = (self.wal.first_offset + self.index) as usize;
-        if ind >= self.wal.entries.len() {
-            return None;
-        }
-        self.current_entry = Some(root_as_log_entry(self.wal.entries.get(ind).unwrap()).unwrap());
-        self.index += 1;
-        match &self.current_entry {
-            None => None,
-            Some(e) => Some(e),
-        }
-    }
-}
-
-impl InMemoryWal {
-    pub fn new() -> Self {
-        InMemoryWal {
-            first_offset: 0,
-            entries: VecDeque::new(),
-            flatbuf_builder: FlatBufferBuilder::new(),
-        }
-    }
+impl State {
     fn append_data_currently_in_builder(&mut self) -> Result<(), Error> {
         let bytes = self.flatbuf_builder.finished_data();
         let buf = Vec::from(bytes);
@@ -56,61 +27,118 @@ impl InMemoryWal {
     }
 }
 
+pub struct InMemIterator<'a> {
+    index: u64,
+    wal: &'a InMemoryWal,
+    current_entry: Option<Vec<u8>>,
+}
+
+impl<'a> Iterator<'a> for InMemIterator<'a> {
+    async fn next_offset(&self) -> Result<u64, Error> {
+        let wal = self.wal.state.lock().await;
+        match wal.first_offset {
+            None => Ok(0),
+            Some(first_offset) => {
+                let offset = first_offset + self.index;
+                Ok(offset)
+            }
+        }
+    }
+
+    async fn next(&mut self) -> Option<LogEntry<'_>> {
+        let wal = self.wal.state.lock().await;
+        let ind = (wal.first_offset.unwrap_or(0) + self.index) as usize;
+        if ind >= wal.entries.len() {
+            return None;
+        }
+        self.current_entry = Some(wal.entries.get(ind).unwrap().clone());
+
+        self.index += 1;
+        match &self.current_entry {
+            None => None,
+            Some(e) => Some(root_as_log_entry(e).unwrap()),
+        }
+    }
+}
+
+impl InMemoryWal {
+    pub fn new() -> Self {
+        InMemoryWal {
+            state: Mutex::new(State {
+                first_offset: None,
+                entries: VecDeque::new(),
+                flatbuf_builder: FlatBufferBuilder::new(),
+            }),
+        }
+    }
+}
+
+#[async_trait]
 impl Wal for InMemoryWal {
-    async fn first_offset(&self) -> Result<u64, Error> {
-        Ok(self.first_offset)
+    async fn sync(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn first_offset(&self) -> Result<Option<u64>, Error> {
+        let wal = self.state.lock().await;
+        Ok(wal.first_offset)
     }
 
     async fn next_offset(&self) -> Result<u64, Error> {
-        let len_u64 = self.entries.len() as u64;
-        Ok(self.first_offset + len_u64)
+        let wal = self.state.lock().await;
+        let len_u64 = wal.entries.len() as u64;
+        Ok(wal.first_offset.unwrap_or(0) + len_u64)
     }
 
-    async fn trim_before_offset(&mut self, offset: u64) -> Result<(), Error> {
-        while self.entries.len() > 0 && self.first_offset < offset {
-            self.entries.pop_front();
-            self.first_offset += 1;
+    async fn trim_before_offset(&self, offset: u64) -> Result<(), Error> {
+        let mut wal = self.state.lock().await;
+        while wal.entries.len() > 0 && wal.first_offset.unwrap_or(0) < offset {
+            wal.entries.pop_front();
+            wal.first_offset = Some(wal.first_offset.unwrap_or(0) + 1);
         }
         Ok(())
     }
 
-    async fn append_prepare(&mut self, entry: PrepareRequest<'_>) -> Result<(), Error> {
-        let prepare_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
+    async fn append_prepare(&self, entry: PrepareRequest<'_>) -> Result<(), Error> {
+        let mut state = self.state.lock().await;
+        let prepare_bytes = state.flatbuf_builder.create_vector(entry._tab.buf());
         let fb_root = LogEntry::create(
-            &mut self.flatbuf_builder,
+            &mut state.flatbuf_builder,
             &LogEntryArgs {
                 entry: Entry::Prepare,
                 bytes: Some(prepare_bytes),
             },
         );
-        self.flatbuf_builder.finish(fb_root, None);
-        self.append_data_currently_in_builder()
+        state.flatbuf_builder.finish(fb_root, None);
+        state.append_data_currently_in_builder()
     }
 
-    async fn append_commit(&mut self, entry: CommitRequest<'_>) -> Result<(), Error> {
-        let commit_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
+    async fn append_commit(&self, entry: CommitRequest<'_>) -> Result<(), Error> {
+        let mut state = self.state.lock().await;
+        let commit_bytes = state.flatbuf_builder.create_vector(entry._tab.buf());
         let fb_root = LogEntry::create(
-            &mut self.flatbuf_builder,
+            &mut state.flatbuf_builder,
             &LogEntryArgs {
                 entry: Entry::Commit,
                 bytes: Some(commit_bytes),
             },
         );
-        self.flatbuf_builder.finish(fb_root, None);
-        self.append_data_currently_in_builder()
+        state.flatbuf_builder.finish(fb_root, None);
+        state.append_data_currently_in_builder()
     }
 
-    async fn append_abort(&mut self, entry: AbortRequest<'_>) -> Result<(), Error> {
-        let abort_bytes = self.flatbuf_builder.create_vector(entry._tab.buf());
+    async fn append_abort(&self, entry: AbortRequest<'_>) -> Result<(), Error> {
+        let mut state = self.state.lock().await;
+        let abort_bytes = state.flatbuf_builder.create_vector(entry._tab.buf());
         let fb_root = LogEntry::create(
-            &mut self.flatbuf_builder,
+            &mut state.flatbuf_builder,
             &LogEntryArgs {
                 entry: Entry::Commit,
                 bytes: Some(abort_bytes),
             },
         );
-        self.flatbuf_builder.finish(fb_root, None);
-        self.append_data_currently_in_builder()
+        state.flatbuf_builder.finish(fb_root, None);
+        state.append_data_currently_in_builder()
     }
 
     fn iterator<'a>(&'a self) -> InMemIterator<'a> {
@@ -119,30 +147,5 @@ impl Wal for InMemoryWal {
             wal: self,
             current_entry: None,
         }
-    }
-
-    async fn find_prepare_record(&self, transaction_id: Uuid) -> Result<Option<Vec<u8>>, Error> {
-        let mut wal_iterator = self.iterator();
-        let prepare_record_bytes = {
-            loop {
-                let next = wal_iterator.next().await;
-                match next {
-                    None => break None,
-                    Some(entry) => match entry.entry() {
-                        Entry::Prepare => {
-                            let bytes = Vec::from(entry.bytes().unwrap().bytes());
-                            let flatbuf = flatbuffers::root::<PrepareRequest>(&bytes).unwrap();
-                            let tid =
-                                util::flatbuf::deserialize_uuid(flatbuf.transaction_id().unwrap());
-                            if tid == transaction_id {
-                                break (Some(bytes));
-                            }
-                        }
-                        _ => (),
-                    },
-                }
-            }
-        };
-        Ok(prepare_record_bytes)
     }
 }
