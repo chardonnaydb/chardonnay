@@ -15,11 +15,13 @@ use tokio_util::sync::CancellationToken;
 
 use uuid::Uuid;
 
+use crate::range_manager::r#impl::RangeManager;
+use crate::range_manager::RangeManager as RangeManagerTrait;
 use crate::transaction_info::TransactionInfo;
 use crate::warden_handler::WardenHandler;
 use crate::{
     cache::Cache, cache::CacheOptions, epoch_supplier::EpochSupplier, error::Error,
-    for_testing::in_memory_wal::InMemoryWal, range_manager::RangeManager, storage::Storage,
+    for_testing::in_memory_wal::InMemoryWal, storage::Storage,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
