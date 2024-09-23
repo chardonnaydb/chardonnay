@@ -10,12 +10,14 @@ use common::{
 use rangeserver::{cache::memtabledb::MemTableDB, server::Server, storage::cassandra::Cassandra};
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 fn main() {
     tracing_subscriber::fmt::init();
     // TODO(tamer): take the config path as an argument.
     let config: Config =
         serde_json::from_str(&std::fs::read_to_string("config.json").unwrap()).unwrap();
+
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
     let runtime_handle = runtime.handle().clone();
     let fast_network = Arc::new(UdpFastNetwork::new(
@@ -41,7 +43,8 @@ fn main() {
             .iter()
             .find(|&s| s.zone == host_info.zone)
             .unwrap();
-        let storage = Arc::new(Cassandra::new("127.0.0.1:9042".to_string()).await);
+        info!("Connecting to Cassandra at {}", config.cassandra.cql_addr);
+        let storage = Arc::new(Cassandra::new(config.cassandra.cql_addr.to_string()).await);
         // TODO: set number of threads and pin to cores.
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
 
@@ -64,6 +67,7 @@ fn main() {
             .unwrap();
         res.await.unwrap()
     });
+    info!("Starting RangeServer...");
     runtime.block_on(server_handle).unwrap().unwrap();
 }
 

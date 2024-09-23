@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug-pod
+  namespace: chardonnay
+spec:
+  containers:
+  - name: debug-container
+    image: cassandra:5.0
+    command: ["/bin/sh"]
+    args: ["-c", "while true; do sleep 30; done;"]
+    volumeMounts:
+    - name: config
+      mountPath: /etc/chardonnay
+  volumes:
+  - name: config
+    configMap:
+      name: chardonnay-rangeserver-config
+  restartPolicy: Never

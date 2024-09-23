@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chardonnay-rangeserver
+  namespace: chardonnay
+spec:
+  serviceName: "chardonnay-rangeserver"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chardonnay-rangeserver
+  template:
+    metadata:
+      labels:
+        app: chardonnay-rangeserver
+    spec:
+      containers:
+      - name: rangeserver
+        image: chardonnay-rangeserver:latest
+        imagePullPolicy: IfNotPresent
+        workingDir: /etc/chardonnay
+        command: ["/bin/sh", "-c"]
+        args: ["cat /etc/chardonnay/config.json && rangeserver"]
+        ports:
+        - containerPort: 50054
+          name: proto-server
+        - containerPort: 50055
+          name: fast-network
+        volumeMounts:
+        - name: config
+          mountPath: /etc/chardonnay
+      volumes:
+      - name: config
+        configMap:
+          name: chardonnay-rangeserver-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chardonnay-rangeserver
+  namespace: chardonnay
+spec:
+  selector:
+    app: chardonnay-rangeserver
+  clusterIP: None
+  ports:
+    - protocol: TCP
+      port: 50054
+      targetPort: 50054
+      name: proto-server
+    - protocol: TCP
+      port: 50055
+      targetPort: 50055
+      name: fast-network
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chardonnay-rangeserver-config
+  namespace: chardonnay
+data:
+  config.json: |
+    {
+        "range_server": {
+            "range_maintenance_duration": {
+                "secs": 1,
+                "nanos": 0
+            },
+            "proto_server_port": 50054,
+            "fast_network_port": 50055
+        },
+        "epoch": {
+            "proto_server_addr": "127.0.0.1:50050"
+        },
+        "cassandra": {
+            "cql_addr": "cassandra:9042"
+        },
+        "regions": {
+            "test-region": {
+                "warden_address": "127.0.0.1:50053",
+                "epoch_publishers": [
+                    {
+                        "name": "ps1",
+                        "zone": "test-region/a",
+                        "publishers": [
+                            {
+                                "name": "ep1",
+                                "backend_addr": "127.0.0.1:50051",
+                                "fast_network_addr": "127.0.0.1:50052"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }

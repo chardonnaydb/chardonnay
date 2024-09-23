@@ -22,7 +22,7 @@ jobs:
 
     - name: Install flatbuffers
       run: scripts/linux_install_flatbuffers.sh
-    
+
     - name: Install protobuf
       run: sudo apt install -y protobuf-compiler
 
@@ -39,3 +39,37 @@ jobs:
 
     - name: Run tests
       run: cargo test
+
+  build-docker-images:
+    runs-on: ubuntu-latest
+    # docker build -t $RANGESERVER_IMG --target rangeserver .
+    # docker build -t $WARDEN_IMG --target warden .
+    # docker build -t $EPOCH_PUBLISHER_IMG --target epoch_publisher .
+    # docker build -t $EPOCH_IMG --target epoch .
+    strategy:
+      matrix:
+        include:
+          - target: rangeserver
+            tags: chardonnay-rangeserver:latest
+          - target: warden
+            tags: chardonnay-warden:latest
+          - target: epoch_publisher
+            tags: epoch-publisher:latest
+          - target: epoch
+            tags: epoch:latest
+
+    steps:
+    - uses: actions/checkout@v3
+      name: Check out the repository code
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Build Docker images
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ./Dockerfile
+        target: ${{ matrix.target }}
+        tags: ${{ matrix.tags }}
+        push: false
