@@ -17,7 +17,6 @@ fn main() {
     // TODO(tamer): take the config path as an argument.
     let config: Config =
         serde_json::from_str(&std::fs::read_to_string("config.json").unwrap()).unwrap();
-    // Log the whole config
 
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
     let runtime_handle = runtime.handle().clone();

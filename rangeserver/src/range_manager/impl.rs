@@ -690,7 +690,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use common::config::{EpochConfig, RangeServerConfig};
+    use common::config::{CassandraConfig, EpochConfig, HostPort, RangeServerConfig};
     use common::util;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
@@ -840,6 +840,12 @@ mod tests {
                 range_maintenance_duration: time::Duration::from_secs(1),
                 proto_server_port: 50054,
                 fast_network_port: 50055,
+            },
+            cassandra: CassandraConfig {
+                cql_addr: HostPort {
+                    host: "127.0.0.1".to_string(),
+                    port: 9042,
+                },
             },
             regions: std::collections::HashMap::new(),
             epoch: epoch_config,
