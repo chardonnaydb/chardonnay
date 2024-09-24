@@ -1,4 +1,5 @@
 pub mod r#impl;
+mod lock_table;
 
 use crate::{error::Error, transaction_info::TransactionInfo};
 use bytes::Bytes;
