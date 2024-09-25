@@ -1496,12 +1496,14 @@ dependencies = [
  "flatbuffers",
  "machnet",
  "prost",
+ "proto",
  "rangeserver",
  "strum",
  "thiserror",
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tonic",
  "uuid 0.8.2",
 ]
 

@@ -8,12 +8,17 @@ use flatbuf::rangeserver_flatbuffers::range_server::Record as FlatbufRecord;
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use flatbuffers::FlatBufferBuilder;
+use proto::rangeserver::range_server_client::RangeServerClient;
+use proto::rangeserver::{PrefetchRequest, RangeId, RangeKey};
 use rangeserver::error::Error as RangeServerError;
 use rangeserver::transaction_info::TransactionInfo;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
+use tonic::transport::Channel;
+use tonic::Request;
 use uuid::Uuid;
 
 pub struct PrepareOk {
@@ -27,19 +32,24 @@ pub struct RangeClient {
     range_server_info: HostInfo,
     // TODO: make more typeful and store more information to e.g. allow timing out.
     outstanding_requests: Mutex<HashMap<Uuid, oneshot::Sender<Bytes>>>,
+    proto_client: Arc<RangeServerClient<Channel>>,
 }
 
 impl RangeClient {
-    pub fn new(
+    pub async fn new(
         fast_network: Arc<dyn FastNetwork>,
         runtime: tokio::runtime::Handle,
         host_info: HostInfo,
         cancellation_token: CancellationToken,
+        proto_server_addr: SocketAddr,
     ) -> Arc<RangeClient> {
+        let addr = format!("http://{}", proto_server_addr);
+        let proto_client = Arc::new(RangeServerClient::connect(addr).await.unwrap());
         let rc = Arc::new(RangeClient {
             fast_network,
             range_server_info: host_info,
             outstanding_requests: Mutex::new(HashMap::new()),
+            proto_client,
         });
 
         let rc_clone = rc.clone();
@@ -415,5 +425,48 @@ impl RangeClient {
         );
         fbb.finish(fbb_root, None);
         fbb.finished_data()
+    }
+
+    pub async fn prefetch(
+        &self,
+        tx: Arc<TransactionInfo>,
+        range_id: &FullRangeId,
+        keys: Vec<Bytes>,
+    ) -> Result<(), RangeServerError> {
+        // Create a PrefetchRequest
+        let transaction_id = tx.id.to_string();
+        let keyspace_id = range_id.keyspace_id.id.to_string();
+        let range_id = range_id.range_id.to_string();
+
+        let range = RangeId {
+            keyspace_id,
+            range_id,
+        };
+
+        let range_keys: Vec<RangeKey> = keys
+            .into_iter()
+            .map(|key| RangeKey {
+                range: Some(range.clone()),
+                key: key.to_vec(),
+            })
+            .collect();
+
+        let request = PrefetchRequest {
+            transaction_id,
+            range_key: range_keys,
+        };
+        // Pull the client
+        let mut client = (*self.proto_client).clone();
+        // Send the request
+        match client.prefetch(Request::new(request)).await {
+            Ok(response) => {
+                println!("RESPONSE={:?}", response);
+                Ok(())
+            }
+            Err(e) => {
+                println!("Failed prefetch: {:?}", e);
+                Err(RangeServerError::PrefetchError)
+            }
+        }
     }
 }

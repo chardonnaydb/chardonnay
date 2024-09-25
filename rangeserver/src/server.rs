@@ -10,6 +10,7 @@ use common::keyspace_id::KeyspaceId;
 use common::util;
 use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
 use flatbuffers::FlatBufferBuilder;
+use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio_util::sync::CancellationToken;
 
@@ -696,6 +697,7 @@ where
         server: Arc<Self>,
         fast_network: Arc<dyn FastNetwork>,
         cancellation_token: CancellationToken,
+        proto_server_listener: TcpListener,
     ) -> Result<oneshot::Receiver<Result<(), DynamicErr>>, DynamicErr> {
         let (warden_s, warden_r) = mpsc::unbounded_channel();
         let server_clone = server.clone();
@@ -710,12 +712,6 @@ where
             println!("Warden update loop exited!")
         });
 
-        // Pull the gRPC server address and define the service
-        let addr: SocketAddr =
-            format!("127.0.0.1:{}", server.config.range_server.proto_server_port)
-                .parse()
-                .unwrap();
-
         let prefetch = ProtoServer {
             parent_server: server.clone(),
         };
@@ -724,7 +720,9 @@ where
         server.bg_runtime.spawn(async move {
             if let Err(e) = TServer::builder()
                 .add_service(RangeServerServer::new(prefetch))
-                .serve(addr)
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(
+                    proto_server_listener,
+                ))
                 .await
             {
                 println!("Server error: {}", e);
@@ -776,6 +774,7 @@ pub mod tests {
         identity: String,
         mock_warden: MockWarden,
         storage_context: crate::storage::cassandra::for_testing::TestContext,
+        proto_server_listener: TcpListener,
     }
 
     async fn init() -> TestContext {
@@ -786,6 +785,7 @@ pub mod tests {
         let cassandra = storage_context.cassandra.clone();
         let mock_warden = MockWarden::new();
         let warden_address = mock_warden.start(None).await.unwrap();
+        let proto_server_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let region = Region {
             cloud: None,
             name: "test-region".into(),
@@ -807,6 +807,7 @@ pub mod tests {
                 range_maintenance_duration: time::Duration::from_secs(1),
                 proto_server_port: 50054,
                 fast_network_port: 50055,
+                // proto_server_addr: proto_server_listener.local_addr().unwrap(),
             },
             cassandra: CassandraConfig {
                 cql_addr: "127.0.0.1:9042".parse().unwrap(),
@@ -838,6 +839,7 @@ pub mod tests {
             identity,
             storage_context,
             mock_warden,
+            proto_server_listener,
         }
     }
 
@@ -845,10 +847,12 @@ pub mod tests {
     async fn range_server_connects_to_warden() {
         let context = init().await;
         let cancellation_token = CancellationToken::new();
+        let proto_server_listener = context.proto_server_listener;
         let ch = Server::start(
             context.server.clone(),
             context.fast_network.clone(),
             cancellation_token.clone(),
+            proto_server_listener,
         )
         .await
         .unwrap();
@@ -869,14 +873,17 @@ pub mod tests {
     async fn incremental_load_unload() {
         let context = init().await;
         let cancellation_token = CancellationToken::new();
+        let proto_server_listener = context.proto_server_listener;
         let range_id = FullRangeId {
             keyspace_id: context.storage_context.keyspace_id,
             range_id: context.storage_context.range_id,
         };
+
         let ch = Server::start(
             context.server.clone(),
             context.fast_network.clone(),
             cancellation_token.clone(),
+            proto_server_listener,
         )
         .await
         .unwrap();
@@ -906,6 +913,7 @@ pub mod tests {
     async fn initial_warden_update() {
         let context = init().await;
         let cancellation_token = CancellationToken::new();
+        let proto_server_listener = context.proto_server_listener;
         let range_id = FullRangeId {
             keyspace_id: context.storage_context.keyspace_id,
             range_id: context.storage_context.range_id,
@@ -914,10 +922,12 @@ pub mod tests {
             .mock_warden
             .assign(&range_id, &context.identity)
             .await;
+
         let ch = Server::start(
             context.server.clone(),
             context.fast_network.clone(),
             cancellation_token.clone(),
+            proto_server_listener,
         )
         .await
         .unwrap();

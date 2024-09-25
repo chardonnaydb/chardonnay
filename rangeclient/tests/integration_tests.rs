@@ -23,6 +23,7 @@ use rangeserver::{
     server::Server,
     transaction_info::TransactionInfo,
 };
+use tokio::net::TcpListener;
 use tokio::runtime::Builder;
 use uuid::Uuid;
 
@@ -85,6 +86,7 @@ async fn setup_server(
     server_socket: UdpSocket,
     cancellation_token: CancellationToken,
     warden_address: SocketAddr,
+    proto_server_listener: TcpListener,
     epoch_supplier: Arc<EpochSupplier>,
     storage_context: &rangeserver::storage::cassandra::for_testing::TestContext,
 ) -> tokio::runtime::Runtime {
@@ -111,9 +113,16 @@ async fn setup_server(
             epoch_supplier,
             bg_runtime.handle().clone(),
         );
-        let res = Server::start(server, fast_network, cancellation_token)
-            .await
-            .unwrap();
+        // TODO pass in TCP stream with port 0
+        // need to propagate address to client
+        let res = Server::start(
+            server,
+            fast_network,
+            cancellation_token,
+            proto_server_listener,
+        )
+        .await
+        .unwrap();
         res.await.unwrap()
     });
     runtime
@@ -122,6 +131,7 @@ async fn setup_server(
 async fn setup_client(
     cancellation_token: CancellationToken,
     server_address: SocketAddr,
+    proto_server_address: SocketAddr,
 ) -> (Arc<RangeClient>, tokio::runtime::Runtime) {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     let fast_network = Arc::new(UdpFastNetwork::new(UdpSocket::bind("127.0.0.1:0").unwrap()));
@@ -137,7 +147,9 @@ async fn setup_client(
         runtime.handle().clone(),
         get_server_host_info(server_address),
         cancellation_token.clone(),
-    );
+        proto_server_address,
+    )
+    .await;
     return (client, runtime);
 }
 
@@ -147,6 +159,8 @@ async fn setup() -> TestContext {
     let epoch_supplier = Arc::new(rangeserver::for_testing::epoch_supplier::EpochSupplier::new());
     let mock_warden = MockWarden::new();
     let warden_address = mock_warden.start(None).await.unwrap();
+    let proto_server_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proto_server_address = proto_server_listener.local_addr().unwrap();
     let cancellation_token = CancellationToken::new();
     let storage_context: rangeserver::storage::cassandra::for_testing::TestContext =
         rangeserver::storage::cassandra::for_testing::init().await;
@@ -154,11 +168,17 @@ async fn setup() -> TestContext {
         server_socket,
         cancellation_token.clone(),
         warden_address,
+        proto_server_listener,
         epoch_supplier.clone(),
         &storage_context,
     )
     .await;
-    let (client, client_runtime) = setup_client(cancellation_token.clone(), server_address).await;
+    let (client, client_runtime) = setup_client(
+        cancellation_token.clone(),
+        server_address,
+        proto_server_address,
+    )
+    .await;
     let range_id = FullRangeId {
         keyspace_id: storage_context.keyspace_id,
         range_id: storage_context.range_id,
@@ -320,4 +340,65 @@ async fn read_modify_write() {
     assert!(vals.get(0).unwrap().as_ref().unwrap().eq(&val1));
     assert!(vals.get(1).unwrap().as_ref().unwrap().eq(&val2));
     tear_down(context).await
+}
+
+#[tokio::test]
+async fn test_prefetch_with_value() {
+    let context = setup().await;
+    let key1 = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+    let key2 = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+    let tx = start_transaction();
+    let range_id = FullRangeId {
+        keyspace_id: context.storage_context.keyspace_id,
+        range_id: context.storage_context.range_id,
+    };
+    let keys = vec![key1.clone(), key2.clone()];
+    let _ = context
+        .client
+        .get(tx.clone(), &range_id, keys)
+        .await
+        .unwrap();
+    let val1 = Bytes::from_static(b"I have a value!");
+    let record1 = Record {
+        key: key1.clone(),
+        val: val1.clone(),
+    };
+    let val2 = Bytes::from_static(b"I have a different value!");
+    let record2 = Record {
+        key: key2.clone(),
+        val: val2.clone(),
+    };
+    let writes = vec![record1, record2];
+    let deletes = vec![];
+    let prepare_ok = context
+        .client
+        .prepare_transaction(tx.clone(), &range_id, true, &writes, &deletes)
+        .await
+        .unwrap();
+    context
+        .client
+        .commit_transaction(tx.clone(), &range_id, prepare_ok.highest_known_epoch)
+        .await
+        .unwrap();
+    let tx2 = start_transaction();
+    let keys = vec![key1.clone(), key2.clone()];
+    let vals = context.client.prefetch(tx2, &range_id, keys).await.unwrap();
+    assert_eq!(vals, ());
+    tear_down(context).await;
+}
+
+#[tokio::test]
+async fn test_prefetch_no_value() {
+    let context = setup().await;
+    let key1 = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+    let key2 = Bytes::copy_from_slice(Uuid::new_v4().as_bytes());
+    let tx = start_transaction();
+    let range_id = FullRangeId {
+        keyspace_id: context.storage_context.keyspace_id,
+        range_id: context.storage_context.range_id,
+    };
+    let keys = vec![key1.clone(), key2.clone()];
+    let vals = context.client.prefetch(tx, &range_id, keys).await.unwrap();
+    assert_eq!(vals, ());
+    tear_down(context).await;
 }

@@ -8,6 +8,7 @@ use common::{
     region::{Region, Zone},
 };
 use rangeserver::{cache::memtabledb::MemTableDB, server::Server, storage::cassandra::Cassandra};
+use tokio::net::TcpListener;
 use tokio::runtime::Builder;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -43,6 +44,12 @@ fn main() {
             .iter()
             .find(|&s| s.zone == host_info.zone)
             .unwrap();
+        let proto_server_listener = TcpListener::bind(format!(
+            "127.0.0.1:{}",
+            config.range_server.proto_server_port
+        ))
+        .await
+        .unwrap();
         info!("Connecting to Cassandra at {}", config.cassandra.cql_addr);
         let storage = Arc::new(Cassandra::new(config.cassandra.cql_addr.to_string()).await);
         // TODO: set number of threads and pin to cores.
@@ -62,9 +69,14 @@ fn main() {
             epoch_supplier,
             bg_runtime.handle().clone(),
         );
-        let res = Server::start(server, fast_network, cancellation_token)
-            .await
-            .unwrap();
+        let res = Server::start(
+            server,
+            fast_network,
+            CancellationToken::new(),
+            proto_server_listener,
+        )
+        .await
+        .unwrap();
         res.await.unwrap()
     });
     info!("Starting RangeServer...");
