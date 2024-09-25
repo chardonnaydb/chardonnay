@@ -25,10 +25,19 @@ message Zone {
     string name = 2;
 }
 
+message KeyRange {
+    // This should be left unset in CreateKeyspaceRequest.
+    string base_range_uuid = 1;
+    // If either is unspecified, that end is unbounded.
+    bytes lower_bound_inclusive = 2;
+    bytes upper_bound_exclusive = 3;
+}
+
 message CreateKeyspaceRequest {
     string namespace = 1;
     string name = 2;
     Zone primary_zone = 3;
+    repeated KeyRange base_key_ranges = 5;
 }
 
 message CreateKeyspaceResponse {
@@ -40,6 +49,7 @@ message KeyspaceInfo {
     string namespace = 2;
     string name = 3;
     Zone primary_zone = 4;
+    repeated KeyRange base_key_ranges = 5;
 }
 
 message ListKeyspacesRequest {

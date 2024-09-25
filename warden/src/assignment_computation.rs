@@ -2,7 +2,12 @@ use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 use std::{collections::HashSet, ops::Deref, sync::Mutex};
 
+use bytes::Bytes;
 use common::host_info::HostInfo;
+use common::key_range::KeyRange;
+use common::region::Region;
+use proto::universe::universe_client::{self, UniverseClient};
+use proto::universe::ListKeyspacesRequest;
 use proto::warden::WardenUpdate;
 use std::cmp::{Ordering, Reverse};
 use std::hash::{Hash, Hasher};
@@ -10,6 +15,7 @@ use tokio::sync::broadcast::{channel, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
 use tracing::{debug, error, info};
+use uuid::Uuid;
 
 use crate::persistence::{RangeAssignment, RangeInfo};
 
@@ -67,7 +73,9 @@ pub trait AssignmentComputation {
 }
 
 pub struct AssignmentComputationImpl {
-    base_ranges: Option<Vec<RangeInfo>>,
+    base_ranges: Mutex<Vec<RangeInfo>>,
+    universe_client: UniverseClient<tonic::transport::Channel>,
+    region: Region,
     range_assignments: Mutex<Vec<RangeAssignment>>,
     ready_range_servers: Mutex<HashSet<HostInfoWrapper>>,
     unassigned_base_ranges: Mutex<Vec<RangeInfo>>,
@@ -75,13 +83,17 @@ pub struct AssignmentComputationImpl {
 }
 
 impl AssignmentComputationImpl {
-    pub fn new(
+    pub async fn new(
         runtime: tokio::runtime::Handle,
         cancellation_token: CancellationToken,
+        universe_client: UniverseClient<tonic::transport::Channel>,
+        region: Region,
     ) -> Arc<Self> {
         let s = Arc::new(Self {
-            // TODO(purujit): Initialize base_ranges and range_assignments from database.
-            base_ranges: None,
+            // TODO(purujit): Initialize base_ranges from cluster manager and range_assignments from database.
+            base_ranges: Mutex::new(vec![]),
+            universe_client,
+            region,
             range_assignments: Mutex::new(vec![]),
             ready_range_servers: Mutex::new(HashSet::new()),
             unassigned_base_ranges: Mutex::new(vec![]),
@@ -102,10 +114,49 @@ impl AssignmentComputationImpl {
         s
     }
 
+    pub async fn read_base_ranges(&self) -> Result<(), tonic::Status> {
+        let request = tonic::Request::new(ListKeyspacesRequest {
+            region: Some(self.region.clone().into()),
+        });
+        let mut client = self.universe_client.clone();
+        let response = client.list_keyspaces(request).await?;
+        let key_spaces = response.into_inner().keyspaces;
+
+        let mut base_ranges = Vec::new();
+        for keyspace in key_spaces {
+            for range in keyspace.base_key_ranges {
+                base_ranges.push(RangeInfo {
+                    id: Uuid::parse_str(&range.base_range_uuid)
+                        .map_err(|e| tonic::Status::internal(e.to_string()))?,
+                    key_range: KeyRange {
+                        lower_bound_inclusive: if range.lower_bound_inclusive.is_empty() {
+                            None
+                        } else {
+                            Some(Bytes::from(range.lower_bound_inclusive))
+                        },
+                        upper_bound_exclusive: if range.upper_bound_exclusive.is_empty() {
+                            None
+                        } else {
+                            Some(Bytes::from(range.upper_bound_exclusive))
+                        },
+                    },
+                });
+            }
+        }
+        {
+            let l = self.base_ranges.lock();
+            *l.unwrap() = base_ranges;
+        }
+        Ok(())
+    }
+
     async fn assignment_computation_loop(self: Arc<Self>) -> () {
         let mut ready_servers = HashSet::new();
         loop {
             let clone = self.clone();
+            self.read_base_ranges().await.map_err(|e| {
+                error!("Failed to read base ranges: {}", e);
+            });
             ready_servers = clone.run_assignment_computation(ready_servers).await;
         }
     }
@@ -264,11 +315,18 @@ mod tests {
         region::{Region, Zone},
     };
     use once_cell::sync::Lazy;
-    use tonic::Code;
+    use proto::universe::{
+        universe_server::{Universe, UniverseServer},
+        CreateKeyspaceRequest, CreateKeyspaceResponse, ListKeyspacesResponse,
+    };
+    use tonic::{Code, Request, Response};
     use uuid::Uuid;
 
     use super::*;
-    use std::sync::Arc;
+    use std::{
+        error::Error,
+        sync::{Arc, Once},
+    };
     fn make_zone() -> Zone {
         Zone {
             region: Region {
@@ -289,18 +347,62 @@ mod tests {
         }
     }
 
+    struct MockUniverseService {}
+
+    #[tonic::async_trait]
+    impl Universe for MockUniverseService {
+        async fn create_keyspace(
+            &self,
+            request: Request<CreateKeyspaceRequest>,
+        ) -> Result<Response<CreateKeyspaceResponse>, Status> {
+            Ok(Response::new(CreateKeyspaceResponse {
+                keyspace_id: Uuid::new_v4().to_string(),
+            }))
+        }
+
+        async fn list_keyspaces(
+            &self,
+            _request: Request<ListKeyspacesRequest>,
+        ) -> Result<Response<ListKeyspacesResponse>, Status> {
+            Ok(Response::new(ListKeyspacesResponse { keyspaces: vec![] }))
+        }
+    }
+
     static RUNTIME: Lazy<tokio::runtime::Runtime> =
         Lazy::new(|| tokio::runtime::Runtime::new().unwrap());
-    fn setup() -> Arc<AssignmentComputationImpl> {
+    static START_UNIVERSE_SERVER: Once = Once::new();
+    async fn setup() -> Arc<AssignmentComputationImpl> {
+        let addr = "[::1]:50052".parse().unwrap();
         let cancellation_token = CancellationToken::new();
-        let computation =
-            AssignmentComputationImpl::new(RUNTIME.handle().clone(), cancellation_token);
-        computation
+        START_UNIVERSE_SERVER.call_once(|| {
+            tokio::spawn(async move {
+                let universe_server = MockUniverseService {};
+                tonic::transport::Server::builder()
+                    .add_service(UniverseServer::new(universe_server))
+                    .serve(addr)
+                    .await
+                    .unwrap();
+            });
+        });
+        while let Err(_e) = UniverseClient::connect("http://[::1]:50052").await {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let client = UniverseClient::connect("http://[::1]:50052").await.unwrap();
+        let computation = AssignmentComputationImpl::new(
+            RUNTIME.handle().clone(),
+            cancellation_token,
+            client,
+            Region {
+                cloud: None,
+                name: "".to_string(),
+            },
+        );
+        computation.await
     }
 
     #[tokio::test]
     async fn test_run_assignment_computation_empty() {
-        let computation = setup();
+        let computation = setup().await;
         let computation_clone = computation.clone();
         computation_clone
             .run_assignment_computation(HashSet::new())
@@ -312,7 +414,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_assignment_computation_single_server() {
-        let computation = setup();
+        let computation = setup().await;
         let computation_clone = computation.clone();
 
         // Populate unassigned_base_ranges with one range and have one server to assign.
@@ -347,7 +449,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_assignment_computation_multiple_servers() {
-        let computation = setup();
+        let computation = setup().await;
         let computation_clone = computation.clone();
 
         // Populate unassigned_base_ranges with 3 ranges and have 2 servers to assign.
@@ -411,7 +513,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_assignment_computation_reassign_unavailable_server() {
-        let computation = setup();
+        let computation = setup().await;
         let computation_clone = computation.clone();
 
         // Populate unassigned_base_ranges with 2 ranges and have 2 servers to assign.
@@ -489,7 +591,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_new_range_server() {
-        let computation = setup();
+        let computation = setup().await;
         let server = HostInfo {
             identity: "new_server".to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),
@@ -515,7 +617,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_notify_range_server_unavailability() {
-        let computation = setup();
+        let computation = setup().await;
         let server = HostInfo {
             identity: "server1".to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),
@@ -534,7 +636,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_notify_range_server_unavailability_older_epoch() {
-        let computation = setup();
+        let computation = setup().await;
         let server = HostInfo {
             identity: "server1".to_string(),
             address: "127.0.0.1:8080".parse().unwrap(),

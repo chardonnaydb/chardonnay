@@ -17,6 +17,26 @@ pub struct Region {
     pub name: String,
 }
 
+impl Into<proto::universe::Region> for Region {
+    fn into(self) -> proto::universe::Region {
+        proto::universe::Region {
+            cloud: self.cloud.map(|c| match c {
+                Cloud::Aws => {
+                    proto::universe::region::Cloud::PublicCloud(proto::universe::Cloud::Aws.into())
+                }
+                Cloud::Azure => proto::universe::region::Cloud::PublicCloud(
+                    proto::universe::Cloud::Azure.into(),
+                ),
+                Cloud::Gcp => {
+                    proto::universe::region::Cloud::PublicCloud(proto::universe::Cloud::Gcp.into())
+                }
+                Cloud::Other(s) => proto::universe::region::Cloud::OtherCloud(s),
+            }),
+            name: self.name,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub struct Zone {
     pub region: Region,

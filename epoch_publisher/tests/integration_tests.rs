@@ -39,6 +39,7 @@ fn get_config(epoch_address: SocketAddr) -> Config {
     let region_config = RegionConfig {
         // Not used in these tests.
         warden_address: "127.0.0.1:1".parse().unwrap(),
+        universe_address: "127.0.0.1:123".parse().unwrap(),
         epoch_publishers: HashSet::new(),
     };
     let epoch_config = EpochConfig {
