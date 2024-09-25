@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chardonnay-epoch-service
+  namespace: chardonnay
+spec:
+  serviceName: "chardonnay-epoch-service"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chardonnay-epoch-service
+  template:
+    metadata:
+      labels:
+        app: chardonnay-epoch-service
+    spec:
+      containers:
+      - name: epoch
+        image: chardonnay-epoch-service:latest
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chardonnay-epoch-service
+  namespace: chardonnay
+spec:
+  selector:
+    app: chardonnay-epoch-service
+  # TODO: Expose epoch service ports
+  clusterIP: None
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080

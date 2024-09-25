@@ -8,7 +8,7 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 use common::{
-    config::{Config, EpochConfig, RangeServerConfig, RegionConfig},
+    config::{CassandraConfig, Config, EpochConfig, RangeServerConfig, RegionConfig},
     full_range_id::FullRangeId,
     host_info::HostInfo,
     keyspace_id::KeyspaceId,
@@ -53,6 +53,9 @@ fn get_config(warden_address: SocketAddr) -> Config {
             range_maintenance_duration: time::Duration::from_secs(1),
             proto_server_port: 50054,
             fast_network_port: 50055,
+        },
+        cassandra: CassandraConfig {
+            cql_addr: "127.0.0.1:9042".parse().unwrap(),
         },
         regions: std::collections::HashMap::new(),
         epoch: epoch_config,

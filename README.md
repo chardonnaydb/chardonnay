@@ -64,3 +64,56 @@ Run:
 ```sh
 cargo test
 ```
+
+## Building Chardonnay with Docker
+
+Run:
+
+```sh
+RANGESERVER_IMG="chardonnay-rangeserver"
+WARDEN_IMG="chardonnay-warden"
+EPOCH_PUBLISHER_IMG="epoch-publisher"
+EPOCH_IMG="epoch"
+
+TAG="latest"
+
+docker build -t "$RANGESERVER_IMG:$TAG" --target rangeserver .
+docker build -t "$WARDEN_IMG:$TAG" --target warden .
+docker build -t "$EPOCH_PUBLISHER_IMG:$TAG" --target epoch_publisher .
+docker build -t "$EPOCH_IMG:$TAG" --target epoch .
+```
+
+## Running Chardonnay on Kubernetes
+
+Prerequisites:
+- Minikube installation
+
+1. Start minikube:
+
+   ```sh
+   minikube start
+   ```
+
+1. Load chardonnay docker images on minikube:
+
+   ```sh
+   minikube image load "$RANGESERVER_IMG:$TAG"
+   minikube image load "$WARDEN_IMG:$TAG"
+   minikube image load "$EPOCH_PUBLISHER_IMG:$TAG"
+   minikube image load "$EPOCH_IMG:$TAG"
+   ```
+
+1. Apply chardonnay manifests for deploying on Kubernetes:
+
+   ```sh
+   kubectl apply \
+      -f kubernetes/namespace.yaml \
+      -f kubernetes/cassandra.yaml \
+      -f kubernetes/rangeserver.yaml
+   ```
+
+1. Confirm that RangeServer is running:
+
+   ```sh
+   kubectl logs -f -n chardonnay chardonnay-rangeserver-0
+   ```

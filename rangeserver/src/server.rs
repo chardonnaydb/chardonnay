@@ -180,16 +180,7 @@ where
         }
     }
 
-    async fn load_range_in_bg_runtime(
-        &self,
-        rm: Arc<RangeManager<S, InMemoryWal, C>>,
-    ) -> Result<(), Error> {
-        self.bg_runtime
-            .spawn(async move { rm.load().await })
-            .await
-            .unwrap()
-    }
-    async fn maybe_load_and_get_range(
+    async fn maybe_load_and_get_range_inner(
         &self,
         id: &FullRangeId,
     ) -> Result<Arc<RangeManager<S, InMemoryWal, C>>, Error> {
@@ -198,7 +189,7 @@ where
             let range_table = self.loaded_ranges.read().await;
             match (*range_table).get(&id.range_id) {
                 Some(r) => {
-                    self.load_range_in_bg_runtime(r.clone()).await?;
+                    r.load().await?;
                     return Ok(r.clone());
                 }
                 None => (),
@@ -213,7 +204,7 @@ where
             let mut range_table = self.loaded_ranges.write().await;
             match (range_table).get(&id.range_id) {
                 Some(r) => {
-                    self.load_range_in_bg_runtime(r.clone()).await?;
+                    r.load().await?;
                     r.clone()
                 }
                 None => {
@@ -225,15 +216,40 @@ where
                         InMemoryWal::new(),
                         C::new(CacheOptions::default()).await,
                         self.prefetching_buffer.clone(),
+                        self.bg_runtime.clone(),
                     );
                     (range_table).insert(id.range_id, rm.clone());
                     drop(range_table);
-                    self.load_range_in_bg_runtime(rm.clone()).await?;
+                    rm.load().await?;
                     rm.clone()
                 }
             }
         };
         Ok(rm.clone())
+    }
+
+    async fn maybe_load_and_get_range(
+        &self,
+        id: &FullRangeId,
+    ) -> Result<Arc<RangeManager<S, InMemoryWal, C>>, Error> {
+        let res = self.maybe_load_and_get_range_inner(id).await;
+        match res {
+            Ok(_) => (),
+            Err(_) => {
+                // An RM load can only be attempted once, so remove from table
+                // to force creating a fresh one if the range is still assigned
+                // to us.
+                let mut range_table = self.loaded_ranges.write().await;
+                let remove = match range_table.get(&id.range_id) {
+                    None => false,
+                    Some(r) => !r.is_unloaded().await,
+                };
+                if remove {
+                    range_table.remove(&id.range_id);
+                }
+            }
+        };
+        res
     }
 
     fn send_response(
@@ -731,7 +747,7 @@ where
 pub mod tests {
     use crate::cache::memtabledb::MemTableDB;
     use crate::epoch_supplier::EpochSupplier as Trait;
-    use common::config::{EpochConfig, RangeServerConfig, RegionConfig};
+    use common::config::{CassandraConfig, EpochConfig, RangeServerConfig, RegionConfig};
     use common::network::for_testing::udp_fast_network::UdpFastNetwork;
     use common::region::{Region, Zone};
     use core::time;
@@ -792,6 +808,9 @@ pub mod tests {
                 proto_server_port: 50054,
                 fast_network_port: 50055,
                 // proto_server_addr: proto_server_listener.local_addr().unwrap(),
+            },
+            cassandra: CassandraConfig {
+                cql_addr: "127.0.0.1:9042".parse().unwrap(),
             },
             regions: std::collections::HashMap::new(),
             epoch: epoch_config,

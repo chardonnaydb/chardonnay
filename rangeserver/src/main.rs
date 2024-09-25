@@ -8,18 +8,17 @@ use common::{
     region::{Region, Zone},
 };
 use rangeserver::{cache::memtabledb::MemTableDB, server::Server, storage::cassandra::Cassandra};
+use tokio::net::TcpListener;
 use tokio::runtime::Builder;
-use tokio::{
-    net::TcpListener,
-    sync::{mpsc, RwLock},
-};
 use tokio_util::sync::CancellationToken;
+use tracing::info;
 
 fn main() {
     tracing_subscriber::fmt::init();
     // TODO(tamer): take the config path as an argument.
     let config: Config =
         serde_json::from_str(&std::fs::read_to_string("config.json").unwrap()).unwrap();
+
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
     let runtime_handle = runtime.handle().clone();
     let fast_network = Arc::new(UdpFastNetwork::new(
@@ -45,13 +44,14 @@ fn main() {
             .iter()
             .find(|&s| s.zone == host_info.zone)
             .unwrap();
-        let storage = Arc::new(Cassandra::new("127.0.0.1:9042".to_string()).await);
-        let epoch_supplier =
-            Arc::new(rangeserver::for_testing::epoch_supplier::EpochSupplier::new());
-        let proto_server_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        // let config = get_config(warden_address, &proto_server_listener).await;
-
-        let host_info = get_host_info();
+        let proto_server_listener = TcpListener::bind(format!(
+            "127.0.0.1:{}",
+            config.range_server.proto_server_port
+        ))
+        .await
+        .unwrap();
+        info!("Connecting to Cassandra at {}", config.cassandra.cql_addr);
+        let storage = Arc::new(Cassandra::new(config.cassandra.cql_addr.to_string()).await);
         // TODO: set number of threads and pin to cores.
         let bg_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
 
@@ -79,6 +79,7 @@ fn main() {
         .unwrap();
         res.await.unwrap()
     });
+    info!("Starting RangeServer...");
     runtime.block_on(server_handle).unwrap().unwrap();
 }
 

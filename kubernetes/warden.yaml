@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: chardonnay-warden
+  namespace: chardonnay
+spec:
+  serviceName: "chardonnay-warden"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chardonnay-warden
+  template:
+    metadata:
+      labels:
+        app: chardonnay-warden
+    spec:
+      containers:
+      - name: warden
+        image: chardonnay-warden:latest
+        ports:
+        - containerPort: 10010
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chardonnay-warden
+  namespace: chardonnay
+spec:
+  selector:
+    app: chardonnay-warden
+  # TODO: Expose warden ports
+  clusterIP: None
+  ports:
+    - protocol: TCP
+      port: 10010
+      targetPort: 10010

@@ -150,13 +150,13 @@ struct LoadedState {
     lock_table: Mutex<LockTable>,
     // TODO: need more efficient representation of prepares than raw bytes.
     pending_prepare_records: Mutex<HashMap<Uuid, Bytes>>,
-    lease_renewal_task: tokio::task::JoinHandle<Result<(), Error>>,
 }
 
 enum State {
-    Unloaded,
+    NotLoaded,
     Loading(tokio::sync::broadcast::Sender<Result<(), Error>>),
     Loaded(LoadedState),
+    Unloaded,
 }
 
 pub struct RangeManager<S, W, C>
@@ -169,10 +169,11 @@ where
     config: Config,
     storage: Arc<S>,
     epoch_supplier: Arc<dyn EpochSupplier>,
-    wal: W,
+    wal: Arc<W>,
     cache: Arc<RwLock<C>>,
     state: Arc<RwLock<State>>,
     prefetching_buffer: Arc<PrefetchingBuffer>,
+    bg_runtime: tokio::runtime::Handle,
 }
 
 #[async_trait]
@@ -192,18 +193,18 @@ where
                     drop(state);
                     return receiver.recv().await.unwrap();
                 }
-                State::Unloaded => {
+                State::NotLoaded => {
                     let (sender, _) = tokio::sync::broadcast::channel(1);
                     *state = State::Loading(sender.clone());
                     sender
                 }
+                State::Unloaded => return Err(Error::RangeIsNotLoaded),
             }
         };
 
-        let load_result: Result<LoadedState, Error> = self.load_inner().await;
+        let load_result = self.load_inner().await;
+
         let mut state = self.state.write().await;
-        // TODO: we must avoid loading the range after it's been unloaded.
-        // Consider making RM's only loadable once instead?
         match load_result {
             Err(e) => {
                 *state = State::Unloaded;
@@ -222,6 +223,14 @@ where
     async fn unload(&self) {
         let mut state = self.state.write().await;
         *state = State::Unloaded;
+    }
+
+    async fn is_unloaded(&self) -> bool {
+        let state = self.state.read().await;
+        match state.deref() {
+            State::Unloaded => true,
+            State::NotLoaded | State::Loading(_) | State::Loaded(_) => false,
+        }
     }
 
     async fn prefetch(&self, transaction_id: Uuid, key: Bytes) -> Result<(), Error> {
@@ -259,7 +268,7 @@ where
     async fn get(&self, tx: Arc<TransactionInfo>, key: Bytes) -> Result<GetResult, Error> {
         let s = self.state.write().await;
         match s.deref() {
-            State::Unloaded | State::Loading(_) => Err(Error::RangeIsNotLoaded),
+            State::NotLoaded | State::Unloaded | State::Loading(_) => Err(Error::RangeIsNotLoaded),
             State::Loaded(state) => {
                 if !state.range_info.key_range.includes(key.clone()) {
                     return Err(Error::KeyIsOutOfRange);
@@ -313,7 +322,9 @@ where
     ) -> Result<PrepareResult, Error> {
         let s = self.state.write().await;
         match s.deref() {
-            State::Unloaded | State::Loading(_) => return Err(Error::RangeIsNotLoaded),
+            State::NotLoaded | State::Unloaded | State::Loading(_) => {
+                return Err(Error::RangeIsNotLoaded)
+            }
             State::Loaded(state) => {
                 // Sanity check that the written keys are all within this range.
                 // TODO: check delete and write sets are non-overlapping.
@@ -370,7 +381,9 @@ where
     async fn abort(&self, tx: Arc<TransactionInfo>, abort: AbortRequest<'_>) -> Result<(), Error> {
         let s = self.state.write().await;
         match s.deref() {
-            State::Unloaded | State::Loading(_) => return Err(Error::RangeIsNotLoaded),
+            State::NotLoaded | State::Unloaded | State::Loading(_) => {
+                return Err(Error::RangeIsNotLoaded)
+            }
             State::Loaded(state) => {
                 let mut lock_table = state.lock_table.lock().await;
                 if !lock_table.is_currently_holding(tx.clone()) {
@@ -403,7 +416,9 @@ where
     ) -> Result<(), Error> {
         let mut s = self.state.write().await;
         match s.deref_mut() {
-            State::Unloaded | State::Loading(_) => return Err(Error::RangeIsNotLoaded),
+            State::NotLoaded | State::Unloaded | State::Loading(_) => {
+                return Err(Error::RangeIsNotLoaded)
+            }
             State::Loaded(state) => {
                 let mut lock_table = state.lock_table.lock().await;
                 if !lock_table.is_currently_holding(tx.clone()) {
@@ -508,66 +523,82 @@ where
         wal: W,
         cache: C,
         prefetching_buffer: Arc<PrefetchingBuffer>,
+        bg_runtime: tokio::runtime::Handle,
     ) -> Arc<Self> {
         Arc::new(RangeManager {
             range_id,
             config,
             storage,
             epoch_supplier,
-            wal,
+            wal: Arc::new(wal),
             cache: Arc::new(RwLock::new(cache)),
-            state: Arc::new(RwLock::new(State::Unloaded)),
+            state: Arc::new(RwLock::new(State::NotLoaded)),
             prefetching_buffer,
+            bg_runtime,
         })
     }
 
     async fn load_inner(&self) -> Result<LoadedState, Error> {
-        // TODO: handle all errors instead of panicking.
-        let epoch = self
-            .epoch_supplier
-            .read_epoch()
-            .await
-            .map_err(Error::from_epoch_supplier_error)?;
-        let range_info = self
-            .storage
-            .take_ownership_and_load_range(self.range_id)
-            .await
-            .map_err(Error::from_storage_error)?;
-        // Epoch read from the provider can be 1 less than the true epoch. The highest known epoch
-        // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
-        // we just wait for the epoch to advance once.
-        self.epoch_supplier
-            .wait_until_epoch(epoch + 1, chrono::Duration::seconds(10))
-            .await
-            .map_err(Error::from_epoch_supplier_error)?;
-        // Get a new epoch lease.
-        let highest_known_epoch = epoch + 1;
-        let new_epoch_lease_lower_bound =
-            std::cmp::max(highest_known_epoch, range_info.epoch_lease.1 + 1);
-        let new_epoch_lease_upper_bound = new_epoch_lease_lower_bound + 10;
-        self.storage
-            .renew_epoch_lease(
-                self.range_id,
-                (new_epoch_lease_lower_bound, new_epoch_lease_upper_bound),
-                range_info.leader_sequence_number,
-            )
-            .await
-            .map_err(Error::from_storage_error)?;
-        self.wal.sync().await.map_err(Error::from_wal_error)?;
-        // Create a recurrent task to renew.
+        let epoch_supplier = self.epoch_supplier.clone();
+        let storage = self.storage.clone();
+        let wal = self.wal.clone();
+        let range_id = self.range_id.clone();
+        let bg_runtime = self.bg_runtime.clone();
+        let state = self.state.clone();
         let lease_renewal_interval = self.config.range_server.range_maintenance_duration;
-        // TODO: Check on the task handle to see if it errored out.
-        let lease_renewal_task = self
-            .start_renew_epoch_lease_task(lease_renewal_interval)
-            .await;
-        // TODO: apply WAL here!
-        Ok(LoadedState {
-            range_info,
-            highest_known_epoch,
-            lock_table: Mutex::new(LockTable::new()),
-            pending_prepare_records: Mutex::new(HashMap::new()),
-            lease_renewal_task: lease_renewal_task,
-        })
+        self.bg_runtime
+            .spawn(async move {
+                // TODO: handle all errors instead of panicking.
+                let epoch = epoch_supplier
+                    .read_epoch()
+                    .await
+                    .map_err(Error::from_epoch_supplier_error)?;
+                let range_info = storage
+                    .take_ownership_and_load_range(range_id)
+                    .await
+                    .map_err(Error::from_storage_error)?;
+                // Epoch read from the provider can be 1 less than the true epoch. The highest known epoch
+                // of a range cannot move backward even across range load/unloads, so to maintain that guarantee
+                // we just wait for the epoch to advance once.
+                epoch_supplier
+                    .wait_until_epoch(epoch + 1, chrono::Duration::seconds(10))
+                    .await
+                    .map_err(Error::from_epoch_supplier_error)?;
+                // Get a new epoch lease.
+                let highest_known_epoch = epoch + 1;
+                let new_epoch_lease_lower_bound =
+                    std::cmp::max(highest_known_epoch, range_info.epoch_lease.1 + 1);
+                let new_epoch_lease_upper_bound = new_epoch_lease_lower_bound + 10;
+                storage
+                    .renew_epoch_lease(
+                        range_id,
+                        (new_epoch_lease_lower_bound, new_epoch_lease_upper_bound),
+                        range_info.leader_sequence_number,
+                    )
+                    .await
+                    .map_err(Error::from_storage_error)?;
+                wal.sync().await.map_err(Error::from_wal_error)?;
+                // Create a recurrent task to renew.
+                bg_runtime.spawn(async move {
+                    Self::renew_epoch_lease_task(
+                        range_id,
+                        epoch_supplier,
+                        storage,
+                        state,
+                        lease_renewal_interval,
+                    )
+                    .await
+                });
+                // TODO: apply WAL here!
+                Ok(LoadedState {
+                    range_info,
+                    highest_known_epoch,
+                    lock_table: Mutex::new(LockTable::new()),
+                    pending_prepare_records: Mutex::new(HashMap::new()),
+                })
+            })
+            .await
+            .unwrap()
     }
 
     async fn renew_epoch_lease_task(
@@ -589,7 +620,8 @@ where
                 old_lease = state.range_info.epoch_lease;
                 leader_sequence_number = state.range_info.leader_sequence_number;
             } else {
-                return Err(Error::RangeIsNotLoaded);
+                tokio::time::sleep(lease_renewal_interval).await;
+                continue;
             }
             // TODO: If we renew too often, this could get out of hand.
             // We should probably limit the max number of epochs in the future
@@ -631,27 +663,6 @@ where
         }
     }
 
-    async fn start_renew_epoch_lease_task(
-        &self,
-        lease_renewal_interval: std::time::Duration,
-    ) -> tokio::task::JoinHandle<Result<(), Error>> {
-        let range_id = self.range_id;
-        let epoch_supplier = self.epoch_supplier.clone();
-        let storage = self.storage.clone();
-        let state = self.state.clone();
-        let task_handle = tokio::spawn(async move {
-            Self::renew_epoch_lease_task(
-                range_id,
-                epoch_supplier,
-                storage,
-                state,
-                lease_renewal_interval,
-            )
-            .await
-        });
-        task_handle
-    }
-
     async fn acquire_range_lock(
         &self,
         state: &LoadedState,
@@ -679,7 +690,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use common::config::{EpochConfig, RangeServerConfig};
+    use common::config::{CassandraConfig, EpochConfig, HostPort, RangeServerConfig};
     use common::util;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
@@ -830,6 +841,12 @@ mod tests {
                 proto_server_port: 50054,
                 fast_network_port: 50055,
             },
+            cassandra: CassandraConfig {
+                cql_addr: HostPort {
+                    host: "127.0.0.1".to_string(),
+                    port: 9042,
+                },
+            },
             regions: std::collections::HashMap::new(),
             epoch: epoch_config,
         };
@@ -837,11 +854,12 @@ mod tests {
             range_id,
             config,
             storage: cassandra,
-            wal: InMemoryWal::new(),
+            wal: Arc::new(InMemoryWal::new()),
             cache,
             epoch_supplier: epoch_supplier.clone(),
-            state: Arc::new(RwLock::new(State::Unloaded)),
+            state: Arc::new(RwLock::new(State::NotLoaded)),
             prefetching_buffer,
+            bg_runtime: tokio::runtime::Handle::current().clone(),
         });
         let rm_copy = rm.clone();
         let init_handle = tokio::spawn(async move { rm_copy.load().await.unwrap() });

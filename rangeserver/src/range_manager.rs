@@ -22,7 +22,11 @@ pub trait RangeManager {
     /// Load and manage the range.
     async fn load(&self) -> Result<(), Error>;
     /// unload the range.
+    /// If the range is ever been unloaded, the same RangeManager cannot be
+    /// reused again, and a new one should be created for the same range.
     async fn unload(&self);
+    /// Returns true if the range is ever been unloaded, false otherwise.
+    async fn is_unloaded(&self) -> bool;
     /// Request prefetching a key from storage and pinning to memory.
     async fn prefetch(&self, transaction_id: Uuid, key: Bytes) -> Result<(), Error>;
     /// Get the value associated with a key.
