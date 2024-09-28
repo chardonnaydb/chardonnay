@@ -42,7 +42,7 @@ fn main() {
         .unwrap();
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
     let fast_network = Arc::new(UdpFastNetwork::new(
-        UdpSocket::bind(publisher_config.fast_network_addr).unwrap(),
+        UdpSocket::bind(publisher_config.fast_network_addr.to_socket_addr()).unwrap(),
     ));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {

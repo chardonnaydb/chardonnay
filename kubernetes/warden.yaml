@@ -17,8 +17,20 @@ spec:
       containers:
       - name: warden
         image: chardonnay-warden:latest
+        imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 10010
+        - containerPort: 50053
+        workingDir: /etc/chardonnay
+        command: ["/bin/sh", "-c"]
+        args: ["cat /etc/chardonnay/config.json && warden"]
+        volumeMounts:
+        - name: config
+          mountPath: /etc/chardonnay
+      volumes:
+      - name: config
+        configMap:
+          name: chardonnay-warden-config
+
 ---
 apiVersion: v1
 kind: Service
@@ -32,5 +44,48 @@ spec:
   clusterIP: None
   ports:
     - protocol: TCP
-      port: 10010
-      targetPort: 10010
+      port: 50053
+      targetPort: 50053
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chardonnay-warden-config
+  namespace: chardonnay
+data:
+  config.json: |
+    {
+        "range_server": {
+            "range_maintenance_duration": {
+                "secs": 1,
+                "nanos": 0
+            },
+            "proto_server_addr": "0.0.0.0:50054",
+            "fast_network_addr": "0.0.0.0:50055"
+        },
+        "epoch": {
+            "proto_server_addr": "chardonnay-epoch:50050"
+        },
+        "cassandra": {
+            "cql_addr": "cassandra:9042"
+        },
+        "regions": {
+            "test-region": {
+                "warden_address": "0.0.0.0:50053",
+                "epoch_publishers": [
+                    {
+                        "name": "ps1",
+                        "zone": "test-region/a",
+                        "publishers": [
+                            {
+                                "name": "ep1",
+                                "backend_addr": "chardonnay-epoch-publisher:50051",
+                                "fast_network_addr": "chardonnay-epoch-publisher:50052"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }

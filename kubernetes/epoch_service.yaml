@@ -1,36 +1,90 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: chardonnay-epoch-service
+  name: chardonnay-epoch
   namespace: chardonnay
 spec:
-  serviceName: "chardonnay-epoch-service"
+  serviceName: "chardonnay-epoch"
   replicas: 1
   selector:
     matchLabels:
-      app: chardonnay-epoch-service
+      app: chardonnay-epoch
   template:
     metadata:
       labels:
-        app: chardonnay-epoch-service
+        app: chardonnay-epoch
     spec:
       containers:
       - name: epoch
-        image: chardonnay-epoch-service:latest
+        image: chardonnay-epoch:latest
+        imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 8080
+        - containerPort: 50050
+        workingDir: /etc/chardonnay
+        command: ["/bin/sh", "-c"]
+        args: ["cat /etc/chardonnay/config.json && epoch"]
+        volumeMounts:
+        - name: config
+          mountPath: /etc/chardonnay
+      volumes:
+      - name: config
+        configMap:
+          name: chardonnay-epoch-config
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: chardonnay-epoch-service
+  name: chardonnay-epoch
   namespace: chardonnay
 spec:
   selector:
-    app: chardonnay-epoch-service
+    app: chardonnay-epoch
   # TODO: Expose epoch service ports
   clusterIP: None
   ports:
     - protocol: TCP
-      port: 8080
-      targetPort: 8080
+      port: 50050
+      targetPort: 50050
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chardonnay-epoch-config
+  namespace: chardonnay
+data:
+  config.json: |
+    {
+        "range_server": {
+            "range_maintenance_duration": {
+                "secs": 1,
+                "nanos": 0
+            },
+            "proto_server_addr": "0.0.0.0:50054",
+            "fast_network_addr": "0.0.0.0:50055"
+        },
+        "epoch": {
+            "proto_server_addr": "0.0.0.0:50050"
+        },
+        "cassandra": {
+            "cql_addr": "cassandra:9042"
+        },
+        "regions": {
+            "test-region": {
+                "warden_address": "chardonnay-warden:50053",
+                "epoch_publishers": [
+                    {
+                        "name": "ps1",
+                        "zone": "test-region/a",
+                        "publishers": [
+                            {
+                                "name": "ep1",
+                                "backend_addr": "chardonnay-epoch-publisher:50051",
+                                "fast_network_addr": "chardonnay-epoch-publisher:50052"
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    }

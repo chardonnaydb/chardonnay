@@ -72,8 +72,8 @@ Run:
 ```sh
 RANGESERVER_IMG="chardonnay-rangeserver"
 WARDEN_IMG="chardonnay-warden"
-EPOCH_PUBLISHER_IMG="epoch-publisher"
-EPOCH_IMG="epoch"
+EPOCH_PUBLISHER_IMG="chardonnay-epoch-publisher"
+EPOCH_IMG="chardonnay-epoch"
 
 TAG="latest"
 
@@ -97,10 +97,19 @@ Prerequisites:
 1. Load chardonnay docker images on minikube:
 
    ```sh
-   minikube image load "$RANGESERVER_IMG:$TAG"
-   minikube image load "$WARDEN_IMG:$TAG"
-   minikube image load "$EPOCH_PUBLISHER_IMG:$TAG"
-   minikube image load "$EPOCH_IMG:$TAG"
+   minikube image load --overwrite "$RANGESERVER_IMG:$TAG"
+   minikube image load --overwrite "$WARDEN_IMG:$TAG"
+   minikube image load --overwrite "$EPOCH_PUBLISHER_IMG:$TAG"
+   minikube image load --overwrite "$EPOCH_IMG:$TAG"
+   ```
+
+   :note: You might need to delete and re-load the images:
+
+   ```sh
+   minikube image rm "$RANGESERVER_IMG:$TAG"
+   minikube image rm "$WARDEN_IMG:$TAG"
+   minikube image rm "$EPOCH_PUBLISHER_IMG:$TAG"
+   minikube image rm "$EPOCH_IMG:$TAG"
    ```
 
 1. Apply chardonnay manifests for deploying on Kubernetes:
@@ -109,11 +118,31 @@ Prerequisites:
    kubectl apply \
       -f kubernetes/namespace.yaml \
       -f kubernetes/cassandra.yaml \
-      -f kubernetes/rangeserver.yaml
+      -f kubernetes/rangeserver.yaml \
+      -f kubernetes/warden.yaml \
+      -f kubernetes/epoch_publisher.yaml \
+      -f kubernetes/epoch_service.yaml
    ```
 
-1. Confirm that RangeServer is running:
+   :warning: Many components of Chardonnay currently crash when their
+   dependencies are not available yet, instead of simply retrying. This means
+   you may need to wait for some minutes for the deployment to stabilize.
+
+1. Exec into the cassandra container and create the necessary keyspace and
+   schema:
 
    ```sh
-   kubectl logs -f -n chardonnay chardonnay-rangeserver-0
+   kubectl exec -it -n chardonnay cassandra-0 -- bash
+
+   # Open a cql shell
+   cqlsh
+   # Copy paste the commands from keyspace.cql
+   USE chardonnay;
+   # Copy paste the commands from schema.cql
+   ```
+
+1. Confirm that everything becomes ready:
+
+   ```sh
+   kubectl get pods -n chardonnay
    ```

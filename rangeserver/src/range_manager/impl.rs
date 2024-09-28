@@ -572,6 +572,7 @@ mod tests {
     use common::util;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
+    use std::str::FromStr;
     use uuid::Uuid;
 
     use super::*;
@@ -716,8 +717,8 @@ mod tests {
         let config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
-                proto_server_port: 50054,
-                fast_network_port: 50055,
+                proto_server_addr: HostPort::from_str("127.0.0.1:50054").unwrap(),
+                fast_network_addr: HostPort::from_str("127.0.0.1:50055").unwrap(),
             },
             cassandra: CassandraConfig {
                 cql_addr: HostPort {

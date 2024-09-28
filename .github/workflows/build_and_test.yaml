@@ -73,3 +73,5 @@ jobs:
         target: ${{ matrix.target }}
         tags: ${{ matrix.tags }}
         push: false
+
+  # TODO: Add an action to test deploying Chardonnay on a minikube cluster

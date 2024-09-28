@@ -22,11 +22,7 @@ fn main() {
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
     let runtime_handle = runtime.handle().clone();
     let fast_network = Arc::new(UdpFastNetwork::new(
-        UdpSocket::bind(format!(
-            "127.0.0.1:{}",
-            config.range_server.fast_network_port
-        ))
-        .unwrap(),
+        UdpSocket::bind(config.range_server.fast_network_addr.to_socket_addr()).unwrap(),
     ));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {
@@ -44,12 +40,10 @@ fn main() {
             .iter()
             .find(|&s| s.zone == host_info.zone)
             .unwrap();
-        let proto_server_listener = TcpListener::bind(format!(
-            "127.0.0.1:{}",
-            config.range_server.proto_server_port
-        ))
-        .await
-        .unwrap();
+        let proto_server_listener =
+            TcpListener::bind(config.range_server.proto_server_addr.to_socket_addr())
+                .await
+                .unwrap();
         info!("Connecting to Cassandra at {}", config.cassandra.cql_addr);
         let storage = Arc::new(Cassandra::new(config.cassandra.cql_addr.to_string()).await);
         // TODO: set number of threads and pin to cores.

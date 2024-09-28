@@ -245,7 +245,7 @@ impl Server {
             // TODO(tamer): make this configurable.
             if let Err(e) = TServer::builder()
                 .add_service(EpochPublisherServer::new(proto_server))
-                .serve(server_clone.publisher_config.backend_addr.clone())
+                .serve(server_clone.publisher_config.backend_addr.to_socket_addr())
                 .await
             {
                 panic!("Unable to start proto server: {}", e);

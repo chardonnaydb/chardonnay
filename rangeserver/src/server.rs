@@ -747,12 +747,13 @@ where
 pub mod tests {
     use crate::cache::memtabledb::MemTableDB;
     use crate::epoch_supplier::EpochSupplier as Trait;
-    use common::config::{CassandraConfig, EpochConfig, RangeServerConfig, RegionConfig};
+    use common::config::{CassandraConfig, EpochConfig, HostPort, RangeServerConfig, RegionConfig};
     use common::network::for_testing::udp_fast_network::UdpFastNetwork;
     use common::region::{Region, Zone};
     use core::time;
     use std::collections::HashSet;
     use std::net::UdpSocket;
+    use std::str::FromStr;
 
     use super::*;
 
@@ -784,7 +785,11 @@ pub mod tests {
             crate::storage::cassandra::for_testing::init().await;
         let cassandra = storage_context.cassandra.clone();
         let mock_warden = MockWarden::new();
-        let warden_address = mock_warden.start(None).await.unwrap();
+        let warden_address_sa = mock_warden.start(None).await.unwrap();
+        let warden_address = HostPort {
+            host: warden_address_sa.ip().to_string(),
+            port: warden_address_sa.port(),
+        };
         let proto_server_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let region = Region {
             cloud: None,
@@ -806,8 +811,8 @@ pub mod tests {
         let mut config = Config {
             range_server: RangeServerConfig {
                 range_maintenance_duration: time::Duration::from_secs(1),
-                proto_server_port: 50054,
-                fast_network_port: 50055,
+                proto_server_addr: HostPort::from_str("127.0.0.1:50054").unwrap(),
+                fast_network_addr: HostPort::from_str("127.0.0.1:50055").unwrap(),
                 // proto_server_addr: proto_server_listener.local_addr().unwrap(),
             },
             cassandra: CassandraConfig {

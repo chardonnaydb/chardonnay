@@ -4,6 +4,7 @@ use common::{config::EpochPublisherSet, host_info::HostInfo, network::fast_netwo
 use epoch_publisher::{client::EpochPublisherClient, error::Error};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 /// EpochReader reads the latest epoch from an EpochPublisherSet.
 pub struct EpochReader {
@@ -27,7 +28,7 @@ impl EpochReader {
             .map(|publisher| {
                 let host_info = HostInfo {
                     identity: publisher.name.clone(),
-                    address: publisher.fast_network_addr,
+                    address: publisher.fast_network_addr.to_socket_addr(),
                     zone: publisher_set.zone.clone(),
                     warden_connection_epoch: 0,
                 };
@@ -56,7 +57,7 @@ impl EpochReader {
             let client = c.clone();
             join_set.spawn_on(
                 // TODO(tamer): pass timeout in as a parameter.
-                async move { client.read_epoch(chrono::Duration::seconds(1)).await },
+                async move { client.read_epoch(chrono::Duration::seconds(5)).await },
                 &self.runtime,
             );
         }
@@ -65,11 +66,17 @@ impl EpochReader {
         let mut epoch_value_counts = HashMap::<u64, u64>::new();
         while let Some(res) = join_set.join_next().await {
             let res = match res {
-                Err(_) => continue, // TODO: maybe log the error here
+                Err(e) => {
+                    warn!("Error reading epoch from publisher: {:?}", e);
+                    continue;
+                }
                 Ok(res) => res,
             };
             let epoch = match res {
-                Err(_) => continue, // TODO: maybe log the error here
+                Err(e) => {
+                    warn!("Error reading epoch from publisher: {:?}", e);
+                    continue;
+                }
                 Ok(epoch) => epoch,
             };
             let current_count = epoch_value_counts.get(&epoch).unwrap_or(&0);

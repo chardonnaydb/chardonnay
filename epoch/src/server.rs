@@ -84,7 +84,7 @@ where
         };
         Server::<S>::start_update_loop(server.clone(), cancellation_token);
         // TODO(tamer): make this configurable.
-        let addr = server.config.epoch.proto_server_addr;
+        let addr = server.config.epoch.proto_server_addr.to_socket_addr();
         if let Err(e) = TServer::builder()
             .add_service(EpochServer::new(proto_server))
             .serve(addr)
