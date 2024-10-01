@@ -384,10 +384,20 @@ mod tests {
                     .unwrap();
             });
         });
-        while let Err(_e) = UniverseClient::connect("http://[::1]:50054").await {
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let client: UniverseClient<tonic::transport::Channel>;
+        loop {
+            let client_result = UniverseClient::connect("http://[::1]:50054").await;
+            match client_result {
+                Ok(client_ok) => {
+                    client = client_ok;
+                    break;
+                }
+                Err(e) => {
+                    println!("Failed to connect to universe server: {}", e);
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+            }
         }
-        let client = UniverseClient::connect("http://[::1]:50054").await.unwrap();
         let computation = AssignmentComputationImpl::new(
             RUNTIME.handle().clone(),
             cancellation_token,
