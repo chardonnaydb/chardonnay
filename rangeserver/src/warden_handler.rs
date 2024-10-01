@@ -124,6 +124,48 @@ impl WardenHandler {
         }
     }
 
+    async fn continuously_connect_and_register_inner(
+        host_info: HostInfo,
+        config: common::config::RegionConfig,
+        updates_sender: mpsc::UnboundedSender<WardenUpdate>,
+        state: Arc<StartedState>,
+        epoch_supplier: Arc<dyn EpochSupplier>,
+    ) -> Result<(), WardenErr> {
+        let addr = format!("http://{}", config.warden_address.clone());
+        let epoch = epoch_supplier.read_epoch().await?;
+        let mut client = WardenClient::connect(addr).await?;
+        let registration_request = proto::warden::RegisterRangeServerRequest {
+            range_server: Some(proto::warden::HostInfo {
+                identity: host_info.identity.clone(),
+                zone: host_info.zone.name.clone(),
+                epoch,
+            }),
+        };
+        let mut stream = client
+            .register_range_server(Request::new(registration_request))
+            .await?
+            .into_inner();
+
+        loop {
+            tokio::select! {
+                () = state.stopper.cancelled() => return Ok(()),
+                maybe_update = stream.message() => {
+                    let maybe_update = maybe_update?;
+                    match maybe_update {
+                        None => {
+                            return Err("connection closed with warden!".into())
+                        }
+                        Some(update) => {
+                            let mut assigned_ranges_lock = state.assigned_ranges.write().await;
+                            Self::process_warden_update(&update, &updates_sender, assigned_ranges_lock.deref_mut())
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+
     async fn continuously_connect_and_register(
         host_info: HostInfo,
         config: common::config::RegionConfig,
@@ -132,40 +174,19 @@ impl WardenHandler {
         epoch_supplier: Arc<dyn EpochSupplier>,
     ) -> Result<(), WardenErr> {
         loop {
-            let addr = format!("http://{}", config.warden_address.clone());
-            // TODO: catch retryable errors and reconnect to warden.
-            let mut client = WardenClient::connect(addr).await.unwrap();
-            let registration_request = proto::warden::RegisterRangeServerRequest {
-                range_server: Some(proto::warden::HostInfo {
-                    identity: host_info.identity.clone(),
-                    zone: host_info.zone.name.clone(),
-                    epoch: epoch_supplier.read_epoch().await.unwrap(),
-                }),
-            };
-
-            let mut stream = client
-                .register_range_server(Request::new(registration_request))
-                .await
-                .unwrap()
-                .into_inner();
-
-            loop {
-                tokio::select! {
-                    () = state.stopper.cancelled() => return Ok(()),
-                    maybe_update = stream.message() => {
-                        let maybe_update = maybe_update.unwrap();
-                        match maybe_update {
-                            None => {
-                                println!("connection closed with warden!");
-                                break;
-                            }
-                            Some(update) => {
-                                let mut assigned_ranges_lock = state.assigned_ranges.write().await;
-                                Self::process_warden_update(&update, &updates_sender, assigned_ranges_lock.deref_mut())
-                            }
-                        }
-                    }
-
+            match Self::continuously_connect_and_register_inner(
+                host_info.clone(),
+                config.clone(),
+                updates_sender.clone(),
+                state.clone(),
+                epoch_supplier.clone(),
+            )
+            .await
+            {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    println!("Warden Loop Error: {}", e);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 }
             }
         }
