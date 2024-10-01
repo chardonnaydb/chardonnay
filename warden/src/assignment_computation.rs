@@ -372,7 +372,7 @@ mod tests {
         Lazy::new(|| tokio::runtime::Runtime::new().unwrap());
     static START_UNIVERSE_SERVER: Once = Once::new();
     async fn setup() -> Arc<AssignmentComputationImpl> {
-        let addr = "[::1]:50052".parse().unwrap();
+        let addr = "[::1]:50054".parse().unwrap();
         let cancellation_token = CancellationToken::new();
         START_UNIVERSE_SERVER.call_once(|| {
             tokio::spawn(async move {
@@ -384,10 +384,10 @@ mod tests {
                     .unwrap();
             });
         });
-        while let Err(_e) = UniverseClient::connect("http://[::1]:50052").await {
+        while let Err(_e) = UniverseClient::connect("http://[::1]:50054").await {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
-        let client = UniverseClient::connect("http://[::1]:50052").await.unwrap();
+        let client = UniverseClient::connect("http://[::1]:50054").await.unwrap();
         let computation = AssignmentComputationImpl::new(
             RUNTIME.handle().clone(),
             cancellation_token,
