@@ -352,6 +352,7 @@ dependencies = [
  "derivative",
  "flatbuf",
  "flatbuffers",
+ "proto",
  "serde",
  "tokio",
  "uuid 0.8.2",

@@ -1,5 +1,6 @@
 use common::config::Config;
 use common::region::{Region, Zone};
+use proto::universe;
 use server::run_warden_server;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -23,8 +24,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let region_config = config.regions.get(&region).unwrap();
     let addr = region_config.warden_address.to_string();
+    let universe_addr = region_config.universe_address.to_string();
     let token = CancellationToken::new();
     // TODO(purujit): set up map computation and plug it in.
-    run_warden_server(addr, tokio::runtime::Handle::current(), token).await?;
+    run_warden_server(
+        addr,
+        universe_addr,
+        region,
+        tokio::runtime::Handle::current(),
+        token,
+    )
+    .await?;
     Ok(())
 }

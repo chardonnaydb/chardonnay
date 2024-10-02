@@ -7,10 +7,13 @@ use std::{
 
 use common::{
     host_info::{self, HostInfo},
-    region::{Region, Zone},
+    region::{self, Region, Zone},
 };
 use pin_project::{pin_project, pinned_drop};
-use proto::warden::{warden_server::Warden, RegisterRangeServerRequest, WardenUpdate};
+use proto::{
+    universe::universe_client::UniverseClient,
+    warden::{warden_server::Warden, RegisterRangeServerRequest, WardenUpdate},
+};
 use tokio::sync::broadcast;
 use tokio_stream::{
     wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
@@ -96,12 +99,16 @@ impl WardenServer {
 /// starting the Warden server.
 pub async fn run_warden_server(
     addr: impl AsRef<str> + std::net::ToSocketAddrs,
+    universe_addr: String,
+    region: Region,
     runtime: tokio::runtime::Handle,
     cancellation_token: CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = addr.to_socket_addrs()?.next().ok_or("Invalid address")?;
-    let warden_server =
-        WardenServer::new(AssignmentComputationImpl::new(runtime, cancellation_token));
+    let universe_client = UniverseClient::connect(universe_addr).await?;
+    let warden_server = WardenServer::new(
+        AssignmentComputationImpl::new(runtime, cancellation_token, universe_client, region).await,
+    );
 
     info!("WardenServer listening on {}", addr);
 
