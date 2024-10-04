@@ -73,14 +73,19 @@ impl Cassandra {
         let res = match query_result {
             None => Ok(OpResult::TransactionIsAborted),
             Some(mut rows) => {
-                if rows.len() != 1 {
+                if rows.len() > 1 {
                     panic!("found multiple results for a transaction record");
                 } else {
-                    let row = rows.pop().unwrap();
-                    let epoch = row.columns[0].as_ref().unwrap().as_bigint().unwrap();
-                    Ok(OpResult::TransactionIsCommitted(CommitInfo {
-                        epoch: epoch as u64,
-                    }))
+                    let row = rows.pop();
+                    match row {
+                        None => Ok(OpResult::TransactionIsAborted),
+                        Some(row) => {
+                            let epoch = row.columns[0].as_ref().unwrap().as_bigint().unwrap();
+                            Ok(OpResult::TransactionIsCommitted(CommitInfo {
+                                epoch: epoch as u64,
+                            }))
+                        }
+                    }
                 }
             }
         };
@@ -215,6 +220,20 @@ pub mod tests {
         cassandra.start_transaction(tx_id).await.unwrap();
         cassandra.abort_transaction(tx_id).await.unwrap();
         match cassandra.commit_transaction(tx_id, 6).await.unwrap() {
+            OpResult::TransactionIsCommitted(_) => panic!("expected transaction to abort"),
+            OpResult::TransactionIsAborted => (),
+        }
+    }
+
+    #[tokio::test]
+    async fn presumed_abort() {
+        let cassandra = Cassandra::create_test().await;
+        let tx_id = Uuid::new_v4();
+        match cassandra.commit_transaction(tx_id, 19).await.unwrap() {
+            OpResult::TransactionIsCommitted(_) => panic!("expected transaction to abort"),
+            OpResult::TransactionIsAborted => (),
+        };
+        match cassandra.abort_transaction(tx_id).await.unwrap() {
             OpResult::TransactionIsCommitted(_) => panic!("expected transaction to abort"),
             OpResult::TransactionIsAborted => (),
         }
