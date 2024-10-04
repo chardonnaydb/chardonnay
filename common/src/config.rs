@@ -1,6 +1,7 @@
 use crate::region::{Region, Zone};
 use core::time;
 use derivative::Derivative;
+use proto::universe::universe_server::Universe;
 use serde::{Deserialize, Serialize};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::vec;
@@ -126,9 +127,15 @@ pub struct RegionConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UniverseConfig {
+    pub proto_server_addr: HostPort,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     pub range_server: RangeServerConfig,
     pub epoch: EpochConfig,
+    pub universe: UniverseConfig,
     pub cassandra: CassandraConfig,
     pub regions: HashMap<Region, RegionConfig>,
 }
