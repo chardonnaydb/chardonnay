@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{net::ToSocketAddrs, sync::Arc};
 
-use common::config::Config;
+use common::{config::Config, network::fast_network};
 use std::net::UdpSocket;
 use tracing_subscriber;
 
@@ -41,8 +41,14 @@ fn main() {
         .find(|&x| x.name == publisher_name)
         .unwrap();
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let fast_network_addr = publisher_config
+        .fast_network_addr
+        .to_socket_addrs()
+        .unwrap()
+        .next()
+        .unwrap();
     let fast_network = Arc::new(UdpFastNetwork::new(
-        UdpSocket::bind(publisher_config.fast_network_addr.to_socket_addr()).unwrap(),
+        UdpSocket::bind(fast_network_addr).unwrap(),
     ));
     let fast_network_clone = fast_network.clone();
     runtime.spawn(async move {

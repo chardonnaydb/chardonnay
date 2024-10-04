@@ -88,13 +88,16 @@ docker build -t "$EPOCH_IMG:$TAG" --target epoch .
 Prerequisites:
 - Minikube installation
 
+:warning: Currently, the Kubernetes deployment in anticipation of the universe manager.
+
+
 1. Start minikube:
 
    ```sh
    minikube start
    ```
 
-1. Load chardonnay docker images on minikube:
+2. Load chardonnay docker images on minikube:
 
    ```sh
    minikube image load --overwrite "$RANGESERVER_IMG:$TAG"
@@ -112,7 +115,7 @@ Prerequisites:
    minikube image rm "$EPOCH_IMG:$TAG"
    ```
 
-1. Apply chardonnay manifests for deploying on Kubernetes:
+3. Apply chardonnay manifests for deploying on Kubernetes:
 
    ```sh
    kubectl apply \
@@ -128,7 +131,7 @@ Prerequisites:
    dependencies are not available yet, instead of simply retrying. This means
    you may need to wait for some minutes for the deployment to stabilize.
 
-1. Exec into the cassandra container and create the necessary keyspace and
+4. Exec into the cassandra container and create the necessary keyspace and
    schema:
 
    ```sh
@@ -141,7 +144,7 @@ Prerequisites:
    # Copy paste the commands from schema.cql
    ```
 
-1. Confirm that everything becomes ready:
+5. Confirm that everything becomes ready:
 
    ```sh
    kubectl get pods -n chardonnay

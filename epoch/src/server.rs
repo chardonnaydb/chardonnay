@@ -5,6 +5,7 @@ use crate::storage::Storage;
 use common::config::Config;
 use proto::epoch::epoch_server::{Epoch, EpochServer};
 use proto::epoch::{ReadEpochRequest, ReadEpochResponse};
+use std::net::ToSocketAddrs;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
@@ -84,7 +85,14 @@ where
         };
         Server::<S>::start_update_loop(server.clone(), cancellation_token);
         // TODO(tamer): make this configurable.
-        let addr = server.config.epoch.proto_server_addr.to_socket_addr();
+        let addr = server
+            .config
+            .epoch
+            .proto_server_addr
+            .to_socket_addrs()
+            .unwrap()
+            .next()
+            .unwrap();
         if let Err(e) = TServer::builder()
             .add_service(EpochServer::new(proto_server))
             .serve(addr)

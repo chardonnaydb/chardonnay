@@ -1,8 +1,9 @@
 use crate::region::{Region, Zone};
-use core::{panic, time};
+use core::time;
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
-use std::net::ToSocketAddrs;
+use std::net::{SocketAddr, ToSocketAddrs};
+use std::vec;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -23,24 +24,18 @@ impl HostPort {
         format!("{}:{}", self.host, self.port)
     }
 
-    pub fn to_socket_addr(&self) -> std::net::SocketAddr {
-        // Check if host is an IP address.
-        if !self.host.parse::<std::net::IpAddr>().is_ok() {
-            let resolved_addr = (self.host.as_str(), self.port)
-                .to_socket_addrs()
-                .unwrap()
-                .next()
-                .unwrap();
-            return resolved_addr;
-        }
-        format!("{}:{}", self.host, self.port).parse().unwrap()
-    }
-
     pub fn from_socket_addr(addr: std::net::SocketAddr) -> Self {
         HostPort {
             host: addr.ip().to_string(),
             port: addr.port(),
         }
+    }
+}
+
+impl ToSocketAddrs for HostPort {
+    type Iter = vec::IntoIter<std::net::SocketAddr>;
+    fn to_socket_addrs(&self) -> std::io::Result<Self::Iter> {
+        (self.host.as_str(), self.port).to_socket_addrs()
     }
 }
 
