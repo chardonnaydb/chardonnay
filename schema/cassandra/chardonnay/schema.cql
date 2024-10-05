@@ -59,3 +59,13 @@ CREATE TABLE wal (
   AND COMPACTION = {
      'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
 };
+
+CREATE TABLE transactions (
+    transaction_id    uuid,
+    status            text,
+    epoch             bigint,
+    commit_info       blob,
+    PRIMARY KEY  (transaction_id)
+) WITH COMPACTION = {
+     'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
+};
