@@ -11,7 +11,7 @@ async fn main() {
     let config: Config =
         serde_json::from_str(&std::fs::read_to_string("config.json").unwrap()).unwrap();
     let storage = epoch::storage::cassandra::Cassandra::new(
-        "127.0.0.1:9042".to_string(),
+        config.cassandra.cql_addr.to_string(),
         "GLOBAL".to_string(),
     )
     .await;

@@ -1,70 +1,69 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: chardonnay-rangeserver
+  name: chardonnay-epoch-publisher
   namespace: chardonnay
 spec:
-  serviceName: "chardonnay-rangeserver"
+  serviceName: "chardonnay-epoch-publisher"
   replicas: 1
   selector:
     matchLabels:
-      app: chardonnay-rangeserver
+      app: chardonnay-epoch-publisher
   template:
     metadata:
       labels:
-        app: chardonnay-rangeserver
+        app: chardonnay-epoch-publisher
     spec:
       containers:
-      - name: rangeserver
-        image: chardonnay-rangeserver:latest
+      - name: epoch-publisher
+        image: chardonnay-epoch-publisher:latest
         imagePullPolicy: IfNotPresent
-        workingDir: /etc/chardonnay
-        command: ["/bin/sh", "-c"]
-        args: ["cat /etc/chardonnay/config.json && rangeserver"]
-        env:
-          - name: RUST_BACKTRACE
-            value: "1"
-          - name: RUST_LOG
-            value: "info"
         ports:
-        - containerPort: 50054
-          name: proto-server
+        - containerPort: 50051
+          name: backend
           protocol: TCP
-        - containerPort: 50055
+        - containerPort: 50052
           name: fast-network
           protocol: UDP
+        env:
+        - name: RUST_LOG
+          value: "info"
+        workingDir: /etc/chardonnay
+        command: ["/bin/sh", "-c"]
+        args: ["cat /etc/chardonnay/config.json && epoch_publisher"]
         volumeMounts:
         - name: config
           mountPath: /etc/chardonnay
       volumes:
       - name: config
         configMap:
-          name: chardonnay-rangeserver-config
+          name: chardonnay-epoch-publisher-config
+
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: chardonnay-rangeserver
+  name: chardonnay-epoch-publisher
   namespace: chardonnay
 spec:
   selector:
-    app: chardonnay-rangeserver
+    app: chardonnay-epoch-publisher
   clusterIP: None
   ports:
-    - protocol: TCP
-      port: 50054
-      targetPort: 50054
-      name: proto-server
-    - protocol: UDP
-      port: 50055
-      targetPort: 50055
-      name: fast-network
+    - name: backend
+      protocol: TCP
+      port: 50051
+      targetPort: 50051
+    - name: fast-network
+      protocol: UDP
+      port: 50052
+      targetPort: 50052
 
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: chardonnay-rangeserver-config
+  name: chardonnay-epoch-publisher-config
   namespace: chardonnay
 data:
   config.json: |
@@ -93,8 +92,8 @@ data:
                         "publishers": [
                             {
                                 "name": "ep1",
-                                "backend_addr": "chardonnay-epoch-publisher:50051",
-                                "fast_network_addr": "chardonnay-epoch-publisher:50052"
+                                "backend_addr": "0.0.0.0:50051",
+                                "fast_network_addr": "0.0.0.0:50052"
                             }
                         ]
                     }

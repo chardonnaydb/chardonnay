@@ -3,6 +3,7 @@ use common::config::EpochPublisher as EpochPublisherConfig;
 use flatbuffers::FlatBufferBuilder;
 use proto::epoch::epoch_client::EpochClient;
 use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
@@ -241,11 +242,18 @@ impl Server {
             server: server.clone(),
         };
         let server_clone = server.clone();
+        let addr = server
+            .publisher_config
+            .backend_addr
+            .to_socket_addrs()
+            .unwrap()
+            .next()
+            .unwrap();
         server.bg_runtime.spawn(async move {
             // TODO(tamer): make this configurable.
             if let Err(e) = TServer::builder()
                 .add_service(EpochPublisherServer::new(proto_server))
-                .serve(server_clone.publisher_config.backend_addr.clone())
+                .serve(addr)
                 .await
             {
                 panic!("Unable to start proto server: {}", e);

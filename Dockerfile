@@ -37,8 +37,6 @@ WORKDIR /chardonnay_build
 # Copy the entire project
 COPY . .
 
-# Install dependencies
-
 # Build the project
 RUN cargo build --release
 

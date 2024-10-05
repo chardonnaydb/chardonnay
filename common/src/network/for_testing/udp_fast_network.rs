@@ -7,6 +7,7 @@ use std::{
 
 use bytes::Bytes;
 use tokio::sync::mpsc;
+use tracing::trace;
 
 enum DefaultHandler {
     NotRegistered,
@@ -31,7 +32,9 @@ impl UdpFastNetwork {
 
 impl Trait for UdpFastNetwork {
     fn send(&self, to: SocketAddr, payload: Bytes) -> Result<(), std::io::Error> {
+        trace!("Sending to: {:?}", to);
         self.socket.send_to(payload.to_vec().as_slice(), to)?;
+        trace!("Send finished");
         Ok(())
     }
 

@@ -2,15 +2,16 @@ use crate::region::{Region, Zone};
 use core::time;
 use derivative::Derivative;
 use serde::{Deserialize, Serialize};
+use std::net::{SocketAddr, ToSocketAddrs};
+use std::vec;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
-    net::SocketAddr,
     str::FromStr,
 };
 
 /// Represents a host and port combination.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct HostPort {
     /// The hostname or IP address.
     pub host: String,
@@ -21,6 +22,20 @@ pub struct HostPort {
 impl HostPort {
     pub fn to_string(&self) -> String {
         format!("{}:{}", self.host, self.port)
+    }
+
+    pub fn from_socket_addr(addr: std::net::SocketAddr) -> Self {
+        HostPort {
+            host: addr.ip().to_string(),
+            port: addr.port(),
+        }
+    }
+}
+
+impl ToSocketAddrs for HostPort {
+    type Iter = vec::IntoIter<std::net::SocketAddr>;
+    fn to_socket_addrs(&self) -> std::io::Result<Self::Iter> {
+        (self.host.as_str(), self.port).to_socket_addrs()
     }
 }
 
@@ -71,7 +86,7 @@ impl<'de> Deserialize<'de> for HostPort {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EpochConfig {
-    pub proto_server_addr: SocketAddr,
+    pub proto_server_addr: HostPort,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -83,8 +98,8 @@ pub struct CassandraConfig {
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct EpochPublisher {
     pub name: String,
-    pub backend_addr: SocketAddr,
-    pub fast_network_addr: SocketAddr,
+    pub backend_addr: HostPort,
+    pub fast_network_addr: HostPort,
 }
 
 #[derive(Derivative, Serialize, Deserialize)]
@@ -99,13 +114,13 @@ pub struct EpochPublisherSet {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RangeServerConfig {
     pub range_maintenance_duration: time::Duration,
-    pub proto_server_port: u32,
-    pub fast_network_port: u32,
+    pub proto_server_addr: HostPort,
+    pub fast_network_addr: HostPort,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RegionConfig {
-    pub warden_address: SocketAddr,
+    pub warden_address: HostPort,
     pub epoch_publishers: HashSet<EpochPublisherSet>,
     pub universe_address: SocketAddr,
 }

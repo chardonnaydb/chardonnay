@@ -13,6 +13,7 @@ use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use tonic::Request;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::epoch_supplier::EpochSupplier;

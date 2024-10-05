@@ -4,8 +4,8 @@
             "secs": 1,
             "nanos": 0
         },
-        "proto_server_port": 50054,
-        "fast_network_port": 50055
+        "proto_server_addr": "127.0.0.1:50054",
+        "fast_network_addr": "127.0.0.1:50055"
     },
     "epoch": {
         "proto_server_addr": "127.0.0.1:50050"

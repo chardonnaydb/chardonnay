@@ -2,13 +2,14 @@ use bytes::Bytes;
 use std::{
     collections::HashSet,
     net::{SocketAddr, UdpSocket},
+    str::FromStr,
     sync::Arc,
     time,
 };
 use tokio_util::sync::CancellationToken;
 
 use common::{
-    config::{CassandraConfig, Config, EpochConfig, RangeServerConfig, RegionConfig},
+    config::{CassandraConfig, Config, EpochConfig, HostPort, RangeServerConfig, RegionConfig},
     full_range_id::FullRangeId,
     host_info::HostInfo,
     keyspace_id::KeyspaceId,
@@ -35,7 +36,7 @@ struct TestContext {
     storage_context: rangeserver::storage::cassandra::for_testing::TestContext,
 }
 
-fn get_config(warden_address: SocketAddr) -> Config {
+fn get_config(warden_address: HostPort) -> Config {
     let region = Region {
         cloud: None,
         name: "test-region".into(),
@@ -52,8 +53,8 @@ fn get_config(warden_address: SocketAddr) -> Config {
     let mut config = Config {
         range_server: RangeServerConfig {
             range_maintenance_duration: time::Duration::from_secs(1),
-            proto_server_port: 50054,
-            fast_network_port: 50055,
+            proto_server_addr: HostPort::from_str("127.0.0.1:50054").unwrap(),
+            fast_network_addr: HostPort::from_str("127.0.0.1:50055").unwrap(),
         },
         cassandra: CassandraConfig {
             cql_addr: "127.0.0.1:9042".parse().unwrap(),
@@ -86,7 +87,7 @@ fn get_server_host_info(address: SocketAddr) -> HostInfo {
 async fn setup_server(
     server_socket: UdpSocket,
     cancellation_token: CancellationToken,
-    warden_address: SocketAddr,
+    warden_address: HostPort,
     proto_server_listener: TcpListener,
     epoch_supplier: Arc<EpochSupplier>,
     storage_context: &rangeserver::storage::cassandra::for_testing::TestContext,
@@ -159,7 +160,11 @@ async fn setup() -> TestContext {
     let server_address = server_socket.local_addr().unwrap();
     let epoch_supplier = Arc::new(rangeserver::for_testing::epoch_supplier::EpochSupplier::new());
     let mock_warden = MockWarden::new();
-    let warden_address = mock_warden.start(None).await.unwrap();
+    let warden_address_sa = mock_warden.start(None).await.unwrap();
+    let warden_address = HostPort {
+        host: warden_address_sa.ip().to_string(),
+        port: warden_address_sa.port(),
+    };
     let proto_server_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proto_server_address = proto_server_listener.local_addr().unwrap();
     let cancellation_token = CancellationToken::new();

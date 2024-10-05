@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use common::{
     config::{
-        CassandraConfig, Config, EpochConfig, EpochPublisher as EpochPublisherConfig,
+        CassandraConfig, Config, EpochConfig, EpochPublisher as EpochPublisherConfig, HostPort,
         RangeServerConfig, RegionConfig,
     },
     host_info::HostInfo,
@@ -44,13 +44,13 @@ fn get_config(epoch_address: SocketAddr) -> Config {
     };
     let epoch_config = EpochConfig {
         // Not used in these tests.
-        proto_server_addr: epoch_address,
+        proto_server_addr: HostPort::from_socket_addr(epoch_address),
     };
     let mut config = Config {
         range_server: RangeServerConfig {
             range_maintenance_duration: time::Duration::from_secs(1),
-            proto_server_port: 50054,
-            fast_network_port: 50055,
+            proto_server_addr: HostPort::from_str("127.0.0.1:50054").unwrap(),
+            fast_network_addr: HostPort::from_str("127.0.0.1:50055").unwrap(),
         },
         cassandra: CassandraConfig {
             cql_addr: "127.0.0.1:9042".parse().unwrap(),
@@ -63,11 +63,11 @@ fn get_config(epoch_address: SocketAddr) -> Config {
 }
 
 fn get_publisher_config(fast_network_addr: SocketAddr) -> EpochPublisherConfig {
-    let backend_addr = SocketAddr::from_str("127.0.0.1:10010").unwrap();
+    let backend_addr = HostPort::from_str("127.0.0.1:10010").unwrap();
     EpochPublisherConfig {
         name: "ep1".to_string(),
         backend_addr,
-        fast_network_addr,
+        fast_network_addr: HostPort::from_socket_addr(fast_network_addr),
     }
 }
 

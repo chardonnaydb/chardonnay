@@ -355,6 +355,7 @@ dependencies = [
  "proto",
  "serde",
  "tokio",
+ "tracing",
  "uuid 0.8.2",
 ]
 
@@ -534,6 +535,7 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tonic-build",
+ "tracing",
  "uuid 0.8.2",
 ]
 
