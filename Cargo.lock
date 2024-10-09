@@ -2299,7 +2299,7 @@ dependencies = [
  "once_cell",
  "pin-project",
  "proto",
- "scylla 0.3.1",
+ "scylla 0.14.0",
  "serde_json",
  "strum",
  "thiserror",
@@ -2309,7 +2309,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
- "uuid 0.8.2",
+ "uuid 1.10.0",
 ]
 
 [[package]]

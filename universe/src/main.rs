@@ -1,7 +1,9 @@
 use common::config::Config;
+use storage::cassandra::Cassandra;
 use tracing::info;
 
 mod server;
+mod storage;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -11,6 +13,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config: Config =
         serde_json::from_str(&std::fs::read_to_string("config.json").unwrap()).unwrap();
     let addr = config.universe.proto_server_addr.to_string();
-    server::run_universe_server(addr).await?;
+    let storage = Cassandra::new(config.cassandra.cql_addr.to_string()).await;
+
+    server::run_universe_server(addr, storage).await?;
     Ok(())
 }

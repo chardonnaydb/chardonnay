@@ -9,8 +9,8 @@ edition = "2021"
 common = {path = "../common"}
 proto = {path = "../proto"}
 tokio = { version = "1", features = ["full"] }
-uuid = {version = "0.8", features = ["v4"]}
-scylla = "0.3.1"
+uuid = {version = "1.0", features = ["v4"]}
+scylla = "0.14.0"
 bytes = "1"
 chrono = "0.4.34"
 thiserror = "1.0.57"

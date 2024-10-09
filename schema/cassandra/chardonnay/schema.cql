@@ -12,7 +12,7 @@ CREATE TABLE range_map (
 CREATE TABLE epoch (
     region      text,
     epoch       bigint,
-    timestamp   timestamp, 
+    timestamp   timestamp,
     PRIMARY KEY  (region)
   ) WITH COMPACTION = {
     'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
@@ -69,3 +69,31 @@ CREATE TABLE transactions (
 ) WITH COMPACTION = {
      'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
 };
+
+CREATE TYPE region (
+  name     text,
+  cloud    text
+);
+
+CREATE TYPE zone (
+  region   frozen<region>,
+  name     text
+);
+
+CREATE TYPE key_range (
+  base_range_uuid    uuid,
+  lower_bound_inclusive    blob,
+  upper_bound_exclusive    blob
+);
+
+CREATE TABLE keyspaces (
+    keyspace_id         uuid,
+    namespace           text,
+    name                text,
+    primary_zone        zone,
+    base_key_ranges     list<frozen<key_range>>,
+    PRIMARY KEY (keyspace_id)
+) WITH COMPACTION = {
+    'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
+};
+

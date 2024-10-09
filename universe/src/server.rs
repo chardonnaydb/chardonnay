@@ -24,11 +24,25 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, instrument};
 
+use crate::storage::{
+    cassandra::{self, Cassandra},
+    Storage,
+};
+
 /// Implementation of the Universe manager.
-pub struct UniverseServer {}
+pub struct UniverseServer<S: Storage> {
+    storage: Arc<S>,
+}
+
+impl<S: Storage> UniverseServer<S> {
+    /// Creates a new UniverseServer.
+    pub fn new(storage: Arc<S>) -> Self {
+        Self { storage }
+    }
+}
 
 #[tonic::async_trait]
-impl Universe for UniverseServer {
+impl<S: Storage> Universe for UniverseServer<S> {
     #[instrument(skip(self))]
     async fn create_keyspace(
         &self,
@@ -36,11 +50,19 @@ impl Universe for UniverseServer {
     ) -> Result<Response<CreateKeyspaceResponse>, Status> {
         debug!("Got a create_keyspace request: {:?}", request);
 
-        // TODO: Implement the actual logic to create a keyspace
-        // For now, we'll return an empty response
-        let response = CreateKeyspaceResponse {
-            keyspace_id: "1234".to_string(),
-        };
+        let req_inner = request.into_inner();
+        let keyspace_id = self
+            .storage
+            .create_keyspace(
+                &req_inner.name,
+                &req_inner.namespace,
+                req_inner.primary_zone,
+                req_inner.base_key_ranges,
+            )
+            .await
+            .map_err(|e| Status::internal(format!("Failed to create keyspace: {}", e)))?;
+
+        let response = CreateKeyspaceResponse { keyspace_id };
         Ok(Response::new(response))
     }
 
@@ -51,18 +73,14 @@ impl Universe for UniverseServer {
     ) -> Result<Response<ListKeyspacesResponse>, Status> {
         debug!("Got a list_keyspaces request: {:?}", request);
 
-        // TODO: Implement the actual logic to list keyspaces
-        // For now, we'll return an empty response
-        let response = ListKeyspacesResponse {
-            keyspaces: Vec::new(),
-        };
-        Ok(Response::new(response))
-    }
-}
+        let keyspaces = self
+            .storage
+            .list_keyspaces()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list keyspaces: {}", e)))?;
 
-impl UniverseServer {
-    pub fn new() -> Self {
-        Self {}
+        let response = ListKeyspacesResponse { keyspaces };
+        Ok(Response::new(response))
     }
 }
 
@@ -74,13 +92,15 @@ impl UniverseServer {
 /// # Errors
 /// This function will return an error if the provided address is invalid or if there is an issue
 /// starting the Universe server.
-pub async fn run_universe_server(
+pub async fn run_universe_server<S: Storage>(
     addr: impl AsRef<str> + std::net::ToSocketAddrs,
+    storage: S,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = addr.to_socket_addrs()?.next().ok_or("Invalid address")?;
-    let universe_server = UniverseServer::new();
 
     info!("UniverseServer listening on {}", addr);
+
+    let universe_server = UniverseServer::new(Arc::new(storage));
 
     tonic::transport::Server::builder()
         .add_service(proto::universe::universe_server::UniverseServer::new(
@@ -94,74 +114,97 @@ pub async fn run_universe_server(
 
 #[cfg(test)]
 mod tests {
-    use tonic::transport::{channel, Channel};
-
-    use super::run_universe_server;
+    use super::*;
+    use crate::storage::cassandra::Cassandra;
+    use proto::universe::{KeyRange, KeyRangeRequest};
+    use std::time::Duration;
+    use tokio::time::sleep;
 
     #[tokio::test]
-    async fn test_create_keyspace() {
-        // Create server task
+    async fn test_run_universe_server() {
+        // Use a random available port
+        let addr = "127.0.0.1:0";
+
+        // Create a Cassandra CQL session
+        let storage = Cassandra::new("127.0.0.1:9042".to_string()).await;
+
+        // Start the server in a separate task
         let server_task = tokio::spawn(async move {
-            let addr = "[::1]:50051";
-            run_universe_server(addr).await.unwrap();
+            run_universe_server(addr, storage).await.unwrap();
         });
 
-        // Give the server a moment to start up
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Wait for 1 second
+        sleep(Duration::from_secs(1)).await;
 
-        // Create a client and connect to the server
-        let channel = Channel::from_static("http://[::1]:50051")
-            .connect()
-            .await
-            .unwrap();
-        let mut client = proto::universe::universe_client::UniverseClient::new(channel);
-
-        // Create a keyspace
-        let request = proto::universe::CreateKeyspaceRequest {
-            name: "test".to_string(),
-            namespace: "test".to_string(),
-            primary_zone: None,
-            base_key_ranges: Vec::new(),
-        };
-
-        let response = client.create_keyspace(request).await.unwrap();
-        assert_eq!(response.get_ref().keyspace_id, "1234");
-
+        // Stop the server by aborting the task
         server_task.abort();
+
+        // Wait for the server to shut down
+        let _ = server_task.await;
     }
 
     #[tokio::test]
-    async fn test_list_keyspaces() {
-        // Create server task
+    async fn test_create_and_list_keyspace_handlers() {
+        let addr = "127.0.0.1:50056";
+
+        // Create a Cassandra CQL session
+        let storage = Cassandra::new("127.0.0.1:9042".to_string()).await;
+
+        // Start the server in a separate task
         let server_task = tokio::spawn(async move {
-            let addr = "[::1]:50051";
-            run_universe_server(addr).await.unwrap();
+            run_universe_server(addr, storage).await.unwrap();
         });
 
-        // Give the server a moment to start up
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Wait a bit for the server to start
+        sleep(Duration::from_millis(100)).await;
 
-        // Create a client and connect to the server
-        let channel = Channel::from_static("http://[::1]:50051")
-            .connect()
+        // Create a Universe client
+        let mut client = UniverseClient::connect(format!("http://{}", addr))
             .await
             .unwrap();
-        let mut client = proto::universe::universe_client::UniverseClient::new(channel);
+
+        // Create a keyspace
+        let keyspace_name = "test_keyspace";
+        let namespace = "test_namespace";
+        let primary_zone = Some(proto::universe::Zone {
+            region: Some(proto::universe::Region {
+                cloud: Some(proto::universe::region::Cloud::OtherCloud(
+                    "lalakis".to_string(),
+                )),
+                name: "test_region".to_string(),
+            }),
+            name: "test_zone".to_string(),
+        });
+        let base_key_ranges = vec![proto::universe::KeyRangeRequest {
+            lower_bound_inclusive: vec![0],
+            upper_bound_exclusive: vec![10],
+        }];
+        // No primary zone or base key ranges for now
+        let keyspace_req = CreateKeyspaceRequest {
+            name: keyspace_name.to_string(),
+            namespace: namespace.to_string(),
+            primary_zone: primary_zone,
+            base_key_ranges: base_key_ranges,
+        };
+        let keyspace_id = client
+            .create_keyspace(keyspace_req)
+            .await
+            .unwrap()
+            .into_inner()
+            .keyspace_id;
 
         // List keyspaces
-        let request = proto::universe::ListKeyspacesRequest { region: None };
+        let keyspaces = client
+            .list_keyspaces(ListKeyspacesRequest { region: None })
+            .await
+            .unwrap()
+            .into_inner()
+            .keyspaces;
 
-        let response = client.list_keyspaces(request).await.unwrap();
-        let keyspaces = response.get_ref().keyspaces.clone();
+        // Check that the keyspace we created is in the list
+        assert!(keyspaces.iter().any(|k| k.keyspace_id == keyspace_id));
 
-        // Assert that the response contains the expected keyspaces
-        // This assertion might need to be adjusted based on the actual implementation
-        assert!(keyspaces.is_empty(), "Expected empty list of keyspaces");
-
-        // You might want to add more specific assertions here, such as:
-        // assert_eq!(keyspaces[0].name, "expected_name");
-        // assert_eq!(keyspaces[0].namespace, "expected_namespace");
-
+        // Stop the server
         server_task.abort();
     }
 }

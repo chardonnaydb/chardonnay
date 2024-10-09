@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use common::{
     config::{
         CassandraConfig, Config, EpochConfig, EpochPublisher as EpochPublisherConfig, HostPort,
-        RangeServerConfig, RegionConfig,
+        RangeServerConfig, RegionConfig, UniverseConfig,
     },
     host_info::HostInfo,
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
@@ -51,6 +51,9 @@ fn get_config(epoch_address: SocketAddr) -> Config {
             range_maintenance_duration: time::Duration::from_secs(1),
             proto_server_addr: HostPort::from_str("127.0.0.1:50054").unwrap(),
             fast_network_addr: HostPort::from_str("127.0.0.1:50055").unwrap(),
+        },
+        universe: UniverseConfig {
+            proto_server_addr: "127.0.0.1:123".parse().unwrap(),
         },
         cassandra: CassandraConfig {
             cql_addr: "127.0.0.1:9042".parse().unwrap(),
