@@ -803,7 +803,6 @@ pub mod tests {
         };
         let region_config = RegionConfig {
             warden_address: warden_address,
-            universe_address: "127.0.0.1:123".parse().unwrap(),
             epoch_publishers: HashSet::new(),
         };
         let epoch_config = EpochConfig {

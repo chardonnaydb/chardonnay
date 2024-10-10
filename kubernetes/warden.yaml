@@ -18,6 +18,11 @@ spec:
       - name: warden
         image: chardonnay-warden:latest
         imagePullPolicy: IfNotPresent
+        env:
+          - name: RUST_BACKTRACE
+            value: "1"
+          - name: RUST_LOG
+            value: "info"
         ports:
         - containerPort: 50053
         workingDir: /etc/chardonnay
@@ -63,6 +68,9 @@ data:
             },
             "proto_server_addr": "0.0.0.0:50054",
             "fast_network_addr": "0.0.0.0:50055"
+        },
+        "universe": {
+            "proto_server_addr": "universe:50056"
         },
         "epoch": {
             "proto_server_addr": "chardonnay-epoch:50050"

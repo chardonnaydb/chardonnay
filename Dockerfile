@@ -65,7 +65,7 @@ COPY --from=builder /chardonnay_build/target/release/warden /usr/bin/warden
 ENTRYPOINT ["warden"]
 
 ###############################################################################
-# epoch_publisher ############################################################
+# epoch_publisher #############################################################
 ###############################################################################
 
 FROM debian:bookworm AS epoch_publisher
@@ -78,7 +78,7 @@ ENTRYPOINT ["epoch_publisher"]
 
 
 ###############################################################################
-# epoch_service ##############################################################
+# epoch_service ###############################################################
 ###############################################################################
 
 FROM debian:bookworm AS epoch
@@ -88,3 +88,15 @@ COPY --from=builder /chardonnay_build/target/release/epoch /usr/bin/epoch
 
 # Set the entrypoint
 ENTRYPOINT ["epoch"]
+
+###############################################################################
+# universe ####################################################################
+###############################################################################
+
+FROM debian:bookworm AS universe
+
+# Copy the built executable from the builder stage
+COPY --from=builder /chardonnay_build/target/release/universe /usr/bin/universe
+
+# Set the entrypoint
+ENTRYPOINT ["universe"]

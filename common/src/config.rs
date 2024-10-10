@@ -123,7 +123,6 @@ pub struct RangeServerConfig {
 pub struct RegionConfig {
     pub warden_address: HostPort,
     pub epoch_publishers: HashSet<EpochPublisherSet>,
-    pub universe_address: SocketAddr,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

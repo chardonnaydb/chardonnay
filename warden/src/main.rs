@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let region_config = config.regions.get(&region).unwrap();
     let addr = region_config.warden_address.to_string();
-    let universe_addr = region_config.universe_address.to_string();
+    let universe_addr = format!("http://{}", config.universe.proto_server_addr.to_string());
     let token = CancellationToken::new();
     // TODO(purujit): set up map computation and plug it in.
     run_warden_server(
