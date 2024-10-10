@@ -1,6 +1,5 @@
 use common::config::Config;
-use common::region::{Region, Zone};
-use proto::universe;
+use common::region::Region;
 use server::run_warden_server;
 use tokio_util::sync::CancellationToken;
 use tracing::info;

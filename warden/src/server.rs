@@ -6,8 +6,8 @@ use std::{
 };
 
 use common::{
-    host_info::{self, HostInfo},
-    region::{self, Region, Zone},
+    host_info::HostInfo,
+    region::{Region, Zone},
 };
 use pin_project::{pin_project, pinned_drop};
 use proto::{
