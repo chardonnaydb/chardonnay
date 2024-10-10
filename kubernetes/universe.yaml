@@ -1,83 +1,74 @@
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: chardonnay-epoch-publisher
+  name: universe
   namespace: chardonnay
+  labels:
+    app: universe
 spec:
-  serviceName: "chardonnay-epoch-publisher"
+  serviceName: "universe"
   replicas: 1
   selector:
     matchLabels:
-      app: chardonnay-epoch-publisher
+      app: universe
   template:
     metadata:
       labels:
-        app: chardonnay-epoch-publisher
+        app: universe
     spec:
       containers:
-      - name: epoch-publisher
-        image: chardonnay-epoch-publisher:latest
+      - name: universe
+        image: chardonnay-universe:latest
         imagePullPolicy: IfNotPresent
         ports:
-        - containerPort: 50051
-          name: backend
-          protocol: TCP
-        - containerPort: 50052
-          name: fast-network
-          protocol: UDP
-        env:
-        - name: RUST_LOG
-          value: "info"
+        - name: grpc
+          containerPort: 50056
         workingDir: /etc/chardonnay
         command: ["/bin/sh", "-c"]
-        args: ["cat /etc/chardonnay/config.json && epoch_publisher"]
+        args: ["cat /etc/chardonnay/config.json && universe"]
         volumeMounts:
         - name: config
           mountPath: /etc/chardonnay
       volumes:
       - name: config
         configMap:
-          name: chardonnay-epoch-publisher-config
-
+          name: universe-config
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: chardonnay-epoch-publisher
+  name: universe
   namespace: chardonnay
+  labels:
+    app: universe
 spec:
-  selector:
-    app: chardonnay-epoch-publisher
-  clusterIP: None
   ports:
-    - name: backend
-      protocol: TCP
-      port: 50051
-      targetPort: 50051
-    - name: fast-network
-      protocol: UDP
-      port: 50052
-      targetPort: 50052
+  - port: 50056
+    name: grpc
+  clusterIP: None
+  selector:
+    app: universe
 
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: chardonnay-epoch-publisher-config
+  name: universe-config
   namespace: chardonnay
 data:
   config.json: |
     {
-        "range_server": {
-            "range_maintenance_duration": {
-                "secs": 1,
-                "nanos": 0
-            },
-            "proto_server_addr": "0.0.0.0:50054",
-            "fast_network_addr": "0.0.0.0:50055"
+      "range_server": {
+          "range_maintenance_duration": {
+              "secs": 1,
+              "nanos": 0
+          },
+          "proto_server_addr": "0.0.0.0:50054",
+          "fast_network_addr": "0.0.0.0:50055"
         },
         "universe": {
-            "proto_server_addr": "universe:50056"
+            "proto_server_addr": "0.0.0.0:50056"
         },
         "epoch": {
             "proto_server_addr": "chardonnay-epoch:50050"
@@ -95,8 +86,8 @@ data:
                         "publishers": [
                             {
                                 "name": "ep1",
-                                "backend_addr": "0.0.0.0:50051",
-                                "fast_network_addr": "0.0.0.0:50052"
+                                "backend_addr": "chardonnay-epoch-publisher:50051",
+                                "fast_network_addr": "chardonnay-epoch-publisher:50052"
                             }
                         ]
                     }

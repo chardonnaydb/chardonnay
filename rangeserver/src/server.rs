@@ -747,7 +747,9 @@ where
 pub mod tests {
     use crate::cache::memtabledb::MemTableDB;
     use crate::epoch_supplier::EpochSupplier as Trait;
-    use common::config::{CassandraConfig, EpochConfig, HostPort, RangeServerConfig, RegionConfig};
+    use common::config::{
+        CassandraConfig, EpochConfig, HostPort, RangeServerConfig, RegionConfig, UniverseConfig,
+    };
     use common::network::for_testing::udp_fast_network::UdpFastNetwork;
     use common::region::{Region, Zone};
     use core::time;
@@ -801,7 +803,6 @@ pub mod tests {
         };
         let region_config = RegionConfig {
             warden_address: warden_address,
-            universe_address: "127.0.0.1:123".parse().unwrap(),
             epoch_publishers: HashSet::new(),
         };
         let epoch_config = EpochConfig {
@@ -814,6 +815,9 @@ pub mod tests {
                 proto_server_addr: HostPort::from_str("127.0.0.1:50054").unwrap(),
                 fast_network_addr: HostPort::from_str("127.0.0.1:50055").unwrap(),
                 // proto_server_addr: proto_server_listener.local_addr().unwrap(),
+            },
+            universe: UniverseConfig {
+                proto_server_addr: "127.0.0.1:123".parse().unwrap(),
             },
             cassandra: CassandraConfig {
                 cql_addr: "127.0.0.1:9042".parse().unwrap(),

@@ -9,7 +9,10 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 use common::{
-    config::{CassandraConfig, Config, EpochConfig, HostPort, RangeServerConfig, RegionConfig},
+    config::{
+        CassandraConfig, Config, EpochConfig, HostPort, RangeServerConfig, RegionConfig,
+        UniverseConfig,
+    },
     full_range_id::FullRangeId,
     host_info::HostInfo,
     keyspace_id::KeyspaceId,
@@ -43,7 +46,6 @@ fn get_config(warden_address: HostPort) -> Config {
     };
     let region_config = RegionConfig {
         warden_address: warden_address,
-        universe_address: "127.0.0.1:123".parse().unwrap(),
         epoch_publishers: HashSet::new(),
     };
     let epoch_config = EpochConfig {
@@ -55,6 +57,9 @@ fn get_config(warden_address: HostPort) -> Config {
             range_maintenance_duration: time::Duration::from_secs(1),
             proto_server_addr: HostPort::from_str("127.0.0.1:50054").unwrap(),
             fast_network_addr: HostPort::from_str("127.0.0.1:50055").unwrap(),
+        },
+        universe: UniverseConfig {
+            proto_server_addr: "127.0.0.1:123".parse().unwrap(),
         },
         cassandra: CassandraConfig {
             cql_addr: "127.0.0.1:9042".parse().unwrap(),

@@ -74,6 +74,7 @@ RANGESERVER_IMG="chardonnay-rangeserver"
 WARDEN_IMG="chardonnay-warden"
 EPOCH_PUBLISHER_IMG="chardonnay-epoch-publisher"
 EPOCH_IMG="chardonnay-epoch"
+UNIVERSE_IMG="chardonnay-universe"
 
 TAG="latest"
 
@@ -81,6 +82,7 @@ docker build -t "$RANGESERVER_IMG:$TAG" --target rangeserver .
 docker build -t "$WARDEN_IMG:$TAG" --target warden .
 docker build -t "$EPOCH_PUBLISHER_IMG:$TAG" --target epoch_publisher .
 docker build -t "$EPOCH_IMG:$TAG" --target epoch .
+docker build -t "$UNIVERSE_IMG:$TAG" --target universe .
 ```
 
 ## Running Chardonnay on Kubernetes
@@ -104,6 +106,7 @@ Prerequisites:
    minikube image load --overwrite "$WARDEN_IMG:$TAG"
    minikube image load --overwrite "$EPOCH_PUBLISHER_IMG:$TAG"
    minikube image load --overwrite "$EPOCH_IMG:$TAG"
+   minikube image load --overwrite "$UNIVERSE_IMG:$TAG"
    ```
 
    :note: You might need to delete and re-load the images:
@@ -113,6 +116,7 @@ Prerequisites:
    minikube image rm "$WARDEN_IMG:$TAG"
    minikube image rm "$EPOCH_PUBLISHER_IMG:$TAG"
    minikube image rm "$EPOCH_IMG:$TAG"
+   minikube image rm "$UNIVERSE_IMG:$TAG"
    ```
 
 3. Apply chardonnay manifests for deploying on Kubernetes:
@@ -124,7 +128,8 @@ Prerequisites:
       -f kubernetes/rangeserver.yaml \
       -f kubernetes/warden.yaml \
       -f kubernetes/epoch_publisher.yaml \
-      -f kubernetes/epoch_service.yaml
+      -f kubernetes/epoch_service.yaml \
+      -f kubernetes/universe.yaml
    ```
 
    :warning: Many components of Chardonnay currently crash when their
