@@ -78,7 +78,7 @@ data:
             "fast_network_addr": "0.0.0.0:50055"
         },
         "universe": {
-            "proto_server_addr": "universe:50056"
+            "proto_server_addr": "chardonnay-universe:50056"
         },
         "epoch": {
             "proto_server_addr": "chardonnay-epoch:50050"

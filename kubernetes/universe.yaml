@@ -2,20 +2,20 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: universe
+  name: chardonnay-universe
   namespace: chardonnay
   labels:
-    app: universe
+    app: chardonnay-universe
 spec:
-  serviceName: "universe"
+  serviceName: chardonnay-universe
   replicas: 1
   selector:
     matchLabels:
-      app: universe
+      app: chardonnay-universe
   template:
     metadata:
       labels:
-        app: universe
+        app: chardonnay-universe
     spec:
       containers:
       - name: universe
@@ -33,28 +33,28 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: universe-config
+          name: chardonnay-universe-config
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: universe
+  name: chardonnay-universe
   namespace: chardonnay
   labels:
-    app: universe
+    app: chardonnay-universe
 spec:
   ports:
   - port: 50056
     name: grpc
   clusterIP: None
   selector:
-    app: universe
+    app: chardonnay-universe
 
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: universe-config
+  name: chardonnay-universe-config
   namespace: chardonnay
 data:
   config.json: |
