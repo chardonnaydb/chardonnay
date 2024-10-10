@@ -2277,6 +2277,7 @@ dependencies = [
 name = "tx_state_store"
 version = "0.1.0"
 dependencies = [
+ "common",
  "scylla 0.14.0",
  "thiserror",
  "tokio",
