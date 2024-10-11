@@ -241,7 +241,6 @@ impl Server {
         let proto_server = ProtoServer {
             server: server.clone(),
         };
-        let server_clone = server.clone();
         let addr = server
             .publisher_config
             .backend_addr
