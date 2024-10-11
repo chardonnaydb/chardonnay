@@ -92,8 +92,7 @@ CREATE TABLE keyspaces (
     name                text,
     primary_zone        zone,
     base_key_ranges     list<frozen<key_range>>,
-    PRIMARY KEY (keyspace_id)
+    PRIMARY KEY ((namespace), name)
 ) WITH COMPACTION = {
     'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
 };
-

@@ -1,9 +1,7 @@
 use common::config::Config;
-use storage::cassandra::Cassandra;
 use tracing::info;
-
-mod server;
-mod storage;
+use universe::server;
+use universe::storage::cassandra::Cassandra;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

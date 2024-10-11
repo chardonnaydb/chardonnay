@@ -10,6 +10,7 @@ use scylla::transport::errors::QueryError;
 use scylla::transport::PagingState;
 use scylla::Session;
 use scylla::{FromRow, SerializeRow, SessionBuilder};
+use std::error::Error as StdError;
 use uuid::Uuid;
 
 pub struct Cassandra {
@@ -20,6 +21,7 @@ static CREATE_KEYSPACE_QUERY: &str = r#"
     INSERT INTO chardonnay.keyspaces
     (keyspace_id, name, namespace, primary_zone, base_key_ranges)
     VALUES (?, ?, ?, ?, ?)
+    IF NOT EXISTS
 "#;
 
 static LIST_KEYSPACES_QUERY: &str = r#"
@@ -41,7 +43,7 @@ fn scylla_query_error_to_storage_error(qe: QueryError) -> Error {
         QueryError::TimeoutError | QueryError::DbError(DbError::WriteTimeout { .. }, _) => {
             Error::Timeout
         }
-        _ => Error::InternalError(Arc::new(qe)),
+        _ => Error::InternalError(Some(Arc::new(qe))),
     }
 }
 
@@ -66,8 +68,8 @@ struct SerializedZone {
 #[derive(Debug, FromUserType, SerializeValue)]
 struct SerializedKeyRange {
     base_range_uuid: Uuid,
-    lower_bound_inclusive: Vec<u8>,
-    upper_bound_exclusive: Vec<u8>,
+    lower_bound_inclusive: Option<Vec<u8>>,
+    upper_bound_exclusive: Option<Vec<u8>>,
 }
 
 #[derive(Debug, FromRow, SerializeRow)]
@@ -75,89 +77,87 @@ struct SerializedKeyspaceInfo {
     keyspace_id: Uuid,
     name: String,
     namespace: String,
-    primary_zone: Option<SerializedZone>,
+    primary_zone: SerializedZone,
     // We need Option here because Scylla doesn't support empty lists.
     // Without Option, on reading, deserialization will fail if the list is empty.
-    base_key_ranges: Option<Vec<SerializedKeyRange>>,
+    base_key_ranges: Vec<SerializedKeyRange>,
 }
 
 impl SerializedKeyspaceInfo {
     fn construct_from_parts(
         name: String,
         namespace: String,
-        primary_zone: Option<Zone>,
-        base_key_range_requests: Vec<KeyRangeRequest>,
+        primary_zone: Zone,
+        base_key_range_requests: Vec<KeyRange>,
     ) -> Self {
         SerializedKeyspaceInfo {
             keyspace_id: Uuid::new_v4(),
-            name: name.to_string(),
-            namespace: namespace.to_string(),
-            primary_zone: primary_zone.map(|zone| SerializedZone {
-                region: zone.region.map(|region| SerializedRegion {
+            name: name,
+            namespace: namespace,
+            primary_zone: SerializedZone {
+                name: primary_zone.name,
+                region: primary_zone.region.map(|region| SerializedRegion {
                     name: region.name,
-                    cloud: region.cloud.map(|cloud| match cloud {
-                        proto::universe::region::Cloud::PublicCloud(cloud) => {
+                    cloud: match region.cloud {
+                        Some(proto::universe::region::Cloud::PublicCloud(cloud)) => Some(
                             proto::universe::Cloud::try_from(cloud)
-                                .map(|c| c.as_str_name().to_string())
-                                .unwrap_or_default()
-                        }
-                        proto::universe::region::Cloud::OtherCloud(other) => other,
-                    }),
+                                .unwrap()
+                                .as_str_name()
+                                .to_string(),
+                        ),
+                        Some(proto::universe::region::Cloud::OtherCloud(other)) => Some(other),
+                        None => None,
+                    },
                 }),
-                name: zone.name,
-            }),
-            base_key_ranges: if base_key_range_requests.is_empty() {
-                None
-            } else {
-                Some(
-                    base_key_range_requests
-                        .into_iter()
-                        .map(|range| SerializedKeyRange {
-                            base_range_uuid: Uuid::new_v4(),
-                            lower_bound_inclusive: range.lower_bound_inclusive,
-                            upper_bound_exclusive: range.upper_bound_exclusive,
-                        })
-                        .collect(),
-                )
             },
+            base_key_ranges: base_key_range_requests
+                .into_iter()
+                .map(|range| SerializedKeyRange {
+                    base_range_uuid: Uuid::from_str(&range.base_range_uuid).unwrap(),
+                    lower_bound_inclusive: Some(range.lower_bound_inclusive),
+                    upper_bound_exclusive: Some(range.upper_bound_exclusive),
+                })
+                .collect(),
         }
     }
 
     /// Convert into a KeyspaceInfo proto.
     fn to_keyspace_info(self) -> KeyspaceInfo {
-        let primary_zone = self.primary_zone.map(|zone| Zone {
-            name: zone.name,
-            region: zone.region.map(|region| proto::universe::Region {
-                name: region.name,
-                cloud: region.cloud.map(|cloud| match cloud.as_str() {
-                    "AWS" => proto::universe::region::Cloud::PublicCloud(
-                        proto::universe::Cloud::Aws as i32,
-                    ),
-                    "AZURE" => proto::universe::region::Cloud::PublicCloud(
-                        proto::universe::Cloud::Azure as i32,
-                    ),
-                    "GCP" => proto::universe::region::Cloud::PublicCloud(
-                        proto::universe::Cloud::Gcp as i32,
-                    ),
-                    other => proto::universe::region::Cloud::OtherCloud(other.to_string()),
+        let primary_zone = Zone {
+            name: self.primary_zone.name,
+            region: self
+                .primary_zone
+                .region
+                .map(|region| proto::universe::Region {
+                    name: region.name,
+                    cloud: region.cloud.map(|cloud| match cloud.as_str() {
+                        "AWS" => proto::universe::region::Cloud::PublicCloud(
+                            proto::universe::Cloud::Aws as i32,
+                        ),
+                        "AZURE" => proto::universe::region::Cloud::PublicCloud(
+                            proto::universe::Cloud::Azure as i32,
+                        ),
+                        "GCP" => proto::universe::region::Cloud::PublicCloud(
+                            proto::universe::Cloud::Gcp as i32,
+                        ),
+                        other => proto::universe::region::Cloud::OtherCloud(other.to_string()),
+                    }),
                 }),
-            }),
-        });
+        };
         let base_key_ranges = self
             .base_key_ranges
-            .unwrap_or_default()
             .into_iter()
             .map(|range| KeyRange {
                 base_range_uuid: range.base_range_uuid.to_string(),
-                lower_bound_inclusive: range.lower_bound_inclusive,
-                upper_bound_exclusive: range.upper_bound_exclusive,
+                lower_bound_inclusive: range.lower_bound_inclusive.unwrap_or_default(),
+                upper_bound_exclusive: range.upper_bound_exclusive.unwrap_or_default(),
             })
             .collect();
         KeyspaceInfo {
             keyspace_id: self.keyspace_id.to_string(),
             name: self.name,
             namespace: self.namespace,
-            primary_zone,
+            primary_zone: Some(primary_zone),
             base_key_ranges,
         }
     }
@@ -180,7 +180,7 @@ impl Storage for Cassandra {
         name: &str,
         namespace: &str,
         primary_zone: Option<Zone>,
-        base_key_ranges: Vec<KeyRangeRequest>,
+        base_key_ranges: Vec<KeyRange>,
     ) -> Result<String, Error> {
         // TODO: Validate base_key_ranges
 
@@ -188,7 +188,7 @@ impl Storage for Cassandra {
         let serialized_info = SerializedKeyspaceInfo::construct_from_parts(
             name.to_string(),
             namespace.to_string(),
-            primary_zone,
+            primary_zone.unwrap(),
             base_key_ranges,
         );
 
@@ -196,15 +196,30 @@ impl Storage for Cassandra {
 
         // Execute the query
         let query = get_serial_query(CREATE_KEYSPACE_QUERY);
-        self.session
+        let query_result = self
+            .session
             .query_single_page(query, serialized_info, PagingState::start())
             .await
             .map_err(scylla_query_error_to_storage_error)?;
 
+        println!("Query result: {:?}", query_result);
+        // If the first row of the result is true, our insert was successful.
+        // Else, insert failed, thus the keyspace already exists.
+        if let Some(Some(insert_succeeded)) = query_result.0.first_row().unwrap().columns.get(0) {
+            if !insert_succeeded.as_boolean().unwrap() {
+                return Err(Error::KeyspaceAlreadyExists);
+            }
+        } else {
+            return Err(Error::InternalError(None));
+        }
+
         Ok(keyspace_id)
     }
 
-    async fn list_keyspaces(&self) -> Result<Vec<KeyspaceInfo>, Error> {
+    async fn list_keyspaces(
+        &self,
+        region: Option<proto::universe::Region>,
+    ) -> Result<Vec<KeyspaceInfo>, Error> {
         // Execute the query
         let query = get_serial_query(LIST_KEYSPACES_QUERY);
         let rows = self
@@ -222,27 +237,50 @@ impl Storage for Cassandra {
                 let serialized = row.into_typed::<SerializedKeyspaceInfo>();
                 serialized
                     .map(SerializedKeyspaceInfo::to_keyspace_info)
-                    .map_err(|e| Error::DeserializationError(Arc::new(e)))
+                    .map_err(|e| Error::InternalError(Some(Arc::new(e))))
             })
             .collect::<Result<Vec<KeyspaceInfo>, Error>>()?;
 
-        Ok(keyspaces)
+        // Filter by region if provided
+        // TODO: Push this to Cassandra query
+        let filtered_keyspaces = if let Some(filter_region) = region {
+            keyspaces
+                .into_iter()
+                .filter(|keyspace| {
+                    keyspace
+                        .primary_zone
+                        .as_ref()
+                        .and_then(|zone| zone.region.as_ref())
+                        .map_or(false, |keyspace_region| keyspace_region == &filter_region)
+                })
+                .collect()
+        } else {
+            keyspaces
+        };
+
+        Ok(filtered_keyspaces)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use super::*;
     use proto::universe::{region, Cloud, KeyRange, KeyspaceInfo, Region, Zone};
 
-    fn create_example_keyspace_info() -> KeyspaceInfo {
+    fn create_example_keyspace_info(
+        name: String,
+        namespace: String,
+        region_name: String,
+    ) -> KeyspaceInfo {
         KeyspaceInfo {
             keyspace_id: Uuid::new_v4().to_string(),
-            namespace: "example_namespace".to_string(),
-            name: "example_keyspace".to_string(),
+            name: name,
+            namespace: namespace,
             primary_zone: Some(Zone {
                 region: Some(Region {
-                    name: "example_region".to_string(),
+                    name: region_name,
                     cloud: Some(region::Cloud::PublicCloud(Cloud::Aws as i32)),
                 }),
                 name: "example_zone".to_string(),
@@ -266,27 +304,25 @@ mod tests {
         a.namespace == b.namespace
             && a.name == b.name
             && a.primary_zone == b.primary_zone
-            && a.base_key_ranges.len() == b.base_key_ranges.len()
-            && a.base_key_ranges
-                .iter()
-                .zip(b.base_key_ranges.iter())
-                .all(|(a_range, b_range)| {
-                    a_range.lower_bound_inclusive == b_range.lower_bound_inclusive
-                        && a_range.upper_bound_exclusive == b_range.upper_bound_exclusive
-                })
+            && a.base_key_ranges == b.base_key_ranges
     }
 
     #[tokio::test]
     async fn test_local_roundtrip() {
-        let original = create_example_keyspace_info();
+        let original = create_example_keyspace_info(
+            "example_keyspace".to_string(),
+            "example_namespace".to_string(),
+            "example_region".to_string(),
+        );
         let serialized = SerializedKeyspaceInfo::construct_from_parts(
             original.name.clone(),
             original.namespace.clone(),
-            original.primary_zone.clone(),
+            original.primary_zone.clone().unwrap(),
             original
                 .base_key_ranges
                 .iter()
-                .map(|range| KeyRangeRequest {
+                .map(|range| KeyRange {
+                    base_range_uuid: range.base_range_uuid.clone(),
                     lower_bound_inclusive: range.lower_bound_inclusive.clone(),
                     upper_bound_exclusive: range.upper_bound_exclusive.clone(),
                 })
@@ -298,40 +334,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_cassandra_roundtrip() {
-        let mut example_keyspaces = vec![create_example_keyspace_info()];
-        // Keyspace with empty base_key_ranges
-        example_keyspaces.push(KeyspaceInfo {
-            keyspace_id: Uuid::new_v4().to_string(),
-            namespace: "empty_namespace".to_string(),
-            name: "empty_keyspace".to_string(),
-            primary_zone: Some(Zone {
-                region: Some(Region {
-                    cloud: Some(proto::universe::region::Cloud::PublicCloud(
-                        proto::universe::Cloud::Aws as i32,
-                    )),
-                    name: "us-west-2".to_string(),
-                }),
-                name: "us-west-2a".to_string(),
-            }),
-            base_key_ranges: vec![],
-        });
-        // Keyspace with no primary_zone
-        example_keyspaces.push(KeyspaceInfo {
-            keyspace_id: Uuid::new_v4().to_string(),
-            namespace: "no_primary_zone_namespace".to_string(),
-            name: "no_primary_zone_keyspace".to_string(),
-            primary_zone: None,
-            base_key_ranges: vec![],
-        });
+        let uuid_str = Uuid::new_v4().to_string();
+        let example_keyspaces = vec![
+            create_example_keyspace_info(
+                "example_keyspace_1_".to_string() + &uuid_str,
+                "example_namespace".to_string(),
+                "example_region_1".to_string(),
+            ),
+            create_example_keyspace_info(
+                "example_keyspace_2_".to_string() + &uuid_str,
+                "example_namespace".to_string(),
+                "example_region_2".to_string(),
+            ),
+        ];
         // Start a session
         let storage = Cassandra::new("127.0.0.1:9042".to_string()).await;
+        let mut keyspace_ids: Vec<String> = vec![];
 
-        for original in example_keyspaces {
+        for original in example_keyspaces.clone() {
             // Insert into Cassandra
+            println!("Inserting keyspace: {}", original.name);
             let base_key_range_requests = original
                 .base_key_ranges
                 .iter()
-                .map(|range| KeyRangeRequest {
+                .map(|range| KeyRange {
+                    base_range_uuid: range.base_range_uuid.clone(),
                     lower_bound_inclusive: range.lower_bound_inclusive.clone(),
                     upper_bound_exclusive: range.upper_bound_exclusive.clone(),
                 })
@@ -345,10 +372,11 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            keyspace_ids.push(keyspace_id.clone());
             // Print keyspace id
             println!("Keyspace ID: {}", keyspace_id);
             // List keyspaces from Cassandra
-            let keyspaces = storage.list_keyspaces().await.unwrap();
+            let keyspaces = storage.list_keyspaces(None).await.unwrap();
             // Find the keyspace we inserted by id
             let roundtrip = keyspaces
                 .into_iter()
@@ -357,51 +385,36 @@ mod tests {
 
             assert_eq!(keyspace_info_equals(&original, &roundtrip), true);
         }
-    }
 
-    #[tokio::test]
-    async fn test_keyspace_without_base_key_ranges() {
-        // Start a session
-        let storage = Cassandra::new("127.0.0.1:9042".to_string()).await;
-        let original = KeyspaceInfo {
-            keyspace_id: Uuid::new_v4().to_string(),
-            namespace: "example_namespace".to_string(),
-            name: "example_keyspace".to_string(),
-            primary_zone: None,
-            base_key_ranges: vec![],
-        };
-        // Insert into Cassandra
-        let base_key_range_requests = original
-            .base_key_ranges
-            .iter()
-            .map(|range| KeyRangeRequest {
-                lower_bound_inclusive: range.lower_bound_inclusive.clone(),
-                upper_bound_exclusive: range.upper_bound_exclusive.clone(),
-            })
-            .collect();
-        let keyspace_id = storage
-            .create_keyspace(
-                &original.name,
-                &original.namespace,
-                original.primary_zone.clone(),
-                base_key_range_requests,
-            )
+        let this_region_keyspace_id = keyspace_ids[0].clone();
+        let other_region_keyspace_id = keyspace_ids[1].clone();
+        // Test list_keyspaces with region filter
+        let keyspaces = storage
+            .list_keyspaces(Some(Region {
+                name: "example_region_1".to_string(),
+                cloud: Some(region::Cloud::PublicCloud(Cloud::Aws as i32)),
+            }))
             .await
             .unwrap();
-        // Print keyspace id
-        println!("Keyspace ID: {}", keyspace_id);
-        // List keyspaces from Cassandra
-        let keyspaces = storage.list_keyspaces().await.unwrap();
-        // Find the keyspace we inserted by id
-        let roundtrip = keyspaces
-            .into_iter()
-            .find(|k| k.keyspace_id == keyspace_id)
-            .unwrap_or_else(|| panic!("Keyspace with id {} was not found", keyspace_id));
+        // The list should NOT contain the keyspace of the other region
+        assert!(!keyspaces
+            .iter()
+            .any(|k| k.keyspace_id == other_region_keyspace_id));
+        // The list should contain the keyspace of this region
+        assert!(keyspaces
+            .iter()
+            .any(|k| k.keyspace_id == this_region_keyspace_id));
 
-        // Fully print original and roundtrip
-        println!("Original: {:#?}", original);
-        println!("Roundtrip: {:#?}", roundtrip);
-
-        assert_eq!(keyspace_info_equals(&original, &roundtrip), true);
+        // Try to create the same keyspace again and expect an error
+        let keyspace = example_keyspaces[0].clone();
+        let result = storage
+            .create_keyspace(
+                &keyspace.name,
+                &keyspace.namespace,
+                keyspace.primary_zone,
+                keyspace.base_key_ranges,
+            )
+            .await;
+        assert!(matches!(result, Err(Error::KeyspaceAlreadyExists)));
     }
 }

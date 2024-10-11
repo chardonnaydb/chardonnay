@@ -8,10 +8,10 @@ pub mod cassandra;
 pub enum Error {
     #[error("Timeout Error")]
     Timeout,
-    #[error("Serialization Error: {0}")]
-    DeserializationError(Arc<dyn std::error::Error + Send + Sync>),
-    #[error("Storage Layer error: {0}")]
-    InternalError(Arc<dyn std::error::Error + Send + Sync>),
+    #[error("Keyspace already exists")]
+    KeyspaceAlreadyExists,
+    #[error("Storage Layer error: {}", .0.as_ref().map(|e| e.to_string()).unwrap_or_else(|| "Unknown error".to_string()))]
+    InternalError(Option<Arc<dyn std::error::Error + Send + Sync>>),
 }
 
 pub trait Storage: Send + Sync + 'static {
@@ -20,10 +20,11 @@ pub trait Storage: Send + Sync + 'static {
         name: &str,
         namespace: &str,
         primary_zone: Option<Zone>,
-        base_key_ranges: Vec<KeyRangeRequest>,
+        base_key_ranges: Vec<KeyRange>,
     ) -> impl std::future::Future<Output = Result<String, Error>> + Send;
 
     fn list_keyspaces(
         &self,
+        region: Option<proto::universe::Region>,
     ) -> impl std::future::Future<Output = Result<Vec<KeyspaceInfo>, Error>> + Send;
 }

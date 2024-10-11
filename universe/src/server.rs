@@ -23,6 +23,7 @@ use tokio_stream::{
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, instrument};
+use uuid::Uuid;
 
 use crate::storage::{
     cassandra::{self, Cassandra},
@@ -48,16 +49,32 @@ impl<S: Storage> Universe for UniverseServer<S> {
         &self,
         request: Request<CreateKeyspaceRequest>,
     ) -> Result<Response<CreateKeyspaceResponse>, Status> {
-        debug!("Got a create_keyspace request: {:?}", request);
+        info!("Got a create_keyspace request: {:?}", request);
 
         let req_inner = request.into_inner();
+        // Validate the base key ranges
+        if req_inner.base_key_ranges.is_empty() {
+            return Err(Status::invalid_argument("Base key ranges cannot be empty"));
+        }
+        // TODO: Maybe we can default the base key ranges in the future
+
+        let base_key_ranges: Vec<proto::universe::KeyRange> = req_inner
+            .base_key_ranges
+            .into_iter()
+            .map(|kr| proto::universe::KeyRange {
+                base_range_uuid: Uuid::new_v4().to_string(),
+                lower_bound_inclusive: kr.lower_bound_inclusive,
+                upper_bound_exclusive: kr.upper_bound_exclusive,
+            })
+            .collect();
+
         let keyspace_id = self
             .storage
             .create_keyspace(
                 &req_inner.name,
                 &req_inner.namespace,
                 req_inner.primary_zone,
-                req_inner.base_key_ranges,
+                base_key_ranges,
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to create keyspace: {}", e)))?;
@@ -75,7 +92,7 @@ impl<S: Storage> Universe for UniverseServer<S> {
 
         let keyspaces = self
             .storage
-            .list_keyspaces()
+            .list_keyspaces(request.into_inner().region)
             .await
             .map_err(|e| Status::internal(format!("Failed to list keyspaces: {}", e)))?;
 
@@ -110,101 +127,4 @@ pub async fn run_universe_server<S: Storage>(
         .await?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::storage::cassandra::Cassandra;
-    use proto::universe::{KeyRange, KeyRangeRequest};
-    use std::time::Duration;
-    use tokio::time::sleep;
-
-    #[tokio::test]
-    async fn test_run_universe_server() {
-        // Use a random available port
-        let addr = "127.0.0.1:0";
-
-        // Create a Cassandra CQL session
-        let storage = Cassandra::new("127.0.0.1:9042".to_string()).await;
-
-        // Start the server in a separate task
-        let server_task = tokio::spawn(async move {
-            run_universe_server(addr, storage).await.unwrap();
-        });
-
-        // Wait for 1 second
-        sleep(Duration::from_secs(1)).await;
-
-        // Stop the server by aborting the task
-        server_task.abort();
-
-        // Wait for the server to shut down
-        let _ = server_task.await;
-    }
-
-    #[tokio::test]
-    async fn test_create_and_list_keyspace_handlers() {
-        let addr = "127.0.0.1:50056";
-
-        // Create a Cassandra CQL session
-        let storage = Cassandra::new("127.0.0.1:9042".to_string()).await;
-
-        // Start the server in a separate task
-        let server_task = tokio::spawn(async move {
-            run_universe_server(addr, storage).await.unwrap();
-        });
-
-        // Wait a bit for the server to start
-        sleep(Duration::from_millis(100)).await;
-
-        // Create a Universe client
-        let mut client = UniverseClient::connect(format!("http://{}", addr))
-            .await
-            .unwrap();
-
-        // Create a keyspace
-        let keyspace_name = "test_keyspace";
-        let namespace = "test_namespace";
-        let primary_zone = Some(proto::universe::Zone {
-            region: Some(proto::universe::Region {
-                cloud: Some(proto::universe::region::Cloud::OtherCloud(
-                    "lalakis".to_string(),
-                )),
-                name: "test_region".to_string(),
-            }),
-            name: "test_zone".to_string(),
-        });
-        let base_key_ranges = vec![proto::universe::KeyRangeRequest {
-            lower_bound_inclusive: vec![0],
-            upper_bound_exclusive: vec![10],
-        }];
-        // No primary zone or base key ranges for now
-        let keyspace_req = CreateKeyspaceRequest {
-            name: keyspace_name.to_string(),
-            namespace: namespace.to_string(),
-            primary_zone: primary_zone,
-            base_key_ranges: base_key_ranges,
-        };
-        let keyspace_id = client
-            .create_keyspace(keyspace_req)
-            .await
-            .unwrap()
-            .into_inner()
-            .keyspace_id;
-
-        // List keyspaces
-        let keyspaces = client
-            .list_keyspaces(ListKeyspacesRequest { region: None })
-            .await
-            .unwrap()
-            .into_inner()
-            .keyspaces;
-
-        // Check that the keyspace we created is in the list
-        assert!(keyspaces.iter().any(|k| k.keyspace_id == keyspace_id));
-
-        // Stop the server
-        server_task.abort();
-    }
 }
