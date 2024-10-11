@@ -7,6 +7,9 @@
         "proto_server_addr": "127.0.0.1:50054",
         "fast_network_addr": "127.0.0.1:50055"
     },
+    "universe": {
+        "proto_server_addr": "127.0.0.1:50056"
+    },
     "epoch": {
         "proto_server_addr": "127.0.0.1:50050"
     },

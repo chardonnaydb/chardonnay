@@ -63,6 +63,9 @@ data:
             "proto_server_addr": "0.0.0.0:50054",
             "fast_network_addr": "0.0.0.0:50055"
         },
+        "universe": {
+            "proto_server_addr": "universe:50056"
+        },
         "epoch": {
             "proto_server_addr": "0.0.0.0:50050"
         },

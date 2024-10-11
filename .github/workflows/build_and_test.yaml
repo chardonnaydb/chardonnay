@@ -46,6 +46,7 @@ jobs:
     # docker build -t $WARDEN_IMG --target warden .
     # docker build -t $EPOCH_PUBLISHER_IMG --target epoch_publisher .
     # docker build -t $EPOCH_IMG --target epoch .
+    # docker build -t $UNIVERSE_IMG --target epoch .
     strategy:
       matrix:
         include:
@@ -57,6 +58,8 @@ jobs:
             tags: epoch-publisher:latest
           - target: epoch
             tags: epoch:latest
+          - target: universe
+            tags: universe:latest
 
     steps:
     - uses: actions/checkout@v3

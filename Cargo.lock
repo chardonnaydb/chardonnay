@@ -2300,6 +2300,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e91b56cd4cadaeb79bbf1a5645f6b4f8dc5bde8834ad5894a8db35fda9efa1fe"
 
 [[package]]
+name = "universe"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "common",
+ "once_cell",
+ "pin-project",
+ "proto",
+ "scylla 0.14.0",
+ "serde_json",
+ "strum",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+ "uuid 1.10.0",
+]
+
+[[package]]
 name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
