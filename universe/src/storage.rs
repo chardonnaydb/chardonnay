@@ -17,9 +17,10 @@ pub enum Error {
 pub trait Storage: Send + Sync + 'static {
     fn create_keyspace(
         &self,
+        keyspace_id: &str,
         name: &str,
         namespace: &str,
-        primary_zone: Option<Zone>,
+        primary_zone: Zone,
         base_key_ranges: Vec<KeyRange>,
     ) -> impl std::future::Future<Output = Result<String, Error>> + Send;
 

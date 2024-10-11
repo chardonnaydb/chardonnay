@@ -7,6 +7,7 @@ use std::{
 
 use common::{
     host_info::{self, HostInfo},
+    keyspace_id,
     region::{self, Region, Zone},
 };
 use pin_project::{pin_project, pinned_drop};
@@ -52,11 +53,8 @@ impl<S: Storage> Universe for UniverseServer<S> {
         info!("Got a create_keyspace request: {:?}", request);
 
         let req_inner = request.into_inner();
-        // Validate the base key ranges
-        if req_inner.base_key_ranges.is_empty() {
-            return Err(Status::invalid_argument("Base key ranges cannot be empty"));
-        }
-        // TODO: Maybe we can default the base key ranges in the future
+        // TODO: Validate the base key ranges. Must be non-overlapping and
+        // cover the entire key space.
 
         let base_key_ranges: Vec<proto::universe::KeyRange> = req_inner
             .base_key_ranges
@@ -68,12 +66,25 @@ impl<S: Storage> Universe for UniverseServer<S> {
             })
             .collect();
 
+        // If the base_key_ranges are empty, create a single range that covers
+        // the entire key space.
+        let base_key_ranges = if base_key_ranges.is_empty() {
+            vec![proto::universe::KeyRange {
+                base_range_uuid: Uuid::new_v4().to_string(),
+                lower_bound_inclusive: vec![],
+                upper_bound_exclusive: vec![],
+            }]
+        } else {
+            base_key_ranges
+        };
+
         let keyspace_id = self
             .storage
             .create_keyspace(
+                Uuid::new_v4().to_string().as_str(),
                 &req_inner.name,
                 &req_inner.namespace,
-                req_inner.primary_zone,
+                req_inner.primary_zone.unwrap(),
                 base_key_ranges,
             )
             .await

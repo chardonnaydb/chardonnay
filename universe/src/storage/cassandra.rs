@@ -10,7 +10,6 @@ use scylla::transport::errors::QueryError;
 use scylla::transport::PagingState;
 use scylla::Session;
 use scylla::{FromRow, SerializeRow, SessionBuilder};
-use std::error::Error as StdError;
 use uuid::Uuid;
 
 pub struct Cassandra {
@@ -85,13 +84,14 @@ struct SerializedKeyspaceInfo {
 
 impl SerializedKeyspaceInfo {
     fn construct_from_parts(
+        keyspace_id: Uuid,
         name: String,
         namespace: String,
         primary_zone: Zone,
         base_key_range_requests: Vec<KeyRange>,
     ) -> Self {
         SerializedKeyspaceInfo {
-            keyspace_id: Uuid::new_v4(),
+            keyspace_id: keyspace_id,
             name: name,
             namespace: namespace,
             primary_zone: SerializedZone {
@@ -177,22 +177,24 @@ impl Cassandra {
 impl Storage for Cassandra {
     async fn create_keyspace(
         &self,
+        keyspace_id: &str,
         name: &str,
         namespace: &str,
-        primary_zone: Option<Zone>,
+        primary_zone: Zone,
         base_key_ranges: Vec<KeyRange>,
     ) -> Result<String, Error> {
         // TODO: Validate base_key_ranges
 
         // Create a SerializedKeyspaceInfo from the input parameters
         let serialized_info = SerializedKeyspaceInfo::construct_from_parts(
+            Uuid::from_str(keyspace_id).unwrap(),
             name.to_string(),
             namespace.to_string(),
-            primary_zone.unwrap(),
+            primary_zone,
             base_key_ranges,
         );
 
-        let keyspace_id = serialized_info.keyspace_id.to_string();
+        let keyspace_id = keyspace_id.to_string();
 
         // Execute the query
         let query = get_serial_query(CREATE_KEYSPACE_QUERY);
@@ -300,13 +302,6 @@ mod tests {
         }
     }
 
-    fn keyspace_info_equals(a: &KeyspaceInfo, b: &KeyspaceInfo) -> bool {
-        a.namespace == b.namespace
-            && a.name == b.name
-            && a.primary_zone == b.primary_zone
-            && a.base_key_ranges == b.base_key_ranges
-    }
-
     #[tokio::test]
     async fn test_local_roundtrip() {
         let original = create_example_keyspace_info(
@@ -315,6 +310,7 @@ mod tests {
             "example_region".to_string(),
         );
         let serialized = SerializedKeyspaceInfo::construct_from_parts(
+            Uuid::from_str(original.keyspace_id.as_str()).unwrap(),
             original.name.clone(),
             original.namespace.clone(),
             original.primary_zone.clone().unwrap(),
@@ -329,7 +325,7 @@ mod tests {
                 .collect(),
         );
         let roundtrip = serialized.to_keyspace_info();
-        assert_eq!(keyspace_info_equals(&original, &roundtrip), true);
+        assert_eq!(original == roundtrip, true);
     }
 
     #[tokio::test]
@@ -365,9 +361,10 @@ mod tests {
                 .collect();
             let keyspace_id = storage
                 .create_keyspace(
+                    &original.keyspace_id,
                     &original.name,
                     &original.namespace,
-                    original.primary_zone.clone(),
+                    original.primary_zone.clone().unwrap(),
                     base_key_range_requests,
                 )
                 .await
@@ -383,7 +380,7 @@ mod tests {
                 .find(|k| k.keyspace_id == keyspace_id)
                 .unwrap_or_else(|| panic!("Keyspace with id {} was not found", keyspace_id));
 
-            assert_eq!(keyspace_info_equals(&original, &roundtrip), true);
+            assert_eq!(original == roundtrip, true);
         }
 
         let this_region_keyspace_id = keyspace_ids[0].clone();
@@ -409,9 +406,10 @@ mod tests {
         let keyspace = example_keyspaces[0].clone();
         let result = storage
             .create_keyspace(
+                &keyspace.keyspace_id,
                 &keyspace.name,
                 &keyspace.namespace,
-                keyspace.primary_zone,
+                keyspace.primary_zone.unwrap(),
                 keyspace.base_key_ranges,
             )
             .await;
