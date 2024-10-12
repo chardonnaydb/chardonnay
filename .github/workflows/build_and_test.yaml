@@ -42,11 +42,6 @@ jobs:
 
   build-docker-images:
     runs-on: ubuntu-latest
-    # docker build -t $RANGESERVER_IMG --target rangeserver .
-    # docker build -t $WARDEN_IMG --target warden .
-    # docker build -t $EPOCH_PUBLISHER_IMG --target epoch_publisher .
-    # docker build -t $EPOCH_IMG --target epoch .
-    # docker build -t $UNIVERSE_IMG --target epoch .
     strategy:
       matrix:
         include:
@@ -55,11 +50,11 @@ jobs:
           - target: warden
             tags: chardonnay-warden:latest
           - target: epoch_publisher
-            tags: epoch-publisher:latest
+            tags: chardonnay-epoch-publisher:latest
           - target: epoch
-            tags: epoch:latest
+            tags: chardonnay-epoch:latest
           - target: universe
-            tags: universe:latest
+            tags: chardonnay-universe:latest
 
     steps:
     - uses: actions/checkout@v3
@@ -78,3 +73,30 @@ jobs:
         push: false
 
   # TODO: Add an action to test deploying Chardonnay on a minikube cluster
+
+  deploy-minikube:
+    runs-on: ubuntu-latest
+    needs: [build-docker-images]
+    steps:
+    - uses: actions/checkout@v3
+      name: Check out the repository code
+
+    - name: Start minikube
+      uses: medyagh/setup-minikube@master
+
+    - name: Build images in minikube
+      run: |
+        eval $(minikube docker-env)
+        docker build -t chardonnay-rangeserver:latest --target rangeserver .
+        docker build -t chardonnay-warden:latest --target warden .
+        docker build -t chardonnay-epoch-publisher:latest --target epoch_publisher .
+        docker build -t chardonnay-epoch:latest --target epoch .
+        docker build -t chardonnay-universe:latest --target universe .
+
+    - name: Deploy and verify Chardonnay
+      run: |
+        cd kubernetes && ./deploy.sh
+
+    - name: Clean up
+      if: always()
+      run: minikube delete
