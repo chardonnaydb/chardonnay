@@ -11,5 +11,6 @@ common = { version = "0.1.0", path = "../common" }
 epoch_reader = { version = "0.1.0", path = "../epoch_reader" }
 rangeclient = { version = "0.1.0", path = "../rangeclient" }
 strum = "0.26.3"
+tokio = "1.40.0"
 tx_state_store = { version = "0.1.0", path = "../tx_state_store" }
 uuid = "1.10.0"

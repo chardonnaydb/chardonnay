@@ -7,8 +7,10 @@ pub enum TransactionAbortReason {
     DeadlockPrevention,
     TransactionLockLost,
     RangeLeadershipChanged,
+    RangeLeaseExpired,
     RangePartitioningChanged,
     TransactionTimeout,
+    PrepareFailed,
     Other,
 }
 

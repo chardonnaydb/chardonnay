@@ -6,9 +6,11 @@ use std::{
 use bytes::Bytes;
 use common::{
     full_range_id::FullRangeId, keyspace_id::KeyspaceId,
-    membership::range_assignment_oracle::RangeAssignmentOracle, transaction_info::TransactionInfo,
+    membership::range_assignment_oracle::RangeAssignmentOracle, record::Record,
+    transaction_info::TransactionInfo,
 };
 use epoch_reader::reader::EpochReader;
+use tokio::task::JoinSet;
 use uuid::Uuid;
 
 use crate::{
@@ -24,22 +26,26 @@ enum State {
     Preparing,
     Aborted,
     Committed,
-    Done,
+}
+
+struct ParticipantRange {
+    readset: HashSet<Bytes>,
+    writeset: HashMap<Bytes, Bytes>,
+    deleteset: HashSet<Bytes>,
+    leader_sequence_number: u64,
 }
 
 pub struct Transaction {
     id: Uuid,
     transaction_info: Arc<TransactionInfo>,
     state: State,
-    readset: HashSet<FullRecordKey>,
-    writeset: HashMap<FullRecordKey, Bytes>,
-    deleteset: HashSet<FullRecordKey>,
-    range_leader_sequence_number: HashMap<Uuid, u64>,
+    participant_ranges: HashMap<FullRangeId, ParticipantRange>,
     resolved_keyspaces: HashMap<Keyspace, KeyspaceId>,
     range_client: Arc<RangeClient>,
     range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,
     epoch_reader: Arc<EpochReader>,
     tx_state_store: Arc<TxStateStoreClient>,
+    runtime: tokio::runtime::Handle,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -87,23 +93,36 @@ impl Transaction {
         match self.state {
             State::Running => Ok(()),
             State::Aborted => Err(Error::TransactionAborted(TransactionAbortReason::Other)),
-            State::Preparing | State::Committed | State::Done => {
-                Err(Error::TransactionNoLongerRunning)
-            }
+            State::Preparing | State::Committed => Err(Error::TransactionNoLongerRunning),
         }
+    }
+
+    fn get_participant_range<'a>(&'a mut self, range_id: FullRangeId) -> &'a mut ParticipantRange {
+        if !self.participant_ranges.contains_key(&range_id) {
+            let initial_range_data = ParticipantRange {
+                readset: HashSet::new(),
+                writeset: HashMap::new(),
+                deleteset: HashSet::new(),
+                leader_sequence_number: 0,
+            };
+            self.participant_ranges.insert(range_id, initial_range_data);
+        }
+        self.participant_ranges.get_mut(&range_id).unwrap()
     }
 
     pub async fn get(&mut self, keyspace: &Keyspace, key: Bytes) -> Result<Option<Bytes>, Error> {
         self.check_still_running()?;
         let full_record_key = self.resolve_full_record_key(keyspace, key.clone()).await?;
+        let participant_range = self.get_participant_range(full_record_key.range_id);
         // Read-your-writes.
-        match self.writeset.get(&full_record_key) {
+        match participant_range.writeset.get(&key) {
             Some(v) => return Ok(Some(v.clone())),
             None => (),
         }
-        if self.deleteset.contains(&full_record_key) {
+        if participant_range.deleteset.contains(&key) {
             return Ok(None);
         }
+        // TODO(tamer): errors.
         let get_result = self
             .range_client
             .get(
@@ -113,25 +132,19 @@ impl Transaction {
             )
             .await
             .unwrap();
+        let participant_range = self.get_participant_range(full_record_key.range_id);
         let current_range_leader_seq_num = get_result.leader_sequence_number;
-        let prev_range_leader_seq_num = match self
-            .range_leader_sequence_number
-            .get(&full_record_key.range_id.range_id)
-        {
-            None => get_result.leader_sequence_number,
-            Some(s) => *s,
+        if participant_range.leader_sequence_number == 0 {
+            participant_range.leader_sequence_number = current_range_leader_seq_num;
         };
-        if current_range_leader_seq_num != prev_range_leader_seq_num {
-            let _ = self.abort().await;
+        if current_range_leader_seq_num != participant_range.leader_sequence_number {
+            let _ = self.record_abort().await;
             return Err(Error::TransactionAborted(
                 TransactionAbortReason::RangeLeadershipChanged,
             ));
         }
-        self.readset.insert(full_record_key.clone());
-        self.range_leader_sequence_number.insert(
-            full_record_key.range_id.range_id,
-            current_range_leader_seq_num,
-        );
+        participant_range.readset.insert(key.clone());
+
         let val = get_result.vals.get(0).unwrap().clone();
         Ok(val)
     }
@@ -139,29 +152,24 @@ impl Transaction {
     pub async fn put(&mut self, keyspace: &Keyspace, key: Bytes, val: Bytes) -> Result<(), Error> {
         self.check_still_running()?;
         let full_record_key = self.resolve_full_record_key(keyspace, key.clone()).await?;
-        self.deleteset.remove(&full_record_key);
-        self.writeset.insert(full_record_key, val.clone());
+        let participant_range = self.get_participant_range(full_record_key.range_id);
+        participant_range.deleteset.remove(&key);
+        participant_range.writeset.insert(key, val.clone());
         Ok(())
     }
 
     pub async fn del(&mut self, keyspace: &Keyspace, key: Bytes) -> Result<(), Error> {
         self.check_still_running()?;
         let full_record_key = self.resolve_full_record_key(keyspace, key.clone()).await?;
-        self.writeset.remove(&full_record_key);
-        self.deleteset.insert(full_record_key);
+        let participant_range = self.get_participant_range(full_record_key.range_id);
+        participant_range.writeset.remove(&key);
+        participant_range.deleteset.insert(key);
         Ok(())
     }
 
-    pub async fn abort(&mut self) -> Result<(), Error> {
-        match self.state {
-            State::Aborted => return Ok(()),
-            _ => {
-                self.check_still_running()?;
-                ()
-            }
-        };
+    async fn record_abort(&mut self) -> Result<(), Error> {
         // We can directly set the state to Aborted here since given Prepare
-        // did not start, it cannot commit on its own without us deciding to
+        // did not succeed, it cannot commit on its own without us deciding to
         // commit it.
         self.state = State::Aborted;
         // Record the abort (TODO: should be done in the background?).
@@ -179,6 +187,107 @@ impl Transaction {
                 panic!("transaction committed without coordinator consent!")
             }
         }
+        Ok(())
+    }
+
+    pub async fn abort(&mut self) -> Result<(), Error> {
+        match self.state {
+            State::Aborted => return Ok(()),
+            _ => {
+                self.check_still_running()?;
+                ()
+            }
+        };
+        self.record_abort().await
+    }
+
+    fn error_from_rangeclient_error(_err: rangeclient::client::Error) -> Error {
+        panic!("encountered rangeclient error, translation not yet implemented.")
+    }
+
+    pub async fn commit(&mut self) -> Result<(), Error> {
+        self.check_still_running()?;
+        self.state = State::Preparing;
+        let mut join_set = JoinSet::new();
+        for (range_id, info) in &self.participant_ranges {
+            let range_id = range_id.clone();
+            let range_client = self.range_client.clone();
+            let transaction_info = self.transaction_info.clone();
+            let has_reads = !info.readset.is_empty();
+            let writes: Vec<Record> = info
+                .writeset
+                .iter()
+                .map(|(k, v)| Record {
+                    key: k.clone(),
+                    val: v.clone(),
+                })
+                .collect();
+            let deletes: Vec<Bytes> = info.deleteset.iter().map(|k| k.clone()).collect();
+            join_set.spawn_on(
+                async move {
+                    range_client
+                        .prepare_transaction(
+                            transaction_info,
+                            &range_id,
+                            has_reads,
+                            &writes,
+                            &deletes,
+                        )
+                        .await
+                },
+                &self.runtime,
+            );
+        }
+        let mut epoch = self.epoch_reader.read_epoch().await.unwrap();
+        let mut epoch_leases = Vec::new();
+
+        while let Some(res) = join_set.join_next().await {
+            let res = match res {
+                Err(_) => {
+                    let _ = self.record_abort().await;
+                    return Err(Error::TransactionAborted(
+                        TransactionAbortReason::PrepareFailed,
+                    ));
+                }
+                Ok(res) => res,
+            };
+            let res = res.map_err(Self::error_from_rangeclient_error)?;
+            epoch_leases.push(res.epoch_lease);
+            if res.highest_known_epoch > epoch {
+                epoch = res.highest_known_epoch;
+            }
+        }
+
+        for lease in &epoch_leases {
+            if lease.lower_bound_inclusive <= epoch && lease.upper_bound_inclusive >= epoch {
+                continue;
+            }
+            // Uh-oh, lease expired, must abort.
+            let _ = self.record_abort().await;
+            return Err(Error::TransactionAborted(
+                TransactionAbortReason::RangeLeaseExpired,
+            ));
+        }
+
+        // At this point we are prepared!
+        // Attempt to commit.
+        match self
+            .tx_state_store
+            .try_commit_transaction(self.id, epoch)
+            .await
+            .unwrap()
+        {
+            OpResult::TransactionIsAborted => {
+                // Somebody must have aborted the transaction (maybe due to timeout)
+                // so unfortunately the commit was not successful.
+                return Err(Error::TransactionAborted(TransactionAbortReason::Other));
+            }
+            OpResult::TransactionIsCommitted(i) => assert!(i.epoch == epoch),
+        };
+
+        // Transaction Committed!
+        self.state = State::Committed;
+        // todo(tamer): notify participants so they can quickly release locks.
         Ok(())
     }
 }

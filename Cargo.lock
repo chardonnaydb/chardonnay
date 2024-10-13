@@ -382,6 +382,7 @@ dependencies = [
  "epoch_reader",
  "rangeclient",
  "strum",
+ "tokio",
  "tx_state_store",
  "uuid 1.10.0",
 ]
