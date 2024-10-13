@@ -2,12 +2,12 @@ use super::*;
 use bytes::Bytes;
 use common::full_range_id::FullRangeId;
 
-use scylla::frame::response::cql_to_rust::FromCqlVal;
 use scylla::frame::value::Unset;
 use scylla::macros::FromUserType;
 use scylla::macros::IntoUserType;
 use scylla::transport::errors::DbError;
 use scylla::transport::errors::QueryError;
+use scylla::SerializeCql;
 use scylla::SessionBuilder;
 use scylla::{FromRow, Session, ValueList};
 use uuid::Uuid;
@@ -16,7 +16,7 @@ pub struct Cassandra {
     session: Session,
 }
 
-#[derive(Debug, FromUserType, IntoUserType)]
+#[derive(Debug, FromUserType, IntoUserType, SerializeCql)]
 struct CqlEpochRange {
     lower_bound_inclusive: i64,
     upper_bound_inclusive: i64,

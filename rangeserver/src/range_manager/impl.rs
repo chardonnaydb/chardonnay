@@ -3,11 +3,12 @@ use super::{GetResult, PrepareResult, RangeManager as Trait};
 use crate::{
     cache::Cache, epoch_supplier::EpochSupplier, error::Error, key_version::KeyVersion,
     range_manager::lock_table, storage::RangeInfo, storage::Storage,
-    transaction_abort_reason::TransactionAbortReason, transaction_info::TransactionInfo, wal::Wal,
+    transaction_abort_reason::TransactionAbortReason, wal::Wal,
 };
 use bytes::Bytes;
 use common::config::Config;
 use common::full_range_id::FullRangeId;
+use common::transaction_info::TransactionInfo;
 
 use uuid::Uuid;
 
@@ -567,10 +568,10 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use common::config::{
         CassandraConfig, EpochConfig, HostPort, RangeServerConfig, UniverseConfig,
     };
+    use common::transaction_info::TransactionInfo;
     use common::util;
     use core::time;
     use flatbuffers::FlatBufferBuilder;
@@ -583,7 +584,7 @@ mod tests {
     use crate::for_testing::epoch_supplier::EpochSupplier;
     use crate::for_testing::in_memory_wal::InMemoryWal;
     use crate::storage::cassandra::Cassandra;
-    use crate::transaction_info::TransactionInfo;
+
     type RM = RangeManager<Cassandra, InMemoryWal, MemTableDB>;
 
     impl RM {

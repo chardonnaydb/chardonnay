@@ -9,7 +9,7 @@ edition = "2021"
 common = {path = "../common"}
 rangeserver = {path = "../rangeserver"}
 tokio = { version = "1", features = ["full"] }
-uuid = {version = "0.8", features = ["v4"]}
+uuid = {version = "1.10.0", features = ["v4"]}
 bytes = "1"
 flatbuf = {path = "../flatbuf"}
 chrono = "0.4.34"

@@ -19,13 +19,13 @@ use common::{
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
     record::Record,
     region::{Region, Zone},
+    transaction_info::TransactionInfo,
 };
 use rangeclient::client::RangeClient;
 use rangeserver::{
     cache::memtabledb::MemTableDB,
     for_testing::{epoch_supplier::EpochSupplier, mock_warden::MockWarden},
     server::Server,
-    transaction_info::TransactionInfo,
 };
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
@@ -259,7 +259,8 @@ async fn read_initial() {
         .client
         .get(tx.clone(), &range_id, keys)
         .await
-        .unwrap();
+        .unwrap()
+        .vals;
     let val = vals.get(0).unwrap();
     assert!(val.is_none());
     context
@@ -284,7 +285,8 @@ async fn commit_no_writes() {
         .client
         .get(tx.clone(), &range_id, keys)
         .await
-        .unwrap();
+        .unwrap()
+        .vals;
     let val = vals.get(0).unwrap();
     assert!(val.is_none());
     let writes = vec![];
@@ -317,7 +319,8 @@ async fn read_modify_write() {
         .client
         .get(tx.clone(), &range_id, keys)
         .await
-        .unwrap();
+        .unwrap()
+        .vals;
     assert!(vals.len() == 2);
     assert!(vals.get(0).unwrap().is_none());
     assert!(vals.get(1).unwrap().is_none());
@@ -346,7 +349,7 @@ async fn read_modify_write() {
     // Now read the values in a new transaction.
     let tx2 = start_transaction();
     let keys = vec![key1.clone(), key2.clone()];
-    let vals = context.client.get(tx2, &range_id, keys).await.unwrap();
+    let vals = context.client.get(tx2, &range_id, keys).await.unwrap().vals;
     assert!(vals.len() == 2);
     assert!(vals.get(0).unwrap().as_ref().unwrap().eq(&val1));
     assert!(vals.get(1).unwrap().as_ref().unwrap().eq(&val2));

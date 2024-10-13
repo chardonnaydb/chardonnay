@@ -8,8 +8,8 @@ pub struct Client {
     storage: Cassandra,
 }
 
-type Error = crate::storage::Error;
-type OpResult = crate::storage::OpResult;
+pub type Error = crate::storage::Error;
+pub type OpResult = crate::storage::OpResult;
 
 impl Client {
     pub async fn new(config: Config, _region: Region) -> Client {
@@ -20,7 +20,7 @@ impl Client {
 
     /// Starts a new transaction with the given id.
     /// Start is idempotent: starting a previously started transaction is a no-op.
-    pub async fn start_transaction(self, id: Uuid) -> Result<(), Error> {
+    pub async fn start_transaction(&self, id: Uuid) -> Result<(), Error> {
         self.storage.start_transaction(id).await
     }
 
@@ -29,7 +29,7 @@ impl Client {
     /// in which case it cannot be aborted. The OpResult returned will indicate
     /// whether the abort succeeded, or whether the transaction is committed.
     /// Aborting an already aborted transaction is a no-op.
-    pub async fn try_abort_transaction(self, id: Uuid) -> Result<OpResult, Error> {
+    pub async fn try_abort_transaction(&self, id: Uuid) -> Result<OpResult, Error> {
         self.storage.abort_transaction(id).await
     }
 
@@ -38,7 +38,7 @@ impl Client {
     /// it cannot be committed. The OpResult returned will indicate the commit
     /// succeeded, or whether the transaction is aborted.
     /// Committing an already committed transaction is a no-op.
-    pub async fn try_commit_transaction(self, id: Uuid, epoch: u64) -> Result<OpResult, Error> {
+    pub async fn try_commit_transaction(&self, id: Uuid, epoch: u64) -> Result<OpResult, Error> {
         self.storage.commit_transaction(id, epoch).await
     }
 }

@@ -8,7 +8,10 @@ use tonic::{transport::Server as TServer, Request, Response, Status as TStatus};
 
 use common::keyspace_id::KeyspaceId;
 use common::util;
-use common::{config::Config, full_range_id::FullRangeId, host_info::HostInfo};
+use common::{
+    config::Config, full_range_id::FullRangeId, host_info::HostInfo,
+    transaction_info::TransactionInfo,
+};
 use flatbuffers::FlatBufferBuilder;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -18,7 +21,6 @@ use uuid::Uuid;
 
 use crate::range_manager::r#impl::RangeManager;
 use crate::range_manager::RangeManager as RangeManagerTrait;
-use crate::transaction_info::TransactionInfo;
 use crate::warden_handler::WardenHandler;
 use crate::{
     cache::Cache, cache::CacheOptions, epoch_supplier::EpochSupplier, error::Error,

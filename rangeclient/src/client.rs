@@ -3,6 +3,7 @@ use common::network::fast_network::FastNetwork;
 use common::util;
 use common::{
     epoch_lease::EpochLease, full_range_id::FullRangeId, host_info::HostInfo, record::Record,
+    transaction_info::TransactionInfo,
 };
 use flatbuf::rangeserver_flatbuffers::range_server::Record as FlatbufRecord;
 use flatbuf::rangeserver_flatbuffers::range_server::TransactionInfo as FlatbufTransactionInfo;
@@ -11,7 +12,6 @@ use flatbuffers::FlatBufferBuilder;
 use proto::rangeserver::range_server_client::RangeServerClient;
 use proto::rangeserver::{PrefetchRequest, RangeId, RangeKey};
 use rangeserver::error::Error as RangeServerError;
-use rangeserver::transaction_info::TransactionInfo;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -21,9 +21,16 @@ use tonic::transport::Channel;
 use tonic::Request;
 use uuid::Uuid;
 
+pub type Error = RangeServerError;
 pub struct PrepareOk {
     pub highest_known_epoch: u64,
     pub epoch_lease: EpochLease,
+}
+
+#[derive(Debug)]
+pub struct GetResult {
+    pub vals: Vec<Option<Bytes>>,
+    pub leader_sequence_number: u64,
 }
 
 // Provides an async rpc interface to a specific range server.
@@ -65,7 +72,7 @@ impl RangeClient {
         tx: Arc<TransactionInfo>,
         range_id: &FullRangeId,
         keys: Vec<Bytes>,
-    ) -> Result<Vec<Option<Bytes>>, RangeServerError> {
+    ) -> Result<GetResult, RangeServerError> {
         // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
         // TODO: too much copying :(
         let req_id = Uuid::new_v4();
@@ -127,6 +134,7 @@ impl RangeClient {
                 let response_msg =
                     flatbuffers::root::<GetResponse>(envelope.bytes().unwrap().bytes()).unwrap();
                 let () = rangeserver::error::Error::from_flatbuf_status(response_msg.status())?;
+                let leader_sequence_number = response_msg.leader_sequence_number() as u64;
                 let mut result = Vec::new();
                 for record in response_msg.records().iter() {
                     for rec in record.iter() {
@@ -137,7 +145,10 @@ impl RangeClient {
                         result.push(val);
                     }
                 }
-                return Ok(result);
+                return Ok(GetResult {
+                    vals: result,
+                    leader_sequence_number,
+                });
             }
             _ => return Err(RangeServerError::InvalidRequestFormat),
         }

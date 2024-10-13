@@ -144,9 +144,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.82"
+version = "0.1.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a27b8a3a6e1a44fa4c8baf1f653e4172e81486d4941f2237e20dc2d0cf4ddff1"
+checksum = "721cae7de5c34fbb2acd27e21e6d2cf7b886dce0c27388d46c4e6c47ea4318dd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -285,9 +285,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.7.1"
+version = "1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8318a53db07bb3f8dca91a600466bdb3f2eaadeedfdbcf02e1accbad9271ba50"
+checksum = "428d9aa8fbc0670b7b8d6030a7fadd0f86151cae55e4dbbece15f3780a3dfaf3"
 
 [[package]]
 name = "cc"
@@ -348,7 +348,9 @@ checksum = "d3fd119d74b830634cea2a0f58bbd0d54540518a14397557951e79340abc28c0"
 name = "common"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "bytes",
+ "chrono",
  "derivative",
  "flatbuf",
  "flatbuffers",
@@ -356,7 +358,7 @@ dependencies = [
  "serde",
  "tokio",
  "tracing",
- "uuid 0.8.2",
+ "uuid 1.10.0",
 ]
 
 [[package]]
@@ -374,6 +376,15 @@ dependencies = [
 [[package]]
 name = "coordinator"
 version = "0.1.0"
+dependencies = [
+ "bytes",
+ "common",
+ "epoch_reader",
+ "rangeclient",
+ "strum",
+ "tx_state_store",
+ "uuid 1.10.0",
+]
 
 [[package]]
 name = "core-foundation-sys"
@@ -1529,7 +1540,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
- "uuid 0.8.2",
+ "uuid 1.10.0",
 ]
 
 [[package]]
@@ -1548,7 +1559,7 @@ dependencies = [
  "prost",
  "proto",
  "rand 0.8.5",
- "scylla 0.3.1",
+ "scylla 0.13.2",
  "serde",
  "serde_json",
  "skiplist",
@@ -1561,7 +1572,7 @@ dependencies = [
  "tonic-build",
  "tracing",
  "tracing-subscriber",
- "uuid 0.8.2",
+ "uuid 1.10.0",
 ]
 
 [[package]]

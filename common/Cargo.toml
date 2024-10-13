@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 proto = {path = "../proto"}
-uuid = {version = "0.8", features = ["v4"]}
+uuid = {version = "1.10.0", features = ["v4"]}
 bytes = "1"
 flatbuf = {path = "../flatbuf"}
 flatbuffers = "24.3.25"
@@ -15,3 +15,5 @@ tokio = { version = "1", features = ["full"] }
 derivative = "2.2.0"
 serde = { version = "1.0.210", features = ["derive"] }
 tracing = "0.1.40"
+async-trait = "0.1.83"
+chrono = "0.4.38"
