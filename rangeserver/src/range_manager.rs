@@ -1,8 +1,9 @@
 pub mod r#impl;
 mod lock_table;
 
-use crate::{error::Error, transaction_info::TransactionInfo};
+use crate::error::Error;
 use bytes::Bytes;
+use common::transaction_info::TransactionInfo;
 use flatbuf::rangeserver_flatbuffers::range_server::*;
 use std::sync::Arc;
 use tonic::async_trait;

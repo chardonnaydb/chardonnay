@@ -1,6 +1,6 @@
 use std::{net::ToSocketAddrs, sync::Arc};
 
-use common::{config::Config, network::fast_network};
+use common::config::Config;
 use std::net::UdpSocket;
 use tracing_subscriber;
 

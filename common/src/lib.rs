@@ -8,4 +8,5 @@ pub mod membership;
 pub mod network;
 pub mod record;
 pub mod region;
+pub mod transaction_info;
 pub mod util;

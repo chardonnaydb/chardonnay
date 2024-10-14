@@ -1,9 +1,6 @@
-use crate::{
-    error::Error, transaction_abort_reason::TransactionAbortReason,
-    transaction_info::TransactionInfo,
-};
+use crate::{error::Error, transaction_abort_reason::TransactionAbortReason};
 use chrono::DateTime;
-
+use common::transaction_info::TransactionInfo;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::oneshot;
