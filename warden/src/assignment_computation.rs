@@ -94,7 +94,6 @@ impl AssignmentComputationImpl {
         region: Region,
     ) -> Arc<Self> {
         let s = Arc::new(Self {
-            // TODO(purujit): Initialize base_ranges from cluster manager and range_assignments incl. last version from database.
             base_ranges: Mutex::new(vec![]),
             universe_client,
             region,
@@ -308,7 +307,7 @@ impl AssignmentComputationImpl {
                 range_assignments.remove(&oldest_version);
             }
 
-            // For now, versions are milliseconds since epoch and adding 1 is safe since even if another Warden instance
+            // For now, versions are milliseconds since Unix epoch and adding 1 is safe since even if another Warden instance
             // comes up, it is unlikely to have any overlap with the previous one unless there is a lot of clock skew.
             // TODO(purujit): Use a more robust versioning scheme.
             let new_version = current_version.add(1);
