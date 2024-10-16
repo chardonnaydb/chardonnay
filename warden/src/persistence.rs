@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RangeInfo {
+    pub keyspace_id: KeyspaceId,
     pub id: Uuid,
     pub key_range: KeyRange,
 }

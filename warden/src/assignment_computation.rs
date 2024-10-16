@@ -1,5 +1,7 @@
 use std::collections::{BinaryHeap, HashMap};
+use std::ops::Add;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashSet, ops::Deref, sync::Mutex};
 
 use bytes::Bytes;
@@ -8,19 +10,20 @@ use common::key_range::KeyRange;
 use common::region::Region;
 use proto::universe::universe_client::UniverseClient;
 use proto::universe::ListKeyspacesRequest;
-use proto::warden::WardenUpdate;
+use proto::warden::{FullAssignment, WardenUpdate};
 use std::cmp::{Ordering, Reverse};
 use std::hash::{Hash, Hasher};
 use tokio::sync::broadcast::{channel, Receiver, Sender};
 use tokio_util::sync::CancellationToken;
 use tonic::Status;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::persistence::{RangeAssignment, RangeInfo};
 
-// TODO(purujit): Convert this to a configuration.
+// TODO(purujit): Convert these to configuration.
 const MIN_NUM_RANGE_SERVERS: usize = 1;
+const MAX_VERSIONS_TO_KEEP: usize = 5;
 
 /// We need to implement Eq, Ord and Hash for Range Server identities in
 /// HostInfo.  Since that type is in another crate and may have a different
@@ -76,7 +79,8 @@ pub struct AssignmentComputationImpl {
     base_ranges: Mutex<Vec<RangeInfo>>,
     universe_client: UniverseClient<tonic::transport::Channel>,
     region: Region,
-    range_assignments: Mutex<Vec<RangeAssignment>>,
+    range_assignments: Mutex<HashMap<i64, Vec<RangeAssignment>>>,
+    current_version: Mutex<i64>,
     ready_range_servers: Mutex<HashSet<HostInfoWrapper>>,
     unassigned_base_ranges: Mutex<Vec<RangeInfo>>,
     assignment_update_sender: Sender<i64>,
@@ -90,11 +94,17 @@ impl AssignmentComputationImpl {
         region: Region,
     ) -> Arc<Self> {
         let s = Arc::new(Self {
-            // TODO(purujit): Initialize base_ranges from cluster manager and range_assignments from database.
             base_ranges: Mutex::new(vec![]),
             universe_client,
             region,
-            range_assignments: Mutex::new(vec![]),
+            range_assignments: Mutex::new(HashMap::new()),
+            // TODO(purujit): Use a better sequence generator for version.
+            current_version: Mutex::new(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64,
+            ),
             ready_range_servers: Mutex::new(HashSet::new()),
             unassigned_base_ranges: Mutex::new(vec![]),
             // Using capacity 1 here because receivers will resync if they lag.
@@ -129,6 +139,10 @@ impl AssignmentComputationImpl {
         for keyspace in key_spaces {
             for range in keyspace.base_key_ranges {
                 base_ranges.push(RangeInfo {
+                    keyspace_id: common::keyspace_id::KeyspaceId {
+                        id: Uuid::parse_str(&keyspace.keyspace_id)
+                            .map_err(|e| tonic::Status::internal(e.to_string()))?,
+                    },
                     id: Uuid::parse_str(&range.base_range_uuid)
                         .map_err(|e| tonic::Status::internal(e.to_string()))?,
                     key_range: KeyRange {
@@ -232,13 +246,21 @@ impl AssignmentComputationImpl {
         );
 
         let mut assignee_to_range_info = HashMap::new();
-        for assignment in self.range_assignments.lock().unwrap().iter() {
-            assignee_to_range_info
-                .entry(assignment.assignee.clone())
-                .or_insert_with(Vec::new)
-                .push(assignment.range.clone());
+        if self.range_assignments.lock().unwrap().len() > 0 {
+            for assignment in self
+                .range_assignments
+                .lock()
+                .unwrap()
+                .get(&self.current_version.lock().unwrap())
+                .unwrap()
+                .iter()
+            {
+                assignee_to_range_info
+                    .entry(assignment.assignee.clone())
+                    .or_insert_with(Vec::new)
+                    .push(assignment.range.clone());
+            }
         }
-
         let mut server_heap = BinaryHeap::new();
         for (server, ranges) in assignee_to_range_info.iter() {
             server_heap.push(Reverse((ranges.len(), server.clone())));
@@ -279,16 +301,42 @@ impl AssignmentComputationImpl {
         }
         {
             let mut range_assignments = self.range_assignments.lock().unwrap();
-            range_assignments.clear();
+            let mut current_version = self.current_version.lock().unwrap();
+            if range_assignments.len() > MAX_VERSIONS_TO_KEEP {
+                let oldest_version = range_assignments.keys().min().unwrap().clone();
+                range_assignments.remove(&oldest_version);
+            }
+
+            // For now, versions are milliseconds since Unix epoch and adding 1 is safe since even if another Warden instance
+            // comes up, it is unlikely to have any overlap with the previous one unless there is a lot of clock skew.
+            // TODO(purujit): Use a more robust versioning scheme.
+            let new_version = current_version.add(1);
+            assert!(!range_assignments.contains_key(&new_version));
+            range_assignments.insert(new_version, Vec::new());
+            let new_range_assignments = range_assignments.get_mut(&new_version).unwrap();
             for (assignee, ranges) in assignee_to_range_info {
                 for range in ranges {
-                    range_assignments.push(RangeAssignment {
+                    new_range_assignments.push(RangeAssignment {
                         assignee: assignee.clone(),
                         range,
                     });
                 }
             }
-            debug!("Range assignments: {:?}.", range_assignments);
+            *current_version = new_version;
+            debug!(
+                "Range assignments at version {:?}: {:?}.",
+                new_version, new_range_assignments
+            );
+            let send_result = self.assignment_update_sender.send(new_version);
+            match send_result {
+                Ok(num_receivers) => {
+                    debug!("Sent assignment update to {} receivers.", num_receivers);
+                }
+                Err(e) => {
+                    // This can happen if all receivers have been dropped. Future sends could succeed.
+                    error!("Failed to send assignment update: {:?}.", e);
+                }
+            }
         }
         new_ready_servers
     }
@@ -321,7 +369,39 @@ impl AssignmentComputation for AssignmentComputationImpl {
         version: i64,
         full_update: bool,
     ) -> Option<WardenUpdate> {
-        todo!()
+        if !full_update {
+            // TODO(purujit): Implement incremental updates.
+            warn!("Incremental update not implemented yet.");
+        }
+        match self.range_assignments.lock().unwrap().get(&version) {
+            Some(range_assignments) => {
+                let assigned_ranges: Vec<_> = range_assignments
+                    .iter()
+                    .filter(|r| r.assignee == host_info.identity)
+                    .map(|r| proto::warden::RangeId {
+                        keyspace_id: r.range.keyspace_id.id.to_string(),
+                        range_id: r.range.id.to_string(),
+                    })
+                    .collect();
+                let update = WardenUpdate {
+                    update: Some(proto::warden::warden_update::Update::FullAssignment(
+                        FullAssignment {
+                            version: self.current_version.lock().unwrap().clone(),
+                            range: assigned_ranges,
+                        },
+                    )),
+                };
+                Some(update)
+            }
+            None => {
+                error!(
+                    "No assignments cached for for version {:?}. Current version: {:?}",
+                    version,
+                    self.current_version.lock().unwrap()
+                );
+                return None;
+            }
+        }
     }
 
     fn notify_range_server_unavailable(&self, host_info: HostInfo) {
@@ -342,7 +422,9 @@ impl AssignmentComputation for AssignmentComputationImpl {
 mod tests {
     use bytes::Bytes;
     use common::{
+        host_info,
         key_range::KeyRange,
+        keyspace_id::KeyspaceId,
         region::{Region, Zone},
     };
     use once_cell::sync::Lazy;
@@ -368,6 +450,7 @@ mod tests {
 
     fn make_range(start: u8, end: u8) -> RangeInfo {
         RangeInfo {
+            keyspace_id: KeyspaceId { id: Uuid::new_v4() },
             key_range: KeyRange {
                 lower_bound_inclusive: Some(Bytes::from(vec![start])),
                 upper_bound_exclusive: Some(Bytes::from(vec![end])),
@@ -531,17 +614,18 @@ mod tests {
         // the unassigned_base_ranges to not have to wait for assignments.
         let range = make_range(0, 127);
         context.base_ranges.lock().unwrap().push(range.clone());
+        let host_info = HostInfo {
+            identity: "server1".to_string(),
+            address: "1.2.3.4:8080".parse().unwrap(),
+            zone: make_zone(),
+            warden_connection_epoch: 1,
+        };
 
         computation
             .ready_range_servers
             .lock()
             .unwrap()
-            .insert(HostInfoWrapper(HostInfo {
-                identity: "server1".to_string(),
-                address: "1.2.3.4:8080".parse().unwrap(),
-                zone: make_zone(),
-                warden_connection_epoch: 1,
-            }));
+            .insert(HostInfoWrapper(host_info.clone()));
 
         loop {
             let assignments = computation.range_assignments.lock().unwrap();
@@ -551,11 +635,22 @@ mod tests {
                 break;
             }
         }
-        let range_assignments = computation.range_assignments.lock().unwrap();
-        assert_eq!(range_assignments.len(), 1);
-
-        assert_eq!(range_assignments[0].assignee.to_string(), "server1");
-        assert_eq!(range_assignments[0].range, range);
+        let current_version;
+        {
+            current_version = computation.current_version.lock().unwrap().clone();
+        }
+        let update = computation
+            .get_assignment_update(&host_info, current_version, true)
+            .unwrap()
+            .update
+            .unwrap();
+        match update {
+            proto::warden::warden_update::Update::FullAssignment(full_assigment) => {
+                assert_eq!(full_assigment.range.len(), 1);
+                assert_eq!(full_assigment.range[0].range_id, range.id.to_string());
+            }
+            _ => panic!("Expected FullAssignment"),
+        }
     }
 
     #[tokio::test]
@@ -601,11 +696,14 @@ mod tests {
             .await;
 
         let range_assignments = computation.range_assignments.lock().unwrap();
-        assert_eq!(range_assignments.len(), 3);
+        let current_version = computation.current_version.lock().unwrap();
+        assert_eq!(range_assignments[&current_version].len(), 3);
 
-        let mut assigned_ranges: Vec<RangeInfo> =
-            range_assignments.iter().map(|a| a.range.clone()).collect();
-        let assigned_servers: HashSet<String> = range_assignments
+        let mut assigned_ranges: Vec<RangeInfo> = range_assignments[&current_version]
+            .iter()
+            .map(|a| a.range.clone())
+            .collect();
+        let assigned_servers: HashSet<String> = range_assignments[&current_version]
             .iter()
             .map(|a| a.assignee.to_string())
             .collect();
@@ -647,17 +745,24 @@ mod tests {
             }),
         ];
 
-        // Add a previous assignment for an unavailable server
-        computation.range_assignments.lock().unwrap().extend(vec![
-            RangeAssignment {
-                range: ranges[0].clone(),
-                assignee: "unavailable_server".to_string(),
-            },
-            RangeAssignment {
-                range: ranges[1].clone(),
-                assignee: "server1".to_string(),
-            },
-        ]);
+        {
+            let mut range_assignments = computation.range_assignments.lock().unwrap();
+            let current_version = computation.current_version.lock().unwrap();
+            // Add a previous assignment for an unavailable server
+            range_assignments.insert(
+                current_version.clone(),
+                vec![
+                    RangeAssignment {
+                        range: ranges[0].clone(),
+                        assignee: "unavailable_server".to_string(),
+                    },
+                    RangeAssignment {
+                        range: ranges[1].clone(),
+                        assignee: "server1".to_string(),
+                    },
+                ],
+            );
+        }
 
         // Only add server2 to ready_range_servers
         computation
@@ -680,11 +785,14 @@ mod tests {
             .await;
 
         let range_assignments = computation.range_assignments.lock().unwrap();
+        let current_version = computation.current_version.lock().unwrap();
 
         assert_eq!(range_assignments.len(), 2);
-        let mut assigned_ranges: Vec<RangeInfo> =
-            range_assignments.iter().map(|a| a.range.clone()).collect();
-        let assigned_servers: HashSet<String> = range_assignments
+        let mut assigned_ranges: Vec<RangeInfo> = range_assignments[&current_version]
+            .iter()
+            .map(|a| a.range.clone())
+            .collect();
+        let assigned_servers: HashSet<String> = range_assignments[&current_version]
             .iter()
             .map(|a| a.assignee.to_string())
             .collect();
