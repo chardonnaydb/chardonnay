@@ -10,7 +10,7 @@ Chardonnay: Fast and General Datacenter Transactions for On-Disk Databases, OSDI
 https://www.usenix.org/system/files/osdi23-eldeeb.pdf
 
 Chablis: Fast and General Transactions in Geo-Distributed Systems, CIDR 2024 (Best Paper Award!)
-https://www.cidrdb.org/cidr2024/papers/p4-eldeeb.pdf
+https://www.cidrdb.org/cidr2024/papers/p4-eldeeb_v2.pdf
 
 ## Building
 
