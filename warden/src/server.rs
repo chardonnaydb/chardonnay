@@ -6,7 +6,7 @@ use std::{
 };
 
 use common::{
-    host_info::HostInfo,
+    host_info::{HostIdentity, HostInfo},
     region::{Region, Zone},
 };
 use pin_project::{pin_project, pinned_drop};
@@ -51,17 +51,20 @@ impl Warden for WardenServer {
             Some(range_server) => {
                 info!("Registering range server: {}", range_server.identity);
                 let host_info = HostInfo {
-                    identity: range_server.identity,
-                    // todo(purujit): Get the address from the range server.
-                    address: SocketAddr::from(([0, 0, 0, 0], 0)),
-                    zone: Zone {
-                        name: range_server.zone,
-                        // TODO(purujit): Get the region from the range server.
-                        region: Region {
-                            cloud: None,
-                            name: "".to_string(),
+                    identity: HostIdentity {
+                        name: range_server.identity,
+                        zone: Zone {
+                            name: range_server.zone,
+                            // TODO(purujit): Get the region from the range server.
+                            region: Region {
+                                cloud: None,
+                                name: "".to_string(),
+                            },
                         },
                     },
+                    // todo(purujit): Get the address from the range server.
+                    address: SocketAddr::from(([0, 0, 0, 0], 0)),
+
                     warden_connection_epoch: range_server.epoch,
                 };
                 match self

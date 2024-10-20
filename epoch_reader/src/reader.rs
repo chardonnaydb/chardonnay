@@ -1,6 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
-use common::{config::EpochPublisherSet, host_info::HostInfo, network::fast_network::FastNetwork};
+use common::{
+    config::EpochPublisherSet,
+    host_info::{HostIdentity, HostInfo},
+    network::fast_network::FastNetwork,
+};
 use epoch_publisher::{client::EpochPublisherClient, error::Error};
 use std::net::ToSocketAddrs;
 use tokio::task::JoinSet;
@@ -28,14 +32,17 @@ impl EpochReader {
             .iter()
             .map(|publisher| {
                 let host_info = HostInfo {
-                    identity: publisher.name.clone(),
+                    identity: HostIdentity {
+                        name: publisher.name.clone(),
+                        zone: publisher_set.zone.clone(),
+                    },
                     address: publisher
                         .fast_network_addr
                         .to_socket_addrs()
                         .unwrap()
                         .next()
                         .unwrap(),
-                    zone: publisher_set.zone.clone(),
+
                     warden_connection_epoch: 0,
                 };
                 EpochPublisherClient::new(

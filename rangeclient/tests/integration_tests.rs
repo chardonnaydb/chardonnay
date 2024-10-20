@@ -14,7 +14,7 @@ use common::{
         UniverseConfig,
     },
     full_range_id::FullRangeId,
-    host_info::HostInfo,
+    host_info::{HostIdentity, HostInfo},
     keyspace_id::KeyspaceId,
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
     record::Record,
@@ -82,9 +82,11 @@ fn get_server_host_info(address: SocketAddr) -> HostInfo {
         name: "a".into(),
     };
     HostInfo {
-        identity: identity.clone(),
+        identity: HostIdentity {
+            name: identity.clone(),
+            zone,
+        },
         address,
-        zone,
         warden_connection_epoch: 0,
     }
 }
@@ -151,10 +153,14 @@ async fn setup_client(
     });
     let client = RangeClient::new(
         fast_network,
-        runtime.handle().clone(),
         get_server_host_info(server_address),
+        Some(proto_server_address),
+    )
+    .await;
+    RangeClient::start(
+        client.clone(),
+        runtime.handle().clone(),
         cancellation_token.clone(),
-        proto_server_address,
     )
     .await;
     return (client, runtime);

@@ -10,5 +10,8 @@ pub trait RangeAssignmentOracle: Send + Sync + 'static {
         key: Bytes,
     ) -> Option<FullRangeId>;
     async fn host_of_range(&self, range_id: &FullRangeId) -> Option<HostInfo>;
+    /// Requests refreshing the assignment.
+    /// Should be used whenever a host says it does not own the range.
+    fn maybe_refresh_host_of_range(&self, range_id: &FullRangeId);
     // TODO: provide APIs for key ranges / scans
 }

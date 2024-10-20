@@ -73,7 +73,7 @@ impl EpochPublisherClient {
         // TODO: gracefully handle malformed messages instead of unwrapping and crashing.
         let req_id = Uuid::new_v4();
         trace!(
-            "issuing read_epoch rpc. Epoch Publisher: {}. req_id: {}",
+            "issuing read_epoch rpc. Epoch Publisher: {:#?}. req_id: {}",
             self.range_server_info.identity,
             req_id
         );
@@ -164,7 +164,7 @@ impl EpochPublisherClient {
                                 }
                             } else {
                                 error!("Epoch Client received a message with an unknown request id. \
-                                    Epoch Publisher: {}", client.range_server_info.identity)
+                                    Epoch Publisher: {:#?}", client.range_server_info.identity)
                             }
                         }
                     }

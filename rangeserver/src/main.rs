@@ -6,7 +6,7 @@ use tracing_subscriber;
 
 use common::{
     config::Config,
-    host_info::HostInfo,
+    host_info::{HostIdentity, HostInfo},
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
     region::{Region, Zone},
 };
@@ -44,11 +44,11 @@ fn main() {
     let server_handle = runtime.spawn(async move {
         let cancellation_token = CancellationToken::new();
         let host_info = get_host_info();
-        let region_config = config.regions.get(&host_info.zone.region).unwrap();
+        let region_config = config.regions.get(&host_info.identity.zone.region).unwrap();
         let publisher_set = region_config
             .epoch_publishers
             .iter()
-            .find(|&s| s.zone == host_info.zone)
+            .find(|&s| s.zone == host_info.identity.zone)
             .unwrap();
         let proto_server_addr = config
             .range_server
@@ -103,9 +103,12 @@ fn get_host_info() -> HostInfo {
         name: "a".into(),
     };
     HostInfo {
-        identity: identity.clone(),
+        identity: HostIdentity {
+            name: identity.clone(),
+            zone,
+        },
         address: "127.0.0.1:50054".parse().unwrap(),
-        zone,
+
         warden_connection_epoch: 0,
     }
 }
