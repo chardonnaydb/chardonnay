@@ -11,8 +11,6 @@ use common::region::Region;
 use proto::universe::universe_client::UniverseClient;
 use proto::universe::ListKeyspacesRequest;
 use proto::warden::{FullAssignment, WardenUpdate};
-use scylla::query::Query;
-use scylla::statement::SerialConsistency;
 use scylla::{Session, SessionBuilder};
 use std::cmp::{Ordering, Reverse};
 use std::hash::{Hash, Hasher};
@@ -22,7 +20,7 @@ use tonic::Status;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::persistence::{RangeAssignment, RangeInfo};
+use crate::persistence::{self, Persistence, RangeAssignment, RangeInfo};
 
 // TODO(purujit): Convert these to configuration.
 const MIN_NUM_RANGE_SERVERS: usize = 1;
@@ -87,14 +85,8 @@ pub struct AssignmentComputationImpl {
     ready_range_servers: Mutex<HashSet<HostInfoWrapper>>,
     unassigned_base_ranges: Mutex<Vec<RangeInfo>>,
     assignment_update_sender: Sender<i64>,
-    session: Session,
+    persistence: Arc<dyn Persistence + Send + Sync + 'static>,
 }
-
-static INSERT_INTO_RANGE_LEASE_QUERY: &str = r#"
-  INSERT INTO chardonnay.range_leases(range_id, key_lower_bound_inclusive, key_upper_bound_exclusive)
-    VALUES (?, ?, ?)
-    IF NOT EXISTS
-"#;
 
 impl AssignmentComputationImpl {
     pub async fn new(
@@ -102,13 +94,8 @@ impl AssignmentComputationImpl {
         cancellation_token: CancellationToken,
         universe_client: UniverseClient<tonic::transport::Channel>,
         region: Region,
-        cassandra_known_node: String,
+        persistence: Arc<dyn Persistence + Send + Sync + 'static>,
     ) -> Arc<Self> {
-        let session = SessionBuilder::new()
-            .known_node(cassandra_known_node)
-            .build()
-            .await
-            .unwrap();
         let s = Arc::new(Self {
             base_ranges: Mutex::new(vec![]),
             universe_client,
@@ -125,7 +112,7 @@ impl AssignmentComputationImpl {
             unassigned_base_ranges: Mutex::new(vec![]),
             // Using capacity 1 here because receivers will resync if they lag.
             assignment_update_sender: channel(1).0,
-            session,
+            persistence,
         });
         let computation_clone = s.clone();
         runtime.spawn(async move {
@@ -199,32 +186,10 @@ impl AssignmentComputationImpl {
             }
         }
 
-        for range in &new_base_ranges {
-            let mut query = Query::new(INSERT_INTO_RANGE_LEASE_QUERY);
-            query.set_serial_consistency(Some(SerialConsistency::Serial));
-            let _ = self
-                .session
-                .query(
-                    query,
-                    (
-                        range.id,
-                        range
-                            .key_range
-                            .lower_bound_inclusive
-                            .clone()
-                            .map_or(vec![], |v| v.to_vec()),
-                        range
-                            .key_range
-                            .upper_bound_exclusive
-                            .clone()
-                            .map_or(vec![], |v| v.to_vec()),
-                    ),
-                )
-                .await
-                .map_err(|err| {
-                    tonic::Status::internal(format!("Failed to write range id: {}", err))
-                })?;
-        }
+        self.persistence
+            .insert_new_ranges(&new_base_ranges)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to insert new ranges: {}", e)))?;
         self.base_ranges
             .lock()
             .unwrap()
@@ -475,6 +440,7 @@ mod tests {
         region::{Region, Zone},
     };
     use once_cell::sync::Lazy;
+    use persistence::PersistenceImpl;
     use proto::universe::{
         universe_server::{Universe, UniverseServer},
         CreateKeyspaceRequest, CreateKeyspaceResponse, KeyspaceInfo, ListKeyspacesResponse,
@@ -573,6 +539,7 @@ mod tests {
         assignment_computation: Arc<AssignmentComputationImpl>,
         server_shutdown_tx: Option<oneshot::Sender<()>>,
         base_ranges: Arc<Mutex<Vec<RangeInfo>>>,
+        session: Arc<Session>,
     }
 
     impl Drop for TestContext {
@@ -622,6 +589,15 @@ mod tests {
                 }
             }
         }
+        let session = Arc::new(
+            SessionBuilder::new()
+                .known_node("127.0.0.1:9042".to_string())
+                .build()
+                .await
+                .unwrap(),
+        );
+
+        let persistence = Arc::new(PersistenceImpl::new("127.0.0.1:9042".to_string()).await);
         let assignment_computation = AssignmentComputationImpl::new(
             RUNTIME.handle().clone(),
             cc_clone,
@@ -630,13 +606,14 @@ mod tests {
                 cloud: None,
                 name: "".to_string(),
             },
-            "127.0.0.1:9042".to_string(),
+            persistence,
         )
         .await;
         TestContext {
             assignment_computation,
             server_shutdown_tx: Some(signal_tx),
             base_ranges,
+            session,
         }
     }
 
@@ -661,7 +638,7 @@ mod tests {
         // TODO(purujit): For some reason, doing this in the `drop` method of the TestContext does not work. The test exits before
         // the tasks spawned by the drop function are completed.
         // This is a workaround.
-        let res = computation
+        let res = context
             .session
             .query("TRUNCATE chardonnay.range_leases", ())
             .await;
@@ -715,7 +692,7 @@ mod tests {
         }
 
         assert_eq!(
-            computation
+            context
                 .session
                 .query(
                     "SELECT * from chardonnay.range_leases where range_id = ?",

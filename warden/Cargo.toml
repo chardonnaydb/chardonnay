@@ -25,3 +25,4 @@ portpicker = "0.1.1"
 uuid = { version = "1.10.0", features = ["v4"] }
 scylla = "0.13.2"
 tokio-util = "0.7.11"
+async-trait = "0.1.83"

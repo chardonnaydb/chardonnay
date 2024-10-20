@@ -25,7 +25,7 @@ use tracing::{debug, info, instrument};
 
 use crate::{
     assignment_computation::{AssignmentComputation, AssignmentComputationImpl},
-    persistence::cassandra,
+    persistence::PersistenceImpl,
 };
 
 /// Implementation of the Warden service.
@@ -119,7 +119,7 @@ pub async fn run_warden_server(
             cancellation_token,
             universe_client,
             region,
-            cassandra_addr,
+            Arc::new(PersistenceImpl::new(cassandra_addr).await),
         )
         .await,
     );
