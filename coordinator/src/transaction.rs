@@ -168,14 +168,25 @@ impl Transaction {
     }
 
     async fn record_abort(&mut self) -> Result<(), Error> {
-        // We can directly set the state to Aborted here since given Prepare
-        // did not succeed, it cannot commit on its own without us deciding to
-        // commit it.
+        // We can directly set the state to Aborted here since given a transaction
+        //  cannot commit on its own without us deciding to commit it.
         self.state = State::Aborted;
-        // Record the abort (TODO: should be done in the background?).
+        // Record the abort.
         // TODO(tamer): handle errors here.
-        // TODO(tamer): in parallel, inform ranges we touched of the abort so
-        // they release locks quickly.
+        let mut abort_join_set = JoinSet::new();
+        for (range_id, _) in &self.participant_ranges {
+            let range_id = range_id.clone();
+            let range_client = self.range_client.clone();
+            let transaction_info = self.transaction_info.clone();
+            abort_join_set.spawn_on(
+                async move {
+                    range_client
+                        .abort_transaction(transaction_info, &range_id)
+                        .await
+                },
+                &self.runtime,
+            );
+        }
         let outcome = self
             .tx_state_store
             .try_abort_transaction(self.id)
@@ -187,6 +198,7 @@ impl Transaction {
                 panic!("transaction committed without coordinator consent!")
             }
         }
+        while let Some(_) = abort_join_set.join_next().await {}
         Ok(())
     }
 
@@ -202,13 +214,14 @@ impl Transaction {
     }
 
     fn error_from_rangeclient_error(_err: rangeclient::client::Error) -> Error {
+        // TODO(tamer): handle
         panic!("encountered rangeclient error, translation not yet implemented.")
     }
 
     pub async fn commit(&mut self) -> Result<(), Error> {
         self.check_still_running()?;
         self.state = State::Preparing;
-        let mut join_set = JoinSet::new();
+        let mut prepare_join_set = JoinSet::new();
         for (range_id, info) in &self.participant_ranges {
             let range_id = range_id.clone();
             let range_client = self.range_client.clone();
@@ -223,7 +236,7 @@ impl Transaction {
                 })
                 .collect();
             let deletes: Vec<Bytes> = info.deleteset.iter().map(|k| k.clone()).collect();
-            join_set.spawn_on(
+            prepare_join_set.spawn_on(
                 async move {
                     range_client
                         .prepare_transaction(
@@ -241,7 +254,7 @@ impl Transaction {
         let mut epoch = self.epoch_reader.read_epoch().await.unwrap();
         let mut epoch_leases = Vec::new();
 
-        while let Some(res) = join_set.join_next().await {
+        while let Some(res) = prepare_join_set.join_next().await {
             let res = match res {
                 Err(_) => {
                     let _ = self.record_abort().await;
@@ -287,7 +300,22 @@ impl Transaction {
 
         // Transaction Committed!
         self.state = State::Committed;
-        // todo(tamer): notify participants so they can quickly release locks.
+        // notify participants so they can quickly release locks.
+        let mut commit_join_set = JoinSet::new();
+        for (range_id, _) in &self.participant_ranges {
+            let range_id = range_id.clone();
+            let range_client = self.range_client.clone();
+            let transaction_info = self.transaction_info.clone();
+            commit_join_set.spawn_on(
+                async move {
+                    range_client
+                        .commit_transaction(transaction_info, &range_id, epoch)
+                        .await
+                },
+                &self.runtime,
+            );
+        }
+        while let Some(_) = commit_join_set.join_next().await {}
         Ok(())
     }
 }

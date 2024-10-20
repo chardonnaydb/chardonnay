@@ -49,6 +49,31 @@ impl RangeClient {
             .await
             .map_err(|e| self.handle_rangeserver_err(range_id, e))
     }
+
+    pub async fn abort_transaction(
+        &self,
+        tx: Arc<TransactionInfo>,
+        range_id: &FullRangeId,
+    ) -> Result<(), Error> {
+        let client = self.get_range_client(range_id).await?;
+        client
+            .abort_transaction(tx, range_id)
+            .await
+            .map_err(|e| self.handle_rangeserver_err(range_id, e))
+    }
+
+    pub async fn commit_transaction(
+        &self,
+        tx: Arc<TransactionInfo>,
+        range_id: &FullRangeId,
+        epoch: u64,
+    ) -> Result<(), Error> {
+        let client = self.get_range_client(range_id).await?;
+        client
+            .commit_transaction(tx, range_id, epoch)
+            .await
+            .map_err(|e| self.handle_rangeserver_err(range_id, e))
+    }
 }
 
 impl RangeClient {
