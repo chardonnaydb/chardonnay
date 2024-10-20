@@ -752,6 +752,7 @@ pub mod tests {
     use common::config::{
         CassandraConfig, EpochConfig, HostPort, RangeServerConfig, RegionConfig, UniverseConfig,
     };
+    use common::host_info::HostIdentity;
     use common::network::for_testing::udp_fast_network::UdpFastNetwork;
     use common::region::{Region, Zone};
     use core::time;
@@ -830,9 +831,11 @@ pub mod tests {
         config.regions.insert(region, region_config);
         let identity: String = "test_server".into();
         let host_info = HostInfo {
-            identity: identity.clone(),
+            identity: HostIdentity {
+                name: identity.clone(),
+                zone,
+            },
             address: "127.0.0.1:50054".parse().unwrap(),
-            zone,
             warden_connection_epoch: epoch_supplier.read_epoch().await.unwrap(),
         };
         let server = Server::new(

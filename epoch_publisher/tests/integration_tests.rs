@@ -16,7 +16,7 @@ use common::{
         CassandraConfig, Config, EpochConfig, EpochPublisher as EpochPublisherConfig, HostPort,
         RangeServerConfig, RegionConfig, UniverseConfig,
     },
-    host_info::HostInfo,
+    host_info::{HostIdentity, HostInfo},
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},
     region::{Region, Zone},
 };
@@ -118,9 +118,11 @@ fn get_server_host_info(address: SocketAddr) -> HostInfo {
         name: "a".into(),
     };
     HostInfo {
-        identity: identity.clone(),
+        identity: HostIdentity {
+            name: identity.clone(),
+            zone,
+        },
         address,
-        zone,
         warden_connection_epoch: 0,
     }
 }

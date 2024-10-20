@@ -383,6 +383,7 @@ dependencies = [
  "rangeclient",
  "strum",
  "tokio",
+ "tokio-util",
  "tx_state_store",
  "uuid 1.10.0",
 ]

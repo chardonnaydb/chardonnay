@@ -136,8 +136,8 @@ impl WardenHandler {
         let mut client = WardenClient::connect(addr).await?;
         let registration_request = proto::warden::RegisterRangeServerRequest {
             range_server: Some(proto::warden::HostInfo {
-                identity: host_info.identity.clone(),
-                zone: host_info.zone.name.clone(),
+                identity: host_info.identity.name.clone(),
+                zone: host_info.identity.zone.name.clone(),
                 epoch,
             }),
         };
@@ -200,7 +200,11 @@ impl WardenHandler {
     ) -> Result<oneshot::Receiver<Result<(), WardenErr>>, WardenErr> {
         let mut state = self.state.write().await;
         if let State::NotStarted = state.deref_mut() {
-            match self.config.regions.get(&self.host_info.zone.region) {
+            match self
+                .config
+                .regions
+                .get(&self.host_info.identity.zone.region)
+            {
                 None => return Err("unknown region!".into()),
                 Some(config) => {
                     let (done_tx, done_rx) = oneshot::channel::<Result<(), WardenErr>>();

@@ -16,11 +16,12 @@ pub enum Error {
     KeyIsOutOfRange,
     RangeOwnershipLost,
     Timeout,
+    ConnectionClosed,
     UnknownTransaction,
-    TransactionAborted(TransactionAbortReason),
     CacheIsFull,
-    InternalError(Arc<dyn std::error::Error + Send + Sync>),
     PrefetchError,
+    TransactionAborted(TransactionAbortReason),
+    InternalError(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl Error {
@@ -65,6 +66,9 @@ impl Error {
             Self::TransactionAborted(_) => Status::TransactionAborted,
             Self::CacheIsFull => Status::CacheIsFull,
             Self::InternalError(_) => Status::InternalError,
+            // ConnectionClosed is really a client-side error and should not be
+            // returned from the server.
+            Self::ConnectionClosed => Status::InternalError,
             Self::PrefetchError => Status::PrefetchError,
         }
     }

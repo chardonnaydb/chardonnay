@@ -14,6 +14,7 @@ use proto::rangeserver::{PrefetchRequest, RangeId, RangeKey};
 use rangeserver::error::Error as RangeServerError;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::ops::DerefMut;
 use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -33,38 +34,71 @@ pub struct GetResult {
     pub leader_sequence_number: u64,
 }
 
+struct StartedState {
+    // TODO: make more typeful and store more information to e.g. allow timing out.
+    outstanding_requests: HashMap<Uuid, oneshot::Sender<Result<Bytes, RangeServerError>>>,
+}
+
+enum State {
+    NotStarted,
+    Started(StartedState),
+    Stopped,
+}
+
 // Provides an async rpc interface to a specific range server.
 pub struct RangeClient {
     fast_network: Arc<dyn FastNetwork>,
     range_server_info: HostInfo,
-    // TODO: make more typeful and store more information to e.g. allow timing out.
-    outstanding_requests: Mutex<HashMap<Uuid, oneshot::Sender<Bytes>>>,
-    proto_client: Arc<RangeServerClient<Channel>>,
+    state: Mutex<State>,
+    proto_client: Option<Arc<RangeServerClient<Channel>>>,
 }
 
 impl RangeClient {
     pub async fn new(
         fast_network: Arc<dyn FastNetwork>,
-        runtime: tokio::runtime::Handle,
         host_info: HostInfo,
-        cancellation_token: CancellationToken,
-        proto_server_addr: SocketAddr,
+        // TODO(tamer): make a "RangeServerHostIdentity" and have proto server
+        // be a required field on it.
+        proto_server_addr: Option<SocketAddr>,
     ) -> Arc<RangeClient> {
-        let addr = format!("http://{}", proto_server_addr);
-        let proto_client = Arc::new(RangeServerClient::connect(addr).await.unwrap());
-        let rc = Arc::new(RangeClient {
+        let proto_client = match proto_server_addr {
+            None => None,
+            Some(proto_server_addr) => {
+                let addr = format!("http://{}", proto_server_addr);
+                Some(Arc::new(RangeServerClient::connect(addr).await.unwrap()))
+            }
+        };
+        Arc::new(RangeClient {
             fast_network,
             range_server_info: host_info,
-            outstanding_requests: Mutex::new(HashMap::new()),
+            state: Mutex::new(State::NotStarted),
             proto_client,
-        });
+        })
+    }
 
+    pub async fn start(
+        rc: Arc<Self>,
+        runtime: tokio::runtime::Handle,
+        cancellation_token: CancellationToken,
+    ) {
+        let mut state = rc.state.lock().await;
+        match state.deref_mut() {
+            State::Started(_) | State::Stopped => return (),
+            State::NotStarted => (),
+        };
+        let started_state = StartedState {
+            outstanding_requests: HashMap::new(),
+        };
+        let _ = std::mem::replace(state.deref_mut(), State::Started(started_state));
         let rc_clone = rc.clone();
         runtime.spawn(async move {
             let _ = Self::network_loop(rc_clone, cancellation_token).await;
             println!("Network loop exited!")
         });
-        rc
+    }
+
+    pub fn host_info(&self) -> HostInfo {
+        self.range_server_info.clone()
     }
 
     pub async fn get(
@@ -112,10 +146,7 @@ impl RangeClient {
         );
         fbb.finish(fbb_root, None);
         let (tx, rx) = oneshot::channel();
-        {
-            let mut outstanding_requests = self.outstanding_requests.lock().await;
-            outstanding_requests.insert(req_id, tx);
-        }
+        self.record_outstanding_request(req_id, tx).await?;
         let get_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
         let mut envelope_fbb = FlatBufferBuilder::new();
         let request_bytes =
@@ -126,7 +157,7 @@ impl RangeClient {
                 Bytes::copy_from_slice(request_bytes),
             )
             .unwrap();
-        let response = rx.await.unwrap();
+        let response = rx.await.unwrap()?;
         let msg = response.to_vec();
         let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
         match envelope.type_() {
@@ -209,10 +240,7 @@ impl RangeClient {
         );
         fbb.finish(fbb_root, None);
         let (tx, rx) = oneshot::channel();
-        {
-            let mut outstanding_requests = self.outstanding_requests.lock().await;
-            outstanding_requests.insert(req_id, tx);
-        }
+        self.record_outstanding_request(req_id, tx).await?;
         let prepare_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
         let mut envelope_fbb = FlatBufferBuilder::new();
         let request_bytes = self.create_msg_envelope(
@@ -226,7 +254,7 @@ impl RangeClient {
                 Bytes::copy_from_slice(request_bytes),
             )
             .unwrap();
-        let response = rx.await.unwrap();
+        let response = rx.await.unwrap()?;
         let msg = response.to_vec();
         let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
         match envelope.type_() {
@@ -276,10 +304,7 @@ impl RangeClient {
         );
         fbb.finish(fbb_root, None);
         let (tx, rx) = oneshot::channel();
-        {
-            let mut outstanding_requests = self.outstanding_requests.lock().await;
-            outstanding_requests.insert(req_id, tx);
-        }
+        self.record_outstanding_request(req_id, tx).await?;
         let abort_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
         let mut envelope_fbb = FlatBufferBuilder::new();
         let request_bytes =
@@ -290,7 +315,7 @@ impl RangeClient {
                 Bytes::copy_from_slice(request_bytes),
             )
             .unwrap();
-        let response = rx.await.unwrap();
+        let response = rx.await.unwrap()?;
         let msg = response.to_vec();
         let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
         match envelope.type_() {
@@ -336,10 +361,7 @@ impl RangeClient {
         );
         fbb.finish(fbb_root, None);
         let (tx, rx) = oneshot::channel();
-        {
-            let mut outstanding_requests = self.outstanding_requests.lock().await;
-            outstanding_requests.insert(req_id, tx);
-        }
+        self.record_outstanding_request(req_id, tx).await?;
         let commit_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
         let mut envelope_fbb = FlatBufferBuilder::new();
         let request_bytes =
@@ -350,7 +372,7 @@ impl RangeClient {
                 Bytes::copy_from_slice(request_bytes),
             )
             .unwrap();
-        let response = rx.await.unwrap();
+        let response = rx.await.unwrap()?;
         let msg = response.to_vec();
         let envelope = flatbuffers::root::<ResponseEnvelope>(msg.as_slice()).unwrap();
         match envelope.type_() {
@@ -400,6 +422,8 @@ impl RangeClient {
         loop {
             let () = tokio::select! {
                 () = cancellation_token.cancelled() => {
+                    // TODO(tamer): remove from fast network as well.
+                    client.close().await;
                     return ()
                 }
                 maybe_message = network_receiver.recv() => {
@@ -410,9 +434,16 @@ impl RangeClient {
                         }
                         Some(msg) => {
                             let req_id = Self::get_request_id_from_response(msg.clone());
-                            let mut outstanding_requests = client.outstanding_requests.lock().await;
+                            let mut state = client.state.lock().await;
+                            let outstanding_requests = match state.deref_mut() {
+                                State::NotStarted | State::Stopped => {
+                                    cancellation_token.cancel();
+                                    continue
+                                }
+                                State::Started(started_state) => &mut started_state.outstanding_requests,
+                            };
                             let sender = outstanding_requests.remove(&req_id).unwrap();
-                            sender.send(msg).unwrap()
+                            sender.send(Ok(msg)).unwrap()
                         }
                     }
                 }
@@ -438,12 +469,48 @@ impl RangeClient {
         fbb.finished_data()
     }
 
+    async fn record_outstanding_request(
+        &self,
+        req_id: Uuid,
+        tx: oneshot::Sender<Result<Bytes, RangeServerError>>,
+    ) -> Result<(), RangeServerError> {
+        {
+            let mut state = self.state.lock().await;
+            let outstanding_requests = match state.deref_mut() {
+                State::NotStarted | State::Stopped => {
+                    return Err(RangeServerError::ConnectionClosed)
+                }
+                State::Started(started_state) => &mut started_state.outstanding_requests,
+            };
+            outstanding_requests.insert(req_id, tx);
+            Ok(())
+        }
+    }
+
+    async fn close(&self) {
+        let mut outstanding_requests = {
+            let mut state = self.state.lock().await;
+            let old_state = std::mem::replace(state.deref_mut(), State::Stopped);
+            match old_state {
+                State::NotStarted | State::Stopped => HashMap::new(),
+                State::Started(started_state) => started_state.outstanding_requests,
+            }
+        };
+        for (_, tx) in outstanding_requests.drain().take(1) {
+            tx.send(Err(RangeServerError::ConnectionClosed)).unwrap();
+        }
+    }
+
     pub async fn prefetch(
         &self,
         tx: Arc<TransactionInfo>,
         range_id: &FullRangeId,
         keys: Vec<Bytes>,
     ) -> Result<(), RangeServerError> {
+        let mut client = match &self.proto_client {
+            None => return Ok(()),
+            Some(proto_client) => (**proto_client).clone(),
+        };
         // Create a PrefetchRequest
         let transaction_id = tx.id.to_string();
         let keyspace_id = range_id.keyspace_id.id.to_string();
@@ -466,8 +533,7 @@ impl RangeClient {
             transaction_id,
             range_key: range_keys,
         };
-        // Pull the client
-        let mut client = (*self.proto_client).clone();
+
         // Send the request
         match client.prefetch(Request::new(request)).await {
             Ok(response) => {

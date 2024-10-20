@@ -54,7 +54,7 @@ impl PartialOrd for HostInfoWrapper {
 
 impl Ord for HostInfoWrapper {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.identity.cmp(&other.identity)
+        self.identity.name.cmp(&other.identity.name)
     }
 }
 
@@ -266,7 +266,7 @@ impl AssignmentComputationImpl {
             server_heap.push(Reverse((ranges.len(), server.clone())));
         }
         for added_server in added_servers {
-            server_heap.push(Reverse((0, added_server.identity.clone())));
+            server_heap.push(Reverse((0, added_server.identity.name.clone())));
         }
 
         // TODO(purujit): Put the removed servers in quarantine for a few seconds, they might come back.
@@ -278,7 +278,7 @@ impl AssignmentComputationImpl {
             ranges_to_assign = previously_unassigned.clone();
 
             for removed_server in removed_servers.clone() {
-                if let Some(ranges) = assignee_to_range_info.remove(&removed_server.identity) {
+                if let Some(ranges) = assignee_to_range_info.remove(&removed_server.identity.name) {
                     ranges_to_assign.extend(ranges);
                 }
             }
@@ -377,7 +377,7 @@ impl AssignmentComputation for AssignmentComputationImpl {
             Some(range_assignments) => {
                 let assigned_ranges: Vec<_> = range_assignments
                     .iter()
-                    .filter(|r| r.assignee == host_info.identity)
+                    .filter(|r| r.assignee == host_info.identity.name)
                     .map(|r| proto::warden::RangeId {
                         keyspace_id: r.range.keyspace_id.id.to_string(),
                         range_id: r.range.id.to_string(),
@@ -422,7 +422,7 @@ impl AssignmentComputation for AssignmentComputationImpl {
 mod tests {
     use bytes::Bytes;
     use common::{
-        host_info,
+        host_info::{self, HostIdentity},
         key_range::KeyRange,
         keyspace_id::KeyspaceId,
         region::{Region, Zone},
@@ -615,9 +615,11 @@ mod tests {
         let range = make_range(0, 127);
         context.base_ranges.lock().unwrap().push(range.clone());
         let host_info = HostInfo {
-            identity: "server1".to_string(),
+            identity: HostIdentity {
+                name: "server1".to_string(),
+                zone: make_zone(),
+            },
             address: "1.2.3.4:8080".parse().unwrap(),
-            zone: make_zone(),
             warden_connection_epoch: 1,
         };
 
@@ -673,15 +675,21 @@ mod tests {
             .extend(ranges);
         let servers = vec![
             HostInfoWrapper(HostInfo {
-                identity: "server1".to_string(),
+                identity: HostIdentity {
+                    name: "server1".to_string(),
+                    zone: make_zone(),
+                },
                 address: "1.2.3.4:8080".parse().unwrap(),
-                zone: make_zone(),
+
                 warden_connection_epoch: 1,
             }),
             HostInfoWrapper(HostInfo {
-                identity: "server2".to_string(),
+                identity: HostIdentity {
+                    name: "server2".to_string(),
+                    zone: make_zone(),
+                },
                 address: "5.6.7.8:8081".parse().unwrap(),
-                zone: make_zone(),
+
                 warden_connection_epoch: 1,
             }),
         ];
@@ -732,15 +740,20 @@ mod tests {
 
         let servers = vec![
             HostInfoWrapper(HostInfo {
-                identity: "server1".to_string(),
+                identity: HostIdentity {
+                    name: "server1".to_string(),
+                    zone: make_zone(),
+                },
                 address: "1.2.3.4:8080".parse().unwrap(),
-                zone: make_zone(),
                 warden_connection_epoch: 1,
             }),
             HostInfoWrapper(HostInfo {
-                identity: "server2".to_string(),
+                identity: HostIdentity {
+                    name: "server2".to_string(),
+                    zone: make_zone(),
+                },
                 address: "5.6.7.8:8081".parse().unwrap(),
-                zone: make_zone(),
+
                 warden_connection_epoch: 1,
             }),
         ];
@@ -773,9 +786,12 @@ mod tests {
 
         let prev_servers: HashSet<HostInfoWrapper> = HashSet::from_iter(vec![
             HostInfoWrapper(HostInfo {
-                identity: "unavailable_server".to_string(),
+                identity: HostIdentity {
+                    name: "unavailable_server".to_string(),
+                    zone: make_zone(),
+                },
                 address: "0.0.0.0:0".parse().unwrap(),
-                zone: make_zone(),
+
                 warden_connection_epoch: 1,
             }),
             servers[0].clone(),
@@ -815,9 +831,12 @@ mod tests {
         let context = setup().await;
         let computation = context.assignment_computation.clone();
         let server = HostInfo {
-            identity: "new_server".to_string(),
+            identity: HostIdentity {
+                name: "new_server".to_string(),
+                zone: make_zone(),
+            },
             address: "127.0.0.1:8080".parse().unwrap(),
-            zone: make_zone(),
+
             warden_connection_epoch: 1,
         };
 
@@ -842,9 +861,12 @@ mod tests {
         let context = setup().await;
         let computation = context.assignment_computation.clone();
         let server = HostInfo {
-            identity: "server1".to_string(),
+            identity: HostIdentity {
+                name: "server1".to_string(),
+                zone: make_zone(),
+            },
             address: "127.0.0.1:8080".parse().unwrap(),
-            zone: make_zone(),
+
             warden_connection_epoch: 1,
         };
 
@@ -862,9 +884,11 @@ mod tests {
         let context = setup().await;
         let computation = context.assignment_computation.clone();
         let server = HostInfo {
-            identity: "server1".to_string(),
+            identity: HostIdentity {
+                name: "server1".to_string(),
+                zone: make_zone(),
+            },
             address: "127.0.0.1:8080".parse().unwrap(),
-            zone: make_zone(),
             warden_connection_epoch: 2,
         };
 
@@ -876,9 +900,11 @@ mod tests {
 
         // Notify with an older epoch
         let older_epoch_server = HostInfo {
-            identity: "server1".to_string(),
+            identity: HostIdentity {
+                name: "server1".to_string(),
+                zone: make_zone(),
+            },
             address: "127.0.0.1:8080".parse().unwrap(),
-            zone: make_zone(),
             warden_connection_epoch: 1,
         };
         computation.notify_range_server_unavailable(older_epoch_server);
