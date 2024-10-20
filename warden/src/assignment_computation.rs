@@ -11,6 +11,9 @@ use common::region::Region;
 use proto::universe::universe_client::UniverseClient;
 use proto::universe::ListKeyspacesRequest;
 use proto::warden::{FullAssignment, WardenUpdate};
+use scylla::query::Query;
+use scylla::statement::SerialConsistency;
+use scylla::{Session, SessionBuilder};
 use std::cmp::{Ordering, Reverse};
 use std::hash::{Hash, Hasher};
 use tokio::sync::broadcast::{channel, Receiver, Sender};
@@ -84,7 +87,14 @@ pub struct AssignmentComputationImpl {
     ready_range_servers: Mutex<HashSet<HostInfoWrapper>>,
     unassigned_base_ranges: Mutex<Vec<RangeInfo>>,
     assignment_update_sender: Sender<i64>,
+    session: Session,
 }
+
+static INSERT_INTO_RANGE_LEASE_QUERY: &str = r#"
+  INSERT INTO chardonnay.range_leases(range_id, key_lower_bound_inclusive, key_upper_bound_exclusive)
+    VALUES (?, ?, ?)
+    IF NOT EXISTS
+"#;
 
 impl AssignmentComputationImpl {
     pub async fn new(
@@ -92,7 +102,13 @@ impl AssignmentComputationImpl {
         cancellation_token: CancellationToken,
         universe_client: UniverseClient<tonic::transport::Channel>,
         region: Region,
+        cassandra_known_node: String,
     ) -> Arc<Self> {
+        let session = SessionBuilder::new()
+            .known_node(cassandra_known_node)
+            .build()
+            .await
+            .unwrap();
         let s = Arc::new(Self {
             base_ranges: Mutex::new(vec![]),
             universe_client,
@@ -109,6 +125,7 @@ impl AssignmentComputationImpl {
             unassigned_base_ranges: Mutex::new(vec![]),
             // Using capacity 1 here because receivers will resync if they lag.
             assignment_update_sender: channel(1).0,
+            session,
         });
         let computation_clone = s.clone();
         runtime.spawn(async move {
@@ -160,13 +177,13 @@ impl AssignmentComputationImpl {
                 });
             }
         }
+        let mut new_base_ranges = vec![];
         {
             let mut l = self.base_ranges.lock().unwrap();
             let current_base_ranges: &mut Vec<RangeInfo> = l.as_mut();
             // Create a set of UUIDs from self.base_ranges.
             let base_ranges_set: HashSet<_> = current_base_ranges.iter().map(|r| r.id).collect();
             let reported_base_ranges_set: HashSet<_> = base_ranges.iter().map(|r| r.id).collect();
-            let mut new_base_ranges = vec![];
             for range in current_base_ranges {
                 if !reported_base_ranges_set.contains(&range.id) {
                     return Err(tonic::Status::internal(format!(
@@ -180,15 +197,45 @@ impl AssignmentComputationImpl {
                     new_base_ranges.push(range.clone());
                 }
             }
-            let current_base_ranges: &mut Vec<RangeInfo> = l.as_mut();
-            current_base_ranges.extend(new_base_ranges.clone());
-            self.unassigned_base_ranges
-                .lock()
-                .unwrap()
-                .extend(new_base_ranges);
         }
+
+        for range in &new_base_ranges {
+            let mut query = Query::new(INSERT_INTO_RANGE_LEASE_QUERY);
+            query.set_serial_consistency(Some(SerialConsistency::Serial));
+            let _ = self
+                .session
+                .query(
+                    query,
+                    (
+                        range.id,
+                        range
+                            .key_range
+                            .lower_bound_inclusive
+                            .clone()
+                            .map_or(vec![], |v| v.to_vec()),
+                        range
+                            .key_range
+                            .upper_bound_exclusive
+                            .clone()
+                            .map_or(vec![], |v| v.to_vec()),
+                    ),
+                )
+                .await
+                .map_err(|err| {
+                    tonic::Status::internal(format!("Failed to write range id: {}", err))
+                })?;
+        }
+        self.base_ranges
+            .lock()
+            .unwrap()
+            .extend(new_base_ranges.clone());
+        self.unassigned_base_ranges
+            .lock()
+            .unwrap()
+            .extend(new_base_ranges);
         Ok(())
     }
+
     async fn assignment_computation_loop(self: Arc<Self>) -> () {
         let mut ready_servers = HashSet::new();
         loop {
@@ -422,7 +469,7 @@ impl AssignmentComputation for AssignmentComputationImpl {
 mod tests {
     use bytes::Bytes;
     use common::{
-        host_info::{self, HostIdentity},
+        host_info::HostIdentity,
         key_range::KeyRange,
         keyspace_id::KeyspaceId,
         region::{Region, Zone},
@@ -535,6 +582,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
+
     async fn setup() -> TestContext {
         let port = portpicker::pick_unused_port().unwrap();
         let addr = format!("[::1]:{port}").parse().unwrap();
@@ -551,8 +599,8 @@ mod tests {
                 .add_service(UniverseServer::new(universe_server))
                 .serve_with_shutdown(addr, async {
                     signal_rx.await.ok();
-                    info!("Server shutting down");
                     cancellation_token.cancel();
+                    info!("Server shutting down");
                 })
                 .await
                 .unwrap();
@@ -582,6 +630,7 @@ mod tests {
                 cloud: None,
                 name: "".to_string(),
             },
+            "127.0.0.1:9042".to_string(),
         )
         .await;
         TestContext {
@@ -609,7 +658,18 @@ mod tests {
         let context = setup().await;
         let computation = context.assignment_computation.clone();
 
-        // Populate unassigned_base_ranges with one range and have one server to assign.
+        // TODO(purujit): For some reason, doing this in the `drop` method of the TestContext does not work. The test exits before
+        // the tasks spawned by the drop function are completed.
+        // This is a workaround.
+        let res = computation
+            .session
+            .query("TRUNCATE chardonnay.range_leases", ())
+            .await;
+        match res {
+            Ok(_) => info!("Truncated chardonnay.range_leases"),
+            Err(e) => panic!("Failed to truncate chardonnay.range_leases: {}", e),
+        }
+        // One base range and have one server to assign.
         // This test feeds the base ranges through the universe server. Other tests directly populate
         // the unassigned_base_ranges to not have to wait for assignments.
         let range = make_range(0, 127);
@@ -653,6 +713,21 @@ mod tests {
             }
             _ => panic!("Expected FullAssignment"),
         }
+
+        assert_eq!(
+            computation
+                .session
+                .query(
+                    "SELECT * from chardonnay.range_leases where range_id = ?",
+                    (range.id,)
+                )
+                .await
+                .unwrap()
+                .rows
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]

@@ -23,7 +23,10 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info, instrument};
 
-use crate::assignment_computation::{AssignmentComputation, AssignmentComputationImpl};
+use crate::{
+    assignment_computation::{AssignmentComputation, AssignmentComputationImpl},
+    persistence::cassandra,
+};
 
 /// Implementation of the Warden service.
 pub struct WardenServer {
@@ -103,6 +106,7 @@ impl WardenServer {
 pub async fn run_warden_server(
     addr: impl AsRef<str> + std::net::ToSocketAddrs,
     universe_addr: String,
+    cassandra_addr: String,
     region: Region,
     runtime: tokio::runtime::Handle,
     cancellation_token: CancellationToken,
@@ -110,7 +114,14 @@ pub async fn run_warden_server(
     let addr = addr.to_socket_addrs()?.next().ok_or("Invalid address")?;
     let universe_client = UniverseClient::connect(universe_addr).await?;
     let warden_server = WardenServer::new(
-        AssignmentComputationImpl::new(runtime, cancellation_token, universe_client, region).await,
+        AssignmentComputationImpl::new(
+            runtime,
+            cancellation_token,
+            universe_client,
+            region,
+            cassandra_addr,
+        )
+        .await,
     );
 
     info!("WardenServer listening on {}", addr);

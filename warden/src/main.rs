@@ -29,6 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_warden_server(
         addr,
         universe_addr,
+        config.cassandra.cql_addr.to_string(),
         region,
         tokio::runtime::Handle::current(),
         token,
