@@ -1,9 +1,8 @@
 use crate::region::{Region, Zone};
 use core::time;
 use derivative::Derivative;
-use proto::universe::universe_server::Universe;
 use serde::{Deserialize, Serialize};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::ToSocketAddrs;
 use std::vec;
 use std::{
     collections::{HashMap, HashSet},

@@ -81,6 +81,8 @@ impl RangeClient {
                     }
                 }
             };
+            // TODO(tamer): need to stop the old client, maybe by implementing
+            // drop on the Client struct.
             range_clients.remove(&host_info.identity);
             range_clients.insert(host_info.identity.clone(), client.clone());
         };
