@@ -11,6 +11,7 @@ use common::region::Region;
 use proto::universe::universe_client::UniverseClient;
 use proto::universe::ListKeyspacesRequest;
 use proto::warden::{FullAssignment, WardenUpdate};
+use scylla::{Session, SessionBuilder};
 use std::cmp::{Ordering, Reverse};
 use std::hash::{Hash, Hasher};
 use tokio::sync::broadcast::{channel, Receiver, Sender};
@@ -19,7 +20,7 @@ use tonic::Status;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::persistence::{RangeAssignment, RangeInfo};
+use crate::persistence::{self, Persistence, RangeAssignment, RangeInfo};
 
 // TODO(purujit): Convert these to configuration.
 const MIN_NUM_RANGE_SERVERS: usize = 1;
@@ -84,6 +85,7 @@ pub struct AssignmentComputationImpl {
     ready_range_servers: Mutex<HashSet<HostInfoWrapper>>,
     unassigned_base_ranges: Mutex<Vec<RangeInfo>>,
     assignment_update_sender: Sender<i64>,
+    persistence: Arc<dyn Persistence + Send + Sync + 'static>,
 }
 
 impl AssignmentComputationImpl {
@@ -92,6 +94,7 @@ impl AssignmentComputationImpl {
         cancellation_token: CancellationToken,
         universe_client: UniverseClient<tonic::transport::Channel>,
         region: Region,
+        persistence: Arc<dyn Persistence + Send + Sync + 'static>,
     ) -> Arc<Self> {
         let s = Arc::new(Self {
             base_ranges: Mutex::new(vec![]),
@@ -109,6 +112,7 @@ impl AssignmentComputationImpl {
             unassigned_base_ranges: Mutex::new(vec![]),
             // Using capacity 1 here because receivers will resync if they lag.
             assignment_update_sender: channel(1).0,
+            persistence,
         });
         let computation_clone = s.clone();
         runtime.spawn(async move {
@@ -160,13 +164,13 @@ impl AssignmentComputationImpl {
                 });
             }
         }
+        let mut new_base_ranges = vec![];
         {
             let mut l = self.base_ranges.lock().unwrap();
             let current_base_ranges: &mut Vec<RangeInfo> = l.as_mut();
             // Create a set of UUIDs from self.base_ranges.
             let base_ranges_set: HashSet<_> = current_base_ranges.iter().map(|r| r.id).collect();
             let reported_base_ranges_set: HashSet<_> = base_ranges.iter().map(|r| r.id).collect();
-            let mut new_base_ranges = vec![];
             for range in current_base_ranges {
                 if !reported_base_ranges_set.contains(&range.id) {
                     return Err(tonic::Status::internal(format!(
@@ -180,15 +184,23 @@ impl AssignmentComputationImpl {
                     new_base_ranges.push(range.clone());
                 }
             }
-            let current_base_ranges: &mut Vec<RangeInfo> = l.as_mut();
-            current_base_ranges.extend(new_base_ranges.clone());
-            self.unassigned_base_ranges
-                .lock()
-                .unwrap()
-                .extend(new_base_ranges);
         }
+
+        self.persistence
+            .insert_new_ranges(&new_base_ranges)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to insert new ranges: {}", e)))?;
+        self.base_ranges
+            .lock()
+            .unwrap()
+            .extend(new_base_ranges.clone());
+        self.unassigned_base_ranges
+            .lock()
+            .unwrap()
+            .extend(new_base_ranges);
         Ok(())
     }
+
     async fn assignment_computation_loop(self: Arc<Self>) -> () {
         let mut ready_servers = HashSet::new();
         loop {
@@ -422,12 +434,13 @@ impl AssignmentComputation for AssignmentComputationImpl {
 mod tests {
     use bytes::Bytes;
     use common::{
-        host_info::{self, HostIdentity},
+        host_info::HostIdentity,
         key_range::KeyRange,
         keyspace_id::KeyspaceId,
         region::{Region, Zone},
     };
     use once_cell::sync::Lazy;
+    use persistence::PersistenceImpl;
     use proto::universe::{
         universe_server::{Universe, UniverseServer},
         CreateKeyspaceRequest, CreateKeyspaceResponse, KeyspaceInfo, ListKeyspacesResponse,
@@ -526,6 +539,7 @@ mod tests {
         assignment_computation: Arc<AssignmentComputationImpl>,
         server_shutdown_tx: Option<oneshot::Sender<()>>,
         base_ranges: Arc<Mutex<Vec<RangeInfo>>>,
+        session: Arc<Session>,
     }
 
     impl Drop for TestContext {
@@ -535,6 +549,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
+
     async fn setup() -> TestContext {
         let port = portpicker::pick_unused_port().unwrap();
         let addr = format!("[::1]:{port}").parse().unwrap();
@@ -551,8 +566,8 @@ mod tests {
                 .add_service(UniverseServer::new(universe_server))
                 .serve_with_shutdown(addr, async {
                     signal_rx.await.ok();
-                    info!("Server shutting down");
                     cancellation_token.cancel();
+                    info!("Server shutting down");
                 })
                 .await
                 .unwrap();
@@ -574,6 +589,15 @@ mod tests {
                 }
             }
         }
+        let session = Arc::new(
+            SessionBuilder::new()
+                .known_node("127.0.0.1:9042".to_string())
+                .build()
+                .await
+                .unwrap(),
+        );
+
+        let persistence = Arc::new(PersistenceImpl::new("127.0.0.1:9042".to_string()).await);
         let assignment_computation = AssignmentComputationImpl::new(
             RUNTIME.handle().clone(),
             cc_clone,
@@ -582,12 +606,14 @@ mod tests {
                 cloud: None,
                 name: "".to_string(),
             },
+            persistence,
         )
         .await;
         TestContext {
             assignment_computation,
             server_shutdown_tx: Some(signal_tx),
             base_ranges,
+            session,
         }
     }
 
@@ -609,7 +635,18 @@ mod tests {
         let context = setup().await;
         let computation = context.assignment_computation.clone();
 
-        // Populate unassigned_base_ranges with one range and have one server to assign.
+        // TODO(purujit): For some reason, doing this in the `drop` method of the TestContext does not work. The test exits before
+        // the tasks spawned by the drop function are completed.
+        // This is a workaround.
+        let res = context
+            .session
+            .query("TRUNCATE chardonnay.range_leases", ())
+            .await;
+        match res {
+            Ok(_) => info!("Truncated chardonnay.range_leases"),
+            Err(e) => panic!("Failed to truncate chardonnay.range_leases: {}", e),
+        }
+        // One base range and have one server to assign.
         // This test feeds the base ranges through the universe server. Other tests directly populate
         // the unassigned_base_ranges to not have to wait for assignments.
         let range = make_range(0, 127);
@@ -653,6 +690,21 @@ mod tests {
             }
             _ => panic!("Expected FullAssignment"),
         }
+
+        assert_eq!(
+            context
+                .session
+                .query(
+                    "SELECT * from chardonnay.range_leases where range_id = ?",
+                    (range.id,)
+                )
+                .await
+                .unwrap()
+                .rows
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
