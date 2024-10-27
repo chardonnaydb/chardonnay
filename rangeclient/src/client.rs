@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::ops::DerefMut;
 use std::sync::Arc;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, RwLock};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Channel;
 use tonic::Request;
@@ -49,7 +49,7 @@ enum State {
 pub struct RangeClient {
     fast_network: Arc<dyn FastNetwork>,
     range_server_info: HostInfo,
-    state: Mutex<State>,
+    state: RwLock<State>,
     proto_client: Option<Arc<RangeServerClient<Channel>>>,
 }
 
@@ -71,7 +71,7 @@ impl RangeClient {
         Arc::new(RangeClient {
             fast_network,
             range_server_info: host_info,
-            state: Mutex::new(State::NotStarted),
+            state: RwLock::new(State::NotStarted),
             proto_client,
         })
     }
@@ -81,7 +81,7 @@ impl RangeClient {
         runtime: tokio::runtime::Handle,
         cancellation_token: CancellationToken,
     ) {
-        let mut state = rc.state.lock().await;
+        let mut state = rc.state.write().await;
         match state.deref_mut() {
             State::Started(_) | State::Stopped => return (),
             State::NotStarted => (),
@@ -95,6 +95,14 @@ impl RangeClient {
             let _ = Self::network_loop(rc_clone, cancellation_token).await;
             println!("Network loop exited!")
         });
+    }
+
+    pub async fn is_stopped(&self) -> bool {
+        let state = self.state.read().await;
+        match *state {
+            State::Stopped => true,
+            State::NotStarted | State::Started(_) => false,
+        }
     }
 
     pub fn host_info(&self) -> HostInfo {
@@ -434,7 +442,7 @@ impl RangeClient {
                         }
                         Some(msg) => {
                             let req_id = Self::get_request_id_from_response(msg.clone());
-                            let mut state = client.state.lock().await;
+                            let mut state = client.state.write().await;
                             let outstanding_requests = match state.deref_mut() {
                                 State::NotStarted | State::Stopped => {
                                     cancellation_token.cancel();
@@ -475,7 +483,7 @@ impl RangeClient {
         tx: oneshot::Sender<Result<Bytes, RangeServerError>>,
     ) -> Result<(), RangeServerError> {
         {
-            let mut state = self.state.lock().await;
+            let mut state = self.state.write().await;
             let outstanding_requests = match state.deref_mut() {
                 State::NotStarted | State::Stopped => {
                     return Err(RangeServerError::ConnectionClosed)
@@ -489,7 +497,7 @@ impl RangeClient {
 
     async fn close(&self) {
         let mut outstanding_requests = {
-            let mut state = self.state.lock().await;
+            let mut state = self.state.write().await;
             let old_state = std::mem::replace(state.deref_mut(), State::Stopped);
             match old_state {
                 State::NotStarted | State::Stopped => HashMap::new(),

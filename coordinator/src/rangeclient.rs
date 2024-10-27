@@ -82,34 +82,49 @@ impl RangeClient {
             None => return Err(Error::RangeIsNotLoaded),
             Some(host_info) => host_info,
         };
-        {
-            // fast-path for common case where we already have a client.
-            let range_clients = self.range_clients.read().await;
-            match range_clients.get(&host_info.identity) {
-                None => (),
-                Some(client) => {
-                    if client.host_info() == host_info {
-                        return Ok(client.clone());
-                    }
-                }
-            };
-        }
 
-        let client = Client::new(self.fast_network.clone(), host_info.clone(), None).await;
-        {
-            let mut range_clients = self.range_clients.write().await;
-            match range_clients.get(&host_info.identity) {
-                None => (),
-                Some(client) => {
-                    if client.host_info() == host_info {
-                        return Ok(client.clone());
-                    }
+        // Check if we already have a started client to the range server.
+        let existing_client = {
+            let client = {
+                let range_clients = self.range_clients.read().await;
+                match range_clients.get(&host_info.identity) {
+                    None => None,
+                    Some(c) => Some(c.clone()),
                 }
             };
-            // TODO(tamer): need to stop the old client, maybe by implementing
-            // drop on the Client struct.
-            range_clients.remove(&host_info.identity);
-            range_clients.insert(host_info.identity.clone(), client.clone());
+            match client {
+                None => None,
+                Some(client) => {
+                    if client.host_info() == host_info && !client.is_stopped().await {
+                        Some(client.clone())
+                    } else {
+                        None
+                    }
+                }
+            }
+        };
+
+        let client = match existing_client {
+            Some(c) => c,
+            None => {
+                let client = Client::new(self.fast_network.clone(), host_info.clone(), None).await;
+                {
+                    let mut range_clients = self.range_clients.write().await;
+                    match range_clients.get(&host_info.identity) {
+                        None => (),
+                        Some(client) => {
+                            if client.host_info() == host_info {
+                                return Ok(client.clone());
+                            }
+                        }
+                    };
+                    // TODO(tamer): need to stop the old client, maybe by implementing
+                    // drop on the Client struct.
+                    range_clients.remove(&host_info.identity);
+                    range_clients.insert(host_info.identity.clone(), client.clone());
+                };
+                client
+            }
         };
 
         Client::start(
@@ -129,8 +144,8 @@ impl RangeClient {
             Error::InvalidRequestFormat
             | Error::RangeDoesNotExist
             | Error::KeyIsOutOfRange
-            | Error::Timeout
             | Error::ConnectionClosed
+            | Error::Timeout
             | Error::UnknownTransaction
             | Error::CacheIsFull
             | Error::PrefetchError
