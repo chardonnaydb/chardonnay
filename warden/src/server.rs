@@ -113,16 +113,15 @@ pub async fn run_warden_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr = addr.to_socket_addrs()?.next().ok_or("Invalid address")?;
     let universe_client = UniverseClient::connect(universe_addr).await?;
-    let warden_server = WardenServer::new(
-        AssignmentComputationImpl::new(
-            runtime,
-            cancellation_token,
-            universe_client,
-            region,
-            Arc::new(PersistenceImpl::new(cassandra_addr).await),
-        )
-        .await,
-    );
+    let assignment_computation = AssignmentComputationImpl::new(
+        universe_client,
+        region,
+        Arc::new(PersistenceImpl::new(cassandra_addr).await),
+    )
+    .await;
+    let clone = assignment_computation.clone();
+    clone.start_computation(runtime, cancellation_token);
+    let warden_server = WardenServer::new(assignment_computation);
 
     info!("WardenServer listening on {}", addr);
 

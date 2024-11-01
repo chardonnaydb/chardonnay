@@ -3,8 +3,11 @@ pub mod cassandra;
 use std::sync::Arc;
 
 use common::{full_range_id::FullRangeId, key_range::KeyRange, keyspace_id::KeyspaceId};
-use scylla::{query::Query, statement::SerialConsistency, Session, SessionBuilder};
+use scylla::{
+    query::Query, statement::SerialConsistency, FromRow, SerializeRow, Session, SessionBuilder,
+};
 use thiserror::Error;
+use tracing::info;
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -20,6 +23,15 @@ pub struct RangeAssignment {
     pub assignee: String,
 }
 
+#[derive(Debug, FromRow, SerializeRow)]
+struct SerializedRangeAssignment {
+    keyspace_id: Uuid,
+    range_id: Uuid,
+    key_lower_bound_inclusive: Option<Vec<u8>>,
+    key_upper_bound_exclusive: Option<Vec<u8>>,
+    assignee: String,
+}
+
 #[derive(Clone, Debug, Error)]
 pub enum Error {
     #[error("Persistence Layer error: {0}")]
@@ -33,10 +45,10 @@ pub trait Persistence: Send + Sync + 'static {
         keyspace_id: &KeyspaceId,
     ) -> Result<Vec<RangeAssignment>, Error>;
 
-    async fn update_range_assignment(
+    async fn update_range_assignments(
         &self,
-        range_id: &FullRangeId,
-        assignee: String,
+        version: i64,
+        assignments: Vec<RangeAssignment>,
     ) -> Result<(), Error>;
 
     async fn insert_new_ranges(&self, ranges: &Vec<RangeInfo>) -> Result<(), Error>;
@@ -65,6 +77,11 @@ static INSERT_INTO_RANGE_LEASE_QUERY: &str = r#"
     IF NOT EXISTS
 "#;
 
+static INSERT_OR_UPDATE_RANGE_ASSIGNMENT_QUERY: &str = r#"
+  INSERT INTO chardonnay.range_map(keyspace_id, range_id, key_lower_bound_inclusive, key_upper_bound_exclusive, assignee)
+  VALUES (?, ?, ?, ?, ?)
+  "#;
+
 #[async_trait::async_trait]
 impl Persistence for PersistenceImpl {
     async fn get_keyspace_range_map(
@@ -74,12 +91,40 @@ impl Persistence for PersistenceImpl {
         todo!();
     }
 
-    async fn update_range_assignment(
+    async fn update_range_assignments(
         &self,
-        range_id: &FullRangeId,
-        assignee: String,
+        version: i64,
+        assignments: Vec<RangeAssignment>,
     ) -> Result<(), Error> {
-        todo!();
+        let prepared = self
+            .session
+            .prepare(INSERT_OR_UPDATE_RANGE_ASSIGNMENT_QUERY)
+            .await
+            .map_err(|op| Error::InternalError(Arc::new(op)))?;
+        info!("Writing assignments for version: {}", version);
+        for assignment in assignments {
+            let assignment = SerializedRangeAssignment {
+                keyspace_id: assignment.range.keyspace_id.id,
+                range_id: assignment.range.id,
+                key_lower_bound_inclusive: assignment
+                    .range
+                    .key_range
+                    .lower_bound_inclusive
+                    .map(|b| b.to_vec()),
+                key_upper_bound_exclusive: assignment
+                    .range
+                    .key_range
+                    .upper_bound_exclusive
+                    .map(|b| b.to_vec()),
+                assignee: assignment.assignee,
+            };
+            self.session
+                .execute(&prepared, assignment)
+                .await
+                .map_err(|op| Error::InternalError(Arc::new(op)))?;
+        }
+        info!("Finished writing assignments for version: {}", version);
+        Ok(())
     }
 
     async fn insert_new_ranges(&self, ranges: &Vec<RangeInfo>) -> Result<(), Error> {
