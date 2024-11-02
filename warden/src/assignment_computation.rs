@@ -11,7 +11,6 @@ use common::region::Region;
 use proto::universe::universe_client::UniverseClient;
 use proto::universe::ListKeyspacesRequest;
 use proto::warden::{FullAssignment, WardenUpdate};
-use scylla::{Session, SessionBuilder};
 use std::cmp::{Ordering, Reverse};
 use std::hash::{Hash, Hasher};
 use tokio::sync::broadcast::{channel, Receiver, Sender};
@@ -20,7 +19,7 @@ use tonic::Status;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::persistence::{self, Persistence, RangeAssignment, RangeInfo};
+use crate::persistence::{Persistence, RangeAssignment, RangeInfo};
 
 // TODO(purujit): Convert these to configuration.
 const MIN_NUM_RANGE_SERVERS: usize = 1;
@@ -90,8 +89,6 @@ pub struct AssignmentComputationImpl {
 
 impl AssignmentComputationImpl {
     pub async fn new(
-        runtime: tokio::runtime::Handle,
-        cancellation_token: CancellationToken,
         universe_client: UniverseClient<tonic::transport::Channel>,
         region: Region,
         persistence: Arc<dyn Persistence + Send + Sync + 'static>,
@@ -114,20 +111,25 @@ impl AssignmentComputationImpl {
             assignment_update_sender: channel(1).0,
             persistence,
         });
-        let computation_clone = s.clone();
+        s
+    }
+
+    pub fn start_computation(
+        self: Arc<Self>,
+        runtime: tokio::runtime::Handle,
+        cancellation_token: CancellationToken,
+    ) {
         runtime.spawn(async move {
             tokio::select! {
                 _ = cancellation_token.cancelled() => {
                     info!("Cancellation token triggered. Exiting assignment computation loop.")
                 }
-                _ = Self::assignment_computation_loop(computation_clone) => {
+                _ = Self::assignment_computation_loop(self.clone()) => {
                     info!("Assignment computation loop exited.")
                 }
             }
         });
-        s
     }
-
     pub async fn read_base_ranges(&self) -> Result<(), tonic::Status> {
         let request = tonic::Request::new(ListKeyspacesRequest {
             region: Some(self.region.clone().into()),
@@ -285,9 +287,13 @@ impl AssignmentComputationImpl {
         // Reassign the ranges from the removed servers to the current servers starting from the least loaded.
         // Also, assign any newly added base ranges.
         let mut ranges_to_assign: Vec<RangeInfo>;
+        // For now, versions are milliseconds since Unix epoch and adding 1 is safe since even if another Warden instance
+        // comes up, it is unlikely to have any overlap with the previous one unless there is a lot of clock skew.
+        // TODO(purujit): Use a more robust versioning scheme.
+        let new_version = self.current_version.lock().unwrap().add(1);
         {
-            let mut previously_unassigned = self.unassigned_base_ranges.lock().unwrap();
-            ranges_to_assign = previously_unassigned.clone();
+            let mut updated_assignments = vec![];
+            ranges_to_assign = self.unassigned_base_ranges.lock().unwrap().clone();
 
             for removed_server in removed_servers.clone() {
                 if let Some(ranges) = assignee_to_range_info.remove(&removed_server.identity.name) {
@@ -304,9 +310,22 @@ impl AssignmentComputationImpl {
                 assignee_to_range_info
                     .entry(next_server.0 .1.clone())
                     .or_insert_with(Vec::new)
-                    .push(range);
+                    .push(range.clone());
                 server_heap.push(Reverse((next_server.0 .0 + 1, next_server.0 .1.clone())));
+                updated_assignments.push(RangeAssignment {
+                    assignee: next_server.0 .1.clone(),
+                    range,
+                });
             }
+            if let Err(e) = self
+                .persistence
+                .update_range_assignments(new_version, updated_assignments)
+                .await
+            {
+                print!("Failed to update range assignments: {:?}.", e);
+                return new_ready_servers;
+            }
+            let mut previously_unassigned = self.unassigned_base_ranges.lock().unwrap();
             // Remove only the ranges that were assigned.
             // This is a safe-guard to make sure if we fail to assign any range, it still stays in the unassigned list.
             previously_unassigned.retain(|r| !assigned_ranges.contains(&r.id));
@@ -319,10 +338,6 @@ impl AssignmentComputationImpl {
                 range_assignments.remove(&oldest_version);
             }
 
-            // For now, versions are milliseconds since Unix epoch and adding 1 is safe since even if another Warden instance
-            // comes up, it is unlikely to have any overlap with the previous one unless there is a lot of clock skew.
-            // TODO(purujit): Use a more robust versioning scheme.
-            let new_version = current_version.add(1);
             assert!(!range_assignments.contains_key(&new_version));
             range_assignments.insert(new_version, Vec::new());
             let new_range_assignments = range_assignments.get_mut(&new_version).unwrap();
@@ -440,14 +455,16 @@ mod tests {
         region::{Region, Zone},
     };
     use once_cell::sync::Lazy;
-    use persistence::PersistenceImpl;
     use proto::universe::{
         universe_server::{Universe, UniverseServer},
         CreateKeyspaceRequest, CreateKeyspaceResponse, KeyspaceInfo, ListKeyspacesResponse,
     };
+    use scylla::{Session, SessionBuilder};
     use tokio::sync::oneshot;
     use tonic::{Code, Request, Response};
     use uuid::Uuid;
+
+    use crate::persistence::PersistenceImpl;
 
     use super::*;
     use std::sync::Arc;
@@ -494,9 +511,18 @@ mod tests {
             if (self.base_ranges.lock().unwrap()).len() == 0 {
                 return Ok(Response::new(ListKeyspacesResponse { keyspaces: vec![] }));
             }
+            let keyspace_id = self
+                .base_ranges
+                .lock()
+                .unwrap()
+                .get(0)
+                .unwrap()
+                .keyspace_id
+                .id
+                .to_string();
             Ok(Response::new(ListKeyspacesResponse {
                 keyspaces: vec![KeyspaceInfo {
-                    keyspace_id: Uuid::new_v4().to_string(),
+                    keyspace_id,
                     namespace: "test_namespace".to_string(),
                     name: "test_keyspace".to_string(),
                     primary_zone: Some(proto::universe::Zone {
@@ -540,6 +566,7 @@ mod tests {
         server_shutdown_tx: Option<oneshot::Sender<()>>,
         base_ranges: Arc<Mutex<Vec<RangeInfo>>>,
         session: Arc<Session>,
+        cancellation_token: CancellationToken,
     }
 
     impl Drop for TestContext {
@@ -599,8 +626,6 @@ mod tests {
 
         let persistence = Arc::new(PersistenceImpl::new("127.0.0.1:9042".to_string()).await);
         let assignment_computation = AssignmentComputationImpl::new(
-            RUNTIME.handle().clone(),
-            cc_clone,
             client,
             Region {
                 cloud: None,
@@ -614,6 +639,7 @@ mod tests {
             server_shutdown_tx: Some(signal_tx),
             base_ranges,
             session,
+            cancellation_token: cc_clone,
         }
     }
 
@@ -634,17 +660,28 @@ mod tests {
     async fn test_run_assignment_computation_single_server() {
         let context = setup().await;
         let computation = context.assignment_computation.clone();
+        let computation_clone = computation.clone();
+        computation_clone
+            .start_computation(RUNTIME.handle().clone(), context.cancellation_token.clone());
 
         // TODO(purujit): For some reason, doing this in the `drop` method of the TestContext does not work. The test exits before
         // the tasks spawned by the drop function are completed.
         // This is a workaround.
-        let res = context
+        let mut res = context
             .session
             .query("TRUNCATE chardonnay.range_leases", ())
             .await;
         match res {
             Ok(_) => info!("Truncated chardonnay.range_leases"),
             Err(e) => panic!("Failed to truncate chardonnay.range_leases: {}", e),
+        }
+        res = context
+            .session
+            .query("TRUNCATE chardonnay.range_map", ())
+            .await;
+        match res {
+            Ok(_) => info!("Truncated chardonnay.range_map"),
+            Err(e) => panic!("Failed to truncate chardonnay.range_map: {}", e),
         }
         // One base range and have one server to assign.
         // This test feeds the base ranges through the universe server. Other tests directly populate
@@ -705,6 +742,18 @@ mod tests {
                 .len(),
             1
         );
+        let ranges = context
+            .session
+            .query(
+                "SELECT * from chardonnay.range_map where keyspace_id = ? and range_id = ?",
+                (range.keyspace_id.id, range.id),
+            )
+            .await
+            .unwrap()
+            .rows
+            .unwrap()
+            .len();
+        assert_eq!(ranges, 1)
     }
 
     #[tokio::test]
