@@ -77,6 +77,10 @@ static INSERT_INTO_RANGE_LEASE_QUERY: &str = r#"
     IF NOT EXISTS
 "#;
 
+// TODO(purujit): To prevent writes from different Warden servers from clobbering each other,
+// we will ultimately want the Warden to acquire a leader lease,
+// we can then wrap this write into a Cassandra Lightweight Transaction that checks against
+// the lease's sequence number.
 static INSERT_OR_UPDATE_RANGE_ASSIGNMENT_QUERY: &str = r#"
   INSERT INTO chardonnay.range_map(keyspace_id, range_id, key_lower_bound_inclusive, key_upper_bound_exclusive, assignee)
   VALUES (?, ?, ?, ?, ?)
