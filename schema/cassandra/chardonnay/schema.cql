@@ -4,7 +4,7 @@ CREATE TABLE range_map (
     key_lower_bound_inclusive    blob,
     key_upper_bound_exclusive    blob,
     assignee                     text,
-    PRIMARY KEY  (keyspace_id, range_id)
+    PRIMARY KEY  ((keyspace_id), range_id)
   ) WITH COMPACTION = {
     'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'
   };
