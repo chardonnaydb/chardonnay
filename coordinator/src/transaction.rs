@@ -318,4 +318,26 @@ impl Transaction {
         while let Some(_) = commit_join_set.join_next().await {}
         Ok(())
     }
+
+    pub(crate) fn new(
+        transaction_info: Arc<TransactionInfo>,
+        range_client: Arc<RangeClient>,
+        range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,
+        epoch_reader: Arc<EpochReader>,
+        tx_state_store: Arc<TxStateStoreClient>,
+        runtime: tokio::runtime::Handle,
+    ) -> Transaction {
+        Transaction {
+            id: transaction_info.id,
+            transaction_info,
+            state: State::Running,
+            participant_ranges: HashMap::new(),
+            resolved_keyspaces: HashMap::new(),
+            range_client,
+            range_assignment_oracle,
+            epoch_reader,
+            tx_state_store,
+            runtime,
+        }
+    }
 }
