@@ -22,6 +22,21 @@ pub struct RangeClient {
 
 // public interface
 impl RangeClient {
+    pub fn new(
+        range_assignment_oracle: Arc<dyn RangeAssignmentOracle>,
+        fast_network: Arc<dyn FastNetwork>,
+        runtime: tokio::runtime::Handle,
+        cancellation_token: CancellationToken,
+    ) -> RangeClient {
+        RangeClient {
+            range_assignment_oracle,
+            fast_network,
+            range_clients: RwLock::new(HashMap::new()),
+            runtime,
+            cancellation_token,
+        }
+    }
+
     pub async fn get(
         &self,
         tx: Arc<TransactionInfo>,
