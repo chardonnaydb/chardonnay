@@ -1,0 +1,14 @@
+[Unit]
+Description=Chardonnay Service
+After=network.target
+StartLimitIntervalSec=0
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+Environment="RUST_BACKTRACE=1"
+ExecStart=/usr/bin/chardonnay
+WorkingDirectory=/etc/chardonnay
+
+[Install]
+WantedBy=multi-user.target
