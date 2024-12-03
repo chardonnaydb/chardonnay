@@ -67,6 +67,7 @@ fn main() {
     let ct_clone = cancellation_token.clone();
     let rt_handle = runtime.handle().clone();
     bg_runtime.spawn(async move {
+        // There is a bug here. If startup fails e.g. initial epoch read fails, we never retry.
         server::Server::start(server, fast_network.clone(), rt_handle, ct_clone).await;
     });
 
