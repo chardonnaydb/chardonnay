@@ -7,7 +7,9 @@ use std::net::ToSocketAddrs;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::oneshot;
+use tracing::warn;
 
 use bytes::Bytes;
 use common::network::fast_network::FastNetwork;
@@ -39,7 +41,7 @@ impl EpochPublisher for ProtoServer {
         &self,
         request: Request<SetEpochRequest>,
     ) -> Result<Response<SetEpochResponse>, TStatus> {
-        info!("Setting epoch");
+        warn!("Setting epoch");
         let reply = SetEpochResponse {};
         let current_epoch = self.server.epoch.load(SeqCst);
         if current_epoch == 0 {
@@ -191,18 +193,29 @@ impl Server {
         // TODO: catch retryable errors and reconnect to epoch.
         let addr = format!("http://{}", self.config.epoch.proto_server_addr.clone());
 
-        let mut client = EpochClient::connect(addr).await.unwrap();
-        let request = proto::epoch::ReadEpochRequest {};
-
-        let epoch = client
-            .read_epoch(Request::new(request))
-            .await
-            .unwrap()
-            .into_inner()
-            .epoch as usize;
-
-        self.epoch.store(epoch, SeqCst);
-        info!("synced initial epoch");
+        loop {
+            match EpochClient::connect(addr.clone()).await {
+                Ok(mut client) => {
+                    let request = proto::epoch::ReadEpochRequest {};
+                    match client.read_epoch(Request::new(request)).await {
+                        Ok(response) => {
+                            let epoch = response.into_inner().epoch as usize;
+                            self.epoch.store(epoch, SeqCst);
+                            break;
+                        }
+                        Err(e) => {
+                            error!("failed to read epoch from epoch server: {}", e);
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("failed to connect to epoch server: {}", e);
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
+        warn!("synced initial epoch");
     }
 
     pub fn new(
