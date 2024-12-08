@@ -2,6 +2,7 @@
 # Configuration variables
 ARG RUST_VERSION=1.81
 ARG FLATBUFFERS_VERSION=23.5.26
+ARG BUILD_TYPE=release
 
 ###############################################################################
 # Builder stage ###############################################################
@@ -41,12 +42,12 @@ COPY . .
 RUN cargo build --release
 
 ###############################################################################
-# node #################################################################
+# node-jepsen #################################################################
 ###############################################################################
 # This is a arm64 build of jgoerzen/debian-base-minimal:bookworm.
 FROM purujit/chardonnay:debian-base-minimal AS debian-addons
 # TODO: See if bookworm-slim would work.
-FROM debian:bookworm AS node
+FROM debian:bookworm AS node-jepsen
 
 COPY --from=debian-addons /usr/local/preinit/ /usr/local/preinit/
 COPY --from=debian-addons /usr/local/bin/ /usr/local/bin/
@@ -88,6 +89,19 @@ RUN apt-get -qy update && \
         build-essential bzip2 ca-certificates curl dirmngr dnsutils faketime iproute2 iptables iputils-ping libzip4 logrotate lsb-release man man-db netcat-openbsd net-tools ntpdate psmisc python3 rsyslog sudo tar tcpdump unzip vim wget
 
 EXPOSE 22
+CMD ["/usr/local/bin/boot-debian-base"]
+
+###############################################################################
+# node-jepsen #################################################################
+###############################################################################
+FROM debian:bookworm AS node-release
+
+###############################################################################
+# node ########################################################################
+###############################################################################
+FROM node-${BUILD_TYPE} AS node
+
+ENTRYPOINT ["chardonnay"]
 
 ###############################################################################
 # rangeserver #################################################################
@@ -96,9 +110,8 @@ EXPOSE 22
 FROM node AS rangeserver
 
 # Copy the built executable from the builder stage
+COPY --from=builder /chardonnay_build/target/release/rangeserver /usr/bin/rangeserver
 COPY --from=builder /chardonnay_build/target/release/rangeserver /usr/bin/chardonnay
-
-CMD ["/usr/local/bin/boot-debian-base"]
 
 ###############################################################################
 # warden ######################################################################
@@ -107,9 +120,8 @@ CMD ["/usr/local/bin/boot-debian-base"]
 FROM node AS warden
 
 # Copy the built executable from the builder stage
+COPY --from=builder /chardonnay_build/target/release/warden /usr/bin/warden
 COPY --from=builder /chardonnay_build/target/release/warden /usr/bin/chardonnay
-
-CMD ["/usr/local/bin/boot-debian-base"]
 
 ###############################################################################
 # epoch_publisher #############################################################
@@ -118,10 +130,8 @@ CMD ["/usr/local/bin/boot-debian-base"]
 FROM node AS epoch_publisher
 
 # Copy the built executable from the builder stage
+COPY --from=builder /chardonnay_build/target/release/epoch_publisher /usr/bin/epoch_publisher
 COPY --from=builder /chardonnay_build/target/release/epoch_publisher /usr/bin/chardonnay
-
-CMD ["/usr/local/bin/boot-debian-base"]
-
 
 ###############################################################################
 # epoch_service ###############################################################
@@ -130,9 +140,8 @@ CMD ["/usr/local/bin/boot-debian-base"]
 FROM node AS epoch
 
 # Copy the built executable from the builder stage
+COPY --from=builder /chardonnay_build/target/release/epoch /usr/bin/epoch
 COPY --from=builder /chardonnay_build/target/release/epoch /usr/bin/chardonnay
-
-CMD ["/usr/local/bin/boot-debian-base"]
 
 ###############################################################################
 # universe ####################################################################
@@ -141,12 +150,11 @@ CMD ["/usr/local/bin/boot-debian-base"]
 FROM node AS universe
 
 # Copy the built executable from the builder stage
+COPY --from=builder /chardonnay_build/target/release/universe /usr/bin/universe
 COPY --from=builder /chardonnay_build/target/release/universe /usr/bin/chardonnay
 
-CMD ["/usr/local/bin/boot-debian-base"]
-
 ###############################################################################
-# cassandra #################################################################
+# cassandra ###################################################################
 ###############################################################################
 FROM cassandra:5.0 AS cassandra-client
 ADD schema/cassandra/chardonnay/keyspace.cql /etc/chardonnay/cassandra/keyspace.cql
