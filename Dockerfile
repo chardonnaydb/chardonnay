@@ -2,6 +2,7 @@
 # Configuration variables
 ARG RUST_VERSION=1.81
 ARG FLATBUFFERS_VERSION=23.5.26
+# Set BUILD_TYPE to 'jepsen' to build the jepsen-specific version of Chardonnay.
 ARG BUILD_TYPE=release
 
 ###############################################################################
@@ -44,9 +45,8 @@ RUN cargo build --release
 ###############################################################################
 # node-jepsen #################################################################
 ###############################################################################
-# This is a arm64 build of jgoerzen/debian-base-minimal:bookworm.
+# This is a arm64 build of jgoerzen/debian-base-minimal:bookworm pulled from Docker hub.
 FROM purujit/chardonnay:debian-base-minimal AS debian-addons
-# TODO: See if bookworm-slim would work.
 FROM debian:bookworm AS node-jepsen
 
 COPY --from=debian-addons /usr/local/preinit/ /usr/local/preinit/
@@ -88,8 +88,8 @@ RUN apt-get -qy update && \
     apt-get -qy install \
         build-essential bzip2 ca-certificates curl dirmngr dnsutils faketime iproute2 iptables iputils-ping libzip4 logrotate lsb-release man man-db netcat-openbsd net-tools ntpdate psmisc python3 rsyslog sudo tar tcpdump unzip vim wget
 
-EXPOSE 22
 CMD ["/usr/local/bin/boot-debian-base"]
+EXPOSE 22
 
 ###############################################################################
 # node-jepsen #################################################################
@@ -100,8 +100,6 @@ FROM debian:bookworm AS node-release
 # node ########################################################################
 ###############################################################################
 FROM node-${BUILD_TYPE} AS node
-
-ENTRYPOINT ["chardonnay"]
 
 ###############################################################################
 # rangeserver #################################################################

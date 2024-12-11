@@ -41,7 +41,7 @@ impl EpochPublisher for ProtoServer {
         &self,
         request: Request<SetEpochRequest>,
     ) -> Result<Response<SetEpochResponse>, TStatus> {
-        warn!("Setting epoch");
+        info!("Setting epoch");
         let reply = SetEpochResponse {};
         let current_epoch = self.server.epoch.load(SeqCst);
         if current_epoch == 0 {
