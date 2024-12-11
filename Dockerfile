@@ -2,6 +2,8 @@
 # Configuration variables
 ARG RUST_VERSION=1.81
 ARG FLATBUFFERS_VERSION=23.5.26
+# Set BUILD_TYPE to 'jepsen' to build the jepsen-specific version of Chardonnay.
+ARG BUILD_TYPE=release
 
 ###############################################################################
 # Builder stage ###############################################################
@@ -41,62 +43,121 @@ COPY . .
 RUN cargo build --release
 
 ###############################################################################
+# node-jepsen #################################################################
+###############################################################################
+# This is a arm64 build of jgoerzen/debian-base-minimal:bookworm pulled from Docker hub.
+FROM purujit/chardonnay:debian-base-minimal AS debian-addons
+FROM debian:bookworm AS node-jepsen
+
+COPY --from=debian-addons /usr/local/preinit/ /usr/local/preinit/
+COPY --from=debian-addons /usr/local/bin/ /usr/local/bin/
+COPY --from=debian-addons /usr/local/debian-base-setup/ /usr/local/debian-base-setup/
+
+RUN run-parts --exit-on-error --verbose /usr/local/debian-base-setup
+
+ENV container=docker
+STOPSIGNAL SIGRTMIN+3
+
+# Basic system stuff
+RUN apt-get -qy update && \
+    apt-get -qy install \
+        apt-transport-https
+
+# Install packages
+RUN apt-get -qy update && \
+    apt-get -qy install \
+        dos2unix openssh-server pwgen
+
+# When run, boot-debian-base will call this script, which does final
+# per-db-node setup stuff.
+ADD setup-jepsen.sh /usr/local/preinit/03-setup-jepsen
+RUN chmod +x /usr/local/preinit/03-setup-jepsen
+# Add a service for systemd to run on startup. See https://medium.com/@benmorel/creating-a-linux-service-with-systemd-611b5c8b91d6
+ADD chardonnay.service /etc/systemd/system/chardonnay.service
+ADD config_for_jepsen.json /etc/chardonnay/config.json
+RUN systemctl enable chardonnay.service
+
+# Configure SSHD
+RUN sed -i "s/#PermitRootLogin prohibit-password/PermitRootLogin yes/g" /etc/ssh/sshd_config
+
+# Enable SSH server
+ENV DEBBASE_SSH=enabled
+
+# Install Jepsen deps
+RUN apt-get -qy update && \
+    apt-get -qy install \
+        build-essential bzip2 ca-certificates curl dirmngr dnsutils faketime iproute2 iptables iputils-ping libzip4 logrotate lsb-release man man-db netcat-openbsd net-tools ntpdate psmisc python3 rsyslog sudo tar tcpdump unzip vim wget
+
+CMD ["/usr/local/bin/boot-debian-base"]
+EXPOSE 22
+
+###############################################################################
+# node-jepsen #################################################################
+###############################################################################
+FROM debian:bookworm AS node-release
+
+###############################################################################
+# node ########################################################################
+###############################################################################
+FROM node-${BUILD_TYPE} AS node
+
+###############################################################################
 # rangeserver #################################################################
 ###############################################################################
 
-FROM debian:bookworm AS rangeserver
+FROM node AS rangeserver
 
 # Copy the built executable from the builder stage
 COPY --from=builder /chardonnay_build/target/release/rangeserver /usr/bin/rangeserver
-
-# Set the entrypoint
-ENTRYPOINT ["rangeserver"]
+COPY --from=builder /chardonnay_build/target/release/rangeserver /usr/bin/chardonnay
 
 ###############################################################################
 # warden ######################################################################
 ###############################################################################
 
-FROM debian:bookworm AS warden
+FROM node AS warden
 
 # Copy the built executable from the builder stage
 COPY --from=builder /chardonnay_build/target/release/warden /usr/bin/warden
-
-# Set the entrypoint
-ENTRYPOINT ["warden"]
+COPY --from=builder /chardonnay_build/target/release/warden /usr/bin/chardonnay
 
 ###############################################################################
 # epoch_publisher #############################################################
 ###############################################################################
 
-FROM debian:bookworm AS epoch_publisher
+FROM node AS epoch_publisher
 
 # Copy the built executable from the builder stage
 COPY --from=builder /chardonnay_build/target/release/epoch_publisher /usr/bin/epoch_publisher
-
-# Set the entrypoint
-ENTRYPOINT ["epoch_publisher"]
-
+COPY --from=builder /chardonnay_build/target/release/epoch_publisher /usr/bin/chardonnay
 
 ###############################################################################
 # epoch_service ###############################################################
 ###############################################################################
 
-FROM debian:bookworm AS epoch
+FROM node AS epoch
 
 # Copy the built executable from the builder stage
 COPY --from=builder /chardonnay_build/target/release/epoch /usr/bin/epoch
-
-# Set the entrypoint
-ENTRYPOINT ["epoch"]
+COPY --from=builder /chardonnay_build/target/release/epoch /usr/bin/chardonnay
 
 ###############################################################################
 # universe ####################################################################
 ###############################################################################
 
-FROM debian:bookworm AS universe
+FROM node AS universe
 
 # Copy the built executable from the builder stage
 COPY --from=builder /chardonnay_build/target/release/universe /usr/bin/universe
+COPY --from=builder /chardonnay_build/target/release/universe /usr/bin/chardonnay
 
-# Set the entrypoint
-ENTRYPOINT ["universe"]
+###############################################################################
+# cassandra ###################################################################
+###############################################################################
+FROM cassandra:5.0 AS cassandra-client
+ADD schema/cassandra/chardonnay/keyspace.cql /etc/chardonnay/cassandra/keyspace.cql
+ADD schema/cassandra/chardonnay/schema.cql /etc/chardonnay/cassandra/schema.cql
+ADD create_schema.sh /usr/local/bin/create_schema.sh
+RUN chmod +x /usr/local/bin/create_schema.sh
+
+CMD ["/usr/local/bin/create_schema.sh"]
