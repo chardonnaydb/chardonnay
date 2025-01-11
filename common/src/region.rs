@@ -17,10 +17,10 @@ pub struct Region {
     pub name: String,
 }
 
-impl Into<proto::universe::Region> for Region {
-    fn into(self) -> proto::universe::Region {
+impl From<Region> for proto::universe::Region {
+    fn from(val: Region) -> Self {
         proto::universe::Region {
-            cloud: self.cloud.map(|c| match c {
+            cloud: val.cloud.map(|c| match c {
                 Cloud::Aws => {
                     proto::universe::region::Cloud::PublicCloud(proto::universe::Cloud::Aws.into())
                 }
@@ -32,7 +32,7 @@ impl Into<proto::universe::Region> for Region {
                 }
                 Cloud::Other(s) => proto::universe::region::Cloud::OtherCloud(s),
             }),
-            name: self.name,
+            name: val.name,
         }
     }
 }
@@ -88,10 +88,10 @@ impl FromStr for Region {
             }),
             2 => {
                 let cloud = parts[0].parse::<Cloud>()?;
-                return Ok(Region {
+                Ok(Region {
                     cloud: Some(cloud),
                     name: parts[1].to_string(),
-                });
+                })
             }
             _ => Err("invalid region string".to_string()),
         }
@@ -109,7 +109,7 @@ impl Serialize for Region {
 
 struct RegionStringVisitor;
 
-impl<'de> Visitor<'de> for RegionStringVisitor {
+impl Visitor<'_> for RegionStringVisitor {
     type Value = Region;
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str("a string representation of the region")
@@ -172,7 +172,7 @@ impl Serialize for Zone {
 
 struct ZoneStringVisitor;
 
-impl<'de> Visitor<'de> for ZoneStringVisitor {
+impl Visitor<'_> for ZoneStringVisitor {
     type Value = Zone;
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         formatter.write_str("a string representation of the zone")
