@@ -28,7 +28,7 @@ async fn test_create_and_list_keyspace_handlers() {
         .unwrap();
 
     // Create a keyspace
-    let keyspace_name = format!("test_keyspace_{}", Uuid::new_v4().to_string());
+    let keyspace_name = format!("test_keyspace_{}", Uuid::new_v4());
     let namespace = "test_namespace";
     let primary_zone = Some(proto::universe::Zone {
         region: Some(proto::universe::Region {
@@ -47,8 +47,8 @@ async fn test_create_and_list_keyspace_handlers() {
     let keyspace_req = CreateKeyspaceRequest {
         name: keyspace_name.to_string(),
         namespace: namespace.to_string(),
-        primary_zone: primary_zone,
-        base_key_ranges: base_key_ranges,
+        primary_zone,
+        base_key_ranges,
     };
     let keyspace_id = client
         .create_keyspace(keyspace_req)
