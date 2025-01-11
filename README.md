@@ -14,13 +14,28 @@ https://www.cidrdb.org/cidr2024/papers/p4-eldeeb_v2.pdf
 
 ## Building
 
-### Dependencies
+### Dev Dependencies
 
-Building Chardonnay requires:
+**Building Chardonnay requires:**
 
 - Rust toolchain
-- Flatbuf compiler aka `flatc` (On OSX, `brew install flatbuffers`)
-- Protocol Buffer compiler aka `protoc` (On OSX, `brew install protobuf`)
+- Flatbuf compiler aka `flatc`
+- Protocol Buffer compiler aka `protoc`
+
+On **macOS** you can install `flatc` and `protoc` using homebrew:
+```sh
+brew install flatbuffers
+brew install protobuf
+```
+
+On **Linux**, the versions of `flatc` and `protoc` provided by many distros are
+very old. Install them from source or their official release binaries instead.
+
+- https://github.com/google/flatbuffers/releases
+- https://github.com/protocolbuffers/protobuf/releases
+
+**Testing requires:**
+- Docker
 
 ### Build
 
@@ -38,11 +53,7 @@ To run the tests you need:
 
 - A Cassandra cluster running on port 9042 with the schema loaded.
 
-1. Install the necessary packages:
-
-   ```sh
-   brew install cassandra docker flatbuffers protobuf
-   ```
+1. Install the [dev dependencies](#dev-dependencies).
 
 1. Start the Cassandra server:
 
@@ -53,8 +64,8 @@ To run the tests you need:
 1. Load the Chardonnay schema:
 
    ```sh
-   cqlsh -f schema/cassandra/chardonnay/keyspace.cql
-   cqlsh -k chardonnay -f schema/cassandra/chardonnay/schema.cql
+   docker exec -i cassandra cqlsh < schema/cassandra/chardonnay/keyspace.cql
+   docker exec -i cassandra cqlsh -k chardonnay < schema/cassandra/chardonnay/schema.cql
    ```
 
 ### Run Tests
