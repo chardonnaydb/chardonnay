@@ -2,7 +2,6 @@ use std::{
     net::{ToSocketAddrs, UdpSocket},
     sync::Arc,
 };
-use tracing_subscriber;
 
 use common::{
     config::Config,
