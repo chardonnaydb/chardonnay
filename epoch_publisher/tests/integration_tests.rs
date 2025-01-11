@@ -79,7 +79,7 @@ async fn setup_server(
     epoch_address: SocketAddr,
 ) -> tokio::runtime::Runtime {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-    let fast_network_addr = server_socket.local_addr().unwrap().clone();
+    let fast_network_addr = server_socket.local_addr().unwrap();
     let fast_network = Arc::new(UdpFastNetwork::new(server_socket));
     let fast_network_clone = fast_network.clone();
     let runtime_clone = runtime.handle().clone();
@@ -155,7 +155,7 @@ async fn setup_client(
         get_server_host_info(server_address),
         cancellation_token.clone(),
     );
-    return (client, runtime, bg_runtime);
+    (client, runtime, bg_runtime)
 }
 
 async fn setup(initial_epoch: u64) -> TestContext {

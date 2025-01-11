@@ -28,6 +28,12 @@ pub struct MockEpoch {
     state: Arc<State>,
 }
 
+impl Default for MockEpoch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockEpoch {
     pub fn new() -> MockEpoch {
         let state = Arc::new(State {

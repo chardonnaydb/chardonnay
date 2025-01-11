@@ -164,7 +164,7 @@ impl Server {
         loop {
             let () = tokio::select! {
                 () = cancellation_token.cancelled() => {
-                    return ()
+                    return 
                 }
                 maybe_message = network_receiver.recv() => {
                     match maybe_message {
