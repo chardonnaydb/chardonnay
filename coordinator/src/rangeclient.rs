@@ -102,10 +102,7 @@ impl RangeClient {
         let existing_client = {
             let client = {
                 let range_clients = self.range_clients.read().await;
-                match range_clients.get(&host_info.identity) {
-                    None => None,
-                    Some(c) => Some(c.clone()),
-                }
+                range_clients.get(&host_info.identity).cloned()
             };
             match client {
                 None => None,

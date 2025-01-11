@@ -60,12 +60,9 @@ impl Transaction {
         // scenarios in which we write different keyspaces if a keyspace is deleted
         // and then another one is created with the same name within the span of the
         // transaction.
-        match self.resolved_keyspaces.get(keyspace) {
-            Some(k) => return Ok(*k),
-            None => (),
-        };
+        if let Some(k) = self.resolved_keyspaces.get(keyspace) { return Ok(*k) };
         // TODO(tamer): implement proper resolution from universe.
-        return Err(Error::KeyspaceDoesNotExist);
+        Err(Error::KeyspaceDoesNotExist)
     }
 
     async fn resolve_full_record_key(
@@ -76,7 +73,7 @@ impl Transaction {
         let keyspace_id = self.resolve_keyspace(keyspace).await?;
         let range_id = match self
             .range_assignment_oracle
-            .full_range_id_of_key(keyspace_id.clone(), key.clone())
+            .full_range_id_of_key(keyspace_id, key.clone())
             .await
         {
             None => return Err(Error::KeyspaceDoesNotExist),
@@ -97,16 +94,16 @@ impl Transaction {
         }
     }
 
-    fn get_participant_range<'a>(&'a mut self, range_id: FullRangeId) -> &'a mut ParticipantRange {
-        if !self.participant_ranges.contains_key(&range_id) {
-            let initial_range_data = ParticipantRange {
+    fn get_participant_range(&mut self, range_id: FullRangeId) -> &mut ParticipantRange {
+        self.participant_ranges.entry(range_id).or_insert_with(|| {
+            
+            ParticipantRange {
                 readset: HashSet::new(),
                 writeset: HashMap::new(),
                 deleteset: HashSet::new(),
                 leader_sequence_number: 0,
-            };
-            self.participant_ranges.insert(range_id, initial_range_data);
-        }
+            }
+        });
         self.participant_ranges.get_mut(&range_id).unwrap()
     }
 
@@ -115,10 +112,7 @@ impl Transaction {
         let full_record_key = self.resolve_full_record_key(keyspace, key.clone()).await?;
         let participant_range = self.get_participant_range(full_record_key.range_id);
         // Read-your-writes.
-        match participant_range.writeset.get(&key) {
-            Some(v) => return Ok(Some(v.clone())),
-            None => (),
-        }
+        if let Some(v) = participant_range.writeset.get(&key) { return Ok(Some(v.clone())) }
         if participant_range.deleteset.contains(&key) {
             return Ok(None);
         }
@@ -145,7 +139,7 @@ impl Transaction {
         }
         participant_range.readset.insert(key.clone());
 
-        let val = get_result.vals.get(0).unwrap().clone();
+        let val = get_result.vals.first().unwrap().clone();
         Ok(val)
     }
 
@@ -174,8 +168,8 @@ impl Transaction {
         // Record the abort.
         // TODO(tamer): handle errors here.
         let mut abort_join_set = JoinSet::new();
-        for (range_id, _) in &self.participant_ranges {
-            let range_id = range_id.clone();
+        for range_id in self.participant_ranges.keys() {
+            let range_id = *range_id;
             let range_client = self.range_client.clone();
             let transaction_info = self.transaction_info.clone();
             abort_join_set.spawn_on(
@@ -207,7 +201,7 @@ impl Transaction {
             State::Aborted => return Ok(()),
             _ => {
                 self.check_still_running()?;
-                ()
+                
             }
         };
         self.record_abort().await
@@ -223,7 +217,7 @@ impl Transaction {
         self.state = State::Preparing;
         let mut prepare_join_set = JoinSet::new();
         for (range_id, info) in &self.participant_ranges {
-            let range_id = range_id.clone();
+            let range_id = *range_id;
             let range_client = self.range_client.clone();
             let transaction_info = self.transaction_info.clone();
             let has_reads = !info.readset.is_empty();
@@ -235,7 +229,7 @@ impl Transaction {
                     val: v.clone(),
                 })
                 .collect();
-            let deletes: Vec<Bytes> = info.deleteset.iter().map(|k| k.clone()).collect();
+            let deletes: Vec<Bytes> = info.deleteset.iter().cloned().collect();
             prepare_join_set.spawn_on(
                 async move {
                     range_client
@@ -302,8 +296,8 @@ impl Transaction {
         self.state = State::Committed;
         // notify participants so they can quickly release locks.
         let mut commit_join_set = JoinSet::new();
-        for (range_id, _) in &self.participant_ranges {
-            let range_id = range_id.clone();
+        for range_id in self.participant_ranges.keys() {
+            let range_id = *range_id;
             let range_client = self.range_client.clone();
             let transaction_info = self.transaction_info.clone();
             commit_join_set.spawn_on(
