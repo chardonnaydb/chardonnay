@@ -66,10 +66,7 @@ impl PublisherSetUpdater {
                 }
                 Ok(res) => res,
             };
-            match res {
-                Err(_) => continue,
-                Ok(_) => (),
-            };
+            if let Err(_) = res { continue };
             num_success += 1;
             if num_success >= self.publisher_majority_count {
                 return Ok(());
