@@ -8,3 +8,7 @@ flatc-rust = "*"
 
 [dependencies]
 flatbuffers = "24.3.25"
+
+[lints.rust]
+# The generated flatbuffers code triggers a bunch of benign and unactionable compiler warnings.
+warnings = "allow"
