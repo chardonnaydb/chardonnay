@@ -192,7 +192,7 @@ impl Transaction {
                 panic!("transaction committed without coordinator consent!")
             }
         }
-        while let Some(_) = abort_join_set.join_next().await {}
+        while abort_join_set.join_next().await.is_some() {}
         Ok(())
     }
 
@@ -309,7 +309,7 @@ impl Transaction {
                 &self.runtime,
             );
         }
-        while let Some(_) = commit_join_set.join_next().await {}
+        while commit_join_set.join_next().await.is_some() {}
         Ok(())
     }
 
