@@ -122,7 +122,7 @@ impl SerializedKeyspaceInfo {
     }
 
     /// Convert into a KeyspaceInfo proto.
-    fn to_keyspace_info(self) -> KeyspaceInfo {
+    fn into_keyspace_info(self) -> KeyspaceInfo {
         let primary_zone = Zone {
             name: self.primary_zone.name,
             region: self
@@ -238,7 +238,7 @@ impl Storage for Cassandra {
             .map(|row| {
                 let serialized = row.into_typed::<SerializedKeyspaceInfo>();
                 serialized
-                    .map(SerializedKeyspaceInfo::to_keyspace_info)
+                    .map(SerializedKeyspaceInfo::into_keyspace_info)
                     .map_err(|e| Error::InternalError(Some(Arc::new(e))))
             })
             .collect::<Result<Vec<KeyspaceInfo>, Error>>()?;
@@ -324,7 +324,7 @@ mod tests {
                 })
                 .collect(),
         );
-        let roundtrip = serialized.to_keyspace_info();
+        let roundtrip = serialized.into_keyspace_info();
         assert!(original == roundtrip);
     }
 
