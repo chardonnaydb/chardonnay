@@ -13,7 +13,7 @@ pub enum Error {
     #[error("Timeout")]
     Timeout,
     #[error("WAL Layer error: {0}")]
-    InternalError(Arc<dyn std::error::Error + Send + Sync>),
+    Internal(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 pub trait Iterator<'a> {
@@ -38,5 +38,5 @@ pub trait Wal: Send + Sync + 'static {
     async fn append_abort(&self, entry: AbortRequest<'_>) -> Result<(), Error>;
     async fn trim_before_offset(&self, offset: u64) -> Result<(), Error>;
 
-    fn iterator<'a>(&'a self) -> impl Iterator + Send;
+    fn iterator(&self) -> impl Iterator + Send;
 }

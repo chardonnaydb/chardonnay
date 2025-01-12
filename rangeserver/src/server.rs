@@ -74,8 +74,8 @@ where
         })?;
 
         let full_range_id = FullRangeId {
-            keyspace_id: keyspace_id,
-            range_id: range_id,
+            keyspace_id,
+            range_id,
         };
 
         let range_manager = self
@@ -87,7 +87,7 @@ where
         match range_manager.prefetch(transaction_id, key).await {
             Ok(_) => {
                 let reply = PrefetchResponse {
-                    status: format!("Prefetch request processed successfully"),
+                    status: "Prefetch request processed successfully".to_string(),
                 };
                 Ok(Response::new(reply)) // Send back response
             }
@@ -141,13 +141,12 @@ where
 
     async fn maybe_start_transaction(&self, id: Uuid, info: Option<FlatbufTransactionInfo<'_>>) {
         let info = match info {
-            None => return (),
+            None => return,
             Some(info) => info,
         };
         let mut tx_table = self.transaction_table.write().await;
-        match (*tx_table).get(&id) {
-            Some(_) => return (),
-            None => (),
+        if (*tx_table).contains_key(&id) {
+            return;
         };
         let overall_timeout = core::time::Duration::from_micros(info.overall_timeout_us() as u64);
         let tx_info = Arc::new(TransactionInfo {
@@ -166,7 +165,7 @@ where
         }
     }
 
-    async fn remove_transaction(&self, id: Uuid) -> () {
+    async fn remove_transaction(&self, id: Uuid) {
         let mut tx_table = self.transaction_table.write().await;
         (*tx_table).remove(&id);
     }
@@ -189,12 +188,9 @@ where
         {
             // Fast path when range has already been loaded.
             let range_table = self.loaded_ranges.read().await;
-            match (*range_table).get(&id.range_id) {
-                Some(r) => {
-                    r.load().await?;
-                    return Ok(r.clone());
-                }
-                None => (),
+            if let Some(r) = (*range_table).get(&id.range_id) {
+                r.load().await?;
+                return Ok(r.clone());
             }
         };
 
@@ -211,7 +207,7 @@ where
                 }
                 None => {
                     let rm = RangeManager::new(
-                        id.clone(),
+                        *id,
                         self.config.clone(),
                         self.storage.clone(),
                         self.epoch_supplier.clone(),
@@ -292,9 +288,8 @@ where
             None => return Err(Error::InvalidRequestFormat),
             Some(id) => util::flatbuf::deserialize_uuid(id),
         };
-        match request.request_id() {
-            None => return Err(Error::InvalidRequestFormat),
-            Some(_) => (),
+        if request.request_id().is_none() {
+            return Err(Error::InvalidRequestFormat);
         }
         self.maybe_start_transaction(transaction_id, request.transaction_info())
             .await;
@@ -360,15 +355,12 @@ where
                         for (k, v) in reads {
                             let k = Some(fbb.create_vector(k.to_vec().as_slice()));
                             let key = Key::create(&mut fbb, &KeyArgs { k });
-                            let value = match v {
-                                None => None,
-                                Some(v) => Some(fbb.create_vector(v.to_vec().as_slice())),
-                            };
+                            let value = v.map(|v| fbb.create_vector(v.to_vec().as_slice()));
                             records_vector.push(Record::create(
                                 &mut fbb,
                                 &RecordArgs {
                                     key: Some(key),
-                                    value: value,
+                                    value,
                                 },
                             ));
                         }
@@ -602,8 +594,7 @@ where
                         Some(update) => {
                             match &update {
                                 crate::warden_handler::WardenUpdate::LoadRange(id) => {
-
-                                    let id = id.clone();
+                                    let id = *id;
                                     let server = server.clone();
                                     tokio::spawn (async move
                                         {
@@ -672,7 +663,7 @@ where
         loop {
             let () = tokio::select! {
                 () = cancellation_token.cancelled() => {
-                    return ()
+                    return
                 }
                 maybe_message = network_receiver.recv() => {
                     match maybe_message {

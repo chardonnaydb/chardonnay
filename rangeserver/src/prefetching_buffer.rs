@@ -48,12 +48,12 @@ impl PrefetchingBuffer {
         if let Some(KeyState::Fetched) = cur_state.key_state.get(&key.clone()) {
             let val = cur_state.prefetch_store.get(&key);
             if let Some(value) = val {
-                return Ok(Some(value.clone()));
+                Ok(Some(value.clone()))
             } else {
-                return Err(());
+                Err(())
             }
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 
@@ -62,7 +62,8 @@ impl PrefetchingBuffer {
     /// which is either Requested, Loading, or Fetched. If Loading, the
     /// process waits for another transaction to complete the fetch
     pub async fn process_prefetch_request(&self, transaction_id: Uuid, key: Bytes) -> KeyState {
-        let mut cur_state = self.state.lock().await;
+        let mut state_guard = self.state.lock().await;
+        let cur_state = &mut *state_guard;
         // Log that this transaction is requesting this key
         self.add_to_transaction_keys(&mut cur_state.transaction_keys, transaction_id, key.clone());
         // Log that this key is being requested by this transaction
@@ -70,46 +71,44 @@ impl PrefetchingBuffer {
 
         // Check if key has already been requested by another transaction
         // If not, add to key_state with fetch state Requested
-        if !cur_state.key_state.contains_key(&key.clone()) {
+        cur_state.key_state.entry(key.clone()).or_insert_with(|| {
             cur_state.fetch_sequence_number += 1;
             let sequence_number = cur_state.fetch_sequence_number;
-            cur_state
-                .key_state
-                .insert(key.clone(), KeyState::Requested(sequence_number));
-        }
+            KeyState::Requested(sequence_number)
+        });
 
         let key_state = cur_state.key_state.get(&key).cloned().unwrap();
         match key_state {
-            KeyState::Fetched => return KeyState::Fetched,
+            KeyState::Fetched => KeyState::Fetched,
             KeyState::Loading(n) => {
-                drop(cur_state);
+                drop(state_guard);
                 // wait for fetch to complete
                 let key_state_watcher = self.state.lock().await.key_state_watcher.clone();
                 if let Some(receiver) = key_state_watcher.get(&key) {
                     let mut receiver = receiver.clone();
                     while receiver.changed().await.is_ok() {
-                        if *receiver.borrow() == KeyState::Fetched {
-                            return KeyState::Fetched;
+                        return if *receiver.borrow() == KeyState::Fetched {
+                            KeyState::Fetched
                         } else {
                             // The fetch failed and was returned to KeyState::Requested
                             // Return KeyState::Requested so that the caller can try again
-                            let mut cur_state = self.state.lock().await;
-                            self.change_keystate_to_loading(key, n, &mut cur_state)
+                            let mut state_guard = self.state.lock().await;
+                            self.change_keystate_to_loading(key, n, &mut state_guard)
                                 .await
                                 .unwrap();
-                            return KeyState::Requested(n);
-                        }
+                            KeyState::Requested(n)
+                        };
                     }
                 }
-                return KeyState::Loading(n);
+                KeyState::Loading(n)
             }
             KeyState::Requested(n) => {
                 // Update keystate to loading while holding the lock to avoid race condition
                 // let mut cur_state = self.state.lock().await;
-                self.change_keystate_to_loading(key, n, &mut cur_state)
+                self.change_keystate_to_loading(key, n, cur_state)
                     .await
                     .unwrap();
-                return KeyState::Requested(n);
+                KeyState::Requested(n)
             }
         }
     }
@@ -186,10 +185,10 @@ impl PrefetchingBuffer {
                         state.key_state_sender.insert(key.clone(), tx);
                         state.key_state_watcher.insert(key.clone(), rx);
                     }
-                    return Ok(());
+                    Ok(())
                 }
                 // We shouldn't be initiating fetch if the key was never requested in the first place
-                None => return Err(()),
+                None => Err(()),
             }
         }
     }

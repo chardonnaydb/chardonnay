@@ -1,17 +1,12 @@
 use crate::cache::{Cache, CacheOptions, Error, GCCallback};
 use bytes::Bytes;
 use core::ops::Bound::Included;
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 use skiplist::OrderedSkipList;
 use std::cmp::max;
 use std::cmp::min;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::mem;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::thread;
 use std::vec::Vec;
 use tokio::sync::RwLock;
 
@@ -98,8 +93,7 @@ impl MemTableDB {
     ) -> Result<(), Error> {
         // sanity checks
         assert!(
-            self.mut_memtable_idx >= 0
-                && self.mut_memtable_idx < self.cache_options.num_write_buffers,
+            self.mut_memtable_idx < self.cache_options.num_write_buffers,
             "mut_memtable_idx is out of range ({})",
             self.mut_memtable_idx
         );
@@ -111,7 +105,7 @@ impl MemTableDB {
                 val_len = v.len();
                 val_match = v;
             }
-            None => assert!(deleted == true, "upsert api called without value argument"),
+            None => assert!(deleted, "upsert api called without value argument"),
         }
 
         let entry_size: u64 = key.len() as u64
@@ -125,8 +119,9 @@ impl MemTableDB {
             deleted,
         };
 
-        assert!(
-            self.memtables[self.mut_memtable_idx].status == MemTableStatus::MUTABLE,
+        assert_eq!(
+            self.memtables[self.mut_memtable_idx].status,
+            MemTableStatus::MUTABLE,
             "active memtable is not mutable ({}) ({:?})",
             self.mut_memtable_idx,
             self.memtables[self.mut_memtable_idx].status
@@ -227,8 +222,7 @@ impl Cache for MemTableDB {
     ) -> Result<(Option<Bytes>, u64), Error> {
         // sanity checks
         assert!(
-            self.mut_memtable_idx >= 0
-                && self.mut_memtable_idx < self.cache_options.num_write_buffers,
+            self.mut_memtable_idx < self.cache_options.num_write_buffers,
             "mut_memtable_idx is out of range ({})",
             self.mut_memtable_idx
         );
@@ -277,14 +271,13 @@ impl Cache for MemTableDB {
                 }
             }
         }
-        return Ok((None, epoch.unwrap_or(0)));
+        Ok((None, epoch.unwrap_or(0)))
     }
 
     async fn clear(&mut self, epoch: u64) -> Result<(), Error> {
         // sanity checks
         assert!(
-            self.mut_memtable_idx >= 0
-                && self.mut_memtable_idx < self.cache_options.num_write_buffers,
+            self.mut_memtable_idx < self.cache_options.num_write_buffers,
             "mut_memtable_idx is out of range ({})",
             self.mut_memtable_idx
         );
@@ -332,7 +325,7 @@ pub mod for_testing {
     pub async fn init() -> TestContext {
         let mt_db = MemTableDB::create_test().await;
 
-        TestContext { mt_db: mt_db }
+        TestContext { mt_db }
     }
 }
 
@@ -340,6 +333,10 @@ pub mod for_testing {
 pub mod tests {
     use super::*;
     use for_testing::*;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
+    use std::collections::HashMap;
+    use std::sync::Mutex;
 
     async fn fill(mt_db: &Arc<RwLock<MemTableDB>>, num_keys: u64, clear: bool) {
         let mut data = vec![0u8; 10];
@@ -356,30 +353,29 @@ pub mod tests {
             );
             {
                 // let mut mt_db_wg = mt_db.write().await;
-                match mt_db
+                if let Err(e) = mt_db
                     .write()
                     .await
                     .upsert(key.clone(), value.clone(), epoch)
                     .await
                 {
-                    Err(e) => assert!(false, "insert result not ok! {}", e),
-                    Ok(_) => {}
+                    assert!(false, "insert result not ok! {}", e)
                 }
             }
             {
                 println!("FILL: get key {:?} epoch {:?}", key, epoch);
                 let (val, ep) = mt_db.read().await.get(key, None).await.unwrap();
-                assert!(
-                    val.clone().unwrap() == value,
+                assert_eq!(
+                    val.clone().unwrap(),
+                    value,
                     "get after insert returned wrong value! expected {:?} got {:?}",
                     value,
                     val.unwrap()
                 );
-                assert!(
-                    ep == epoch,
+                assert_eq!(
+                    ep, epoch,
                     "get after insert returned wrong epoch! expected {:?} got {:?}",
-                    epoch,
-                    ep
+                    epoch, ep
                 );
             }
 
@@ -421,17 +417,17 @@ pub mod tests {
             epoch = i;
 
             let (val, ep) = mt_db.read().await.get(key, Some(epoch)).await.unwrap();
-            assert!(
-                val.clone().unwrap() == value,
+            assert_eq!(
+                val.clone().unwrap(),
+                value,
                 "get after insert returned wrong value! expected {:?} got {:?}",
                 value,
                 val
             );
-            assert!(
-                ep == epoch,
+            assert_eq!(
+                ep, epoch,
                 "get after insert returned wrong epoch! expected {:?} got {:?}",
-                epoch,
-                ep
+                epoch, ep
             );
         }
     }
@@ -462,14 +458,13 @@ pub mod tests {
         let epoch = num_keys;
         let value = Bytes::from(data.clone());
 
-        match mt_db
+        if let Err(e) = mt_db
             .write()
             .await
             .upsert(key.clone(), value.clone(), epoch)
             .await
         {
-            Err(e) => assert!(false, "insert returned error! {}", e),
-            Ok(_) => {}
+            assert!(false, "insert returned error! {}", e)
         }
 
         // read older epoch
@@ -479,32 +474,32 @@ pub mod tests {
             .get(key.clone(), Some(epoch - 1))
             .await
             .unwrap();
-        assert!(
-            val.clone().unwrap() != value,
+        assert_ne!(
+            val.clone().unwrap(),
+            value,
             "get after insert returned wrong value! expected {:?} got {:?}",
             value,
             val
         );
-        assert!(
-            ep == 1,
+        assert_eq!(
+            ep, 1,
             "get after insert returned wrong epoch! expected {:?} got {:?}",
-            epoch,
-            ep
+            epoch, ep
         );
 
         // read latest
         let (val, ep) = mt_db.read().await.get(key.clone(), None).await.unwrap();
-        assert!(
-            val.clone().unwrap() == value,
+        assert_eq!(
+            val.clone().unwrap(),
+            value,
             "get after insert returned wrong value! expected {:?} got {:?}",
             value,
             val
         );
-        assert!(
-            ep == epoch,
+        assert_eq!(
+            ep, epoch,
             "get after insert returned wrong epoch! expected {:?} got {:?}",
-            epoch,
-            ep
+            epoch, ep
         );
 
         // read future
@@ -514,17 +509,17 @@ pub mod tests {
             .get(key.clone(), Some(epoch + 1))
             .await
             .unwrap();
-        assert!(
-            val.clone().unwrap() == value,
+        assert_eq!(
+            val.clone().unwrap(),
+            value,
             "get after insert returned wrong value! expected {:?} got {:?}",
             value,
             val
         );
-        assert!(
-            ep == epoch,
+        assert_eq!(
+            ep, epoch,
             "get after insert returned wrong epoch! expected {:?} got {:?}",
-            epoch,
-            ep
+            epoch, ep
         );
     }
 
@@ -555,17 +550,17 @@ pub mod tests {
             .get(key.clone(), Some(epoch))
             .await
             .unwrap();
-        assert!(
-            val.clone().unwrap() == value,
+        assert_eq!(
+            val.clone().unwrap(),
+            value,
             "get after insert returned wrong value! expected {:?} got {:?}",
             value,
             val
         );
-        assert!(
-            ep == epoch,
+        assert_eq!(
+            ep, epoch,
             "get after insert returned wrong epoch! expected {:?} got {:?}",
-            epoch,
-            ep
+            epoch, ep
         );
 
         // read latest
@@ -575,17 +570,17 @@ pub mod tests {
             .get(key.clone(), Some(num_keys))
             .await
             .unwrap();
-        assert!(
-            val.clone().unwrap() == value,
+        assert_eq!(
+            val.clone().unwrap(),
+            value,
             "get after insert returned wrong value! expected {:?} got {:?}",
             value,
             val
         );
-        assert!(
-            ep == epoch,
+        assert_eq!(
+            ep, epoch,
             "get after insert returned wrong epoch! expected {:?} got {:?}",
-            epoch,
-            ep
+            epoch, ep
         );
     }
 
@@ -615,9 +610,8 @@ pub mod tests {
         let value = Bytes::from(data.clone());
         let epoch = num_keys;
 
-        match mt_db.write().await.delete(key.clone(), epoch).await {
-            Err(e) => assert!(false, "delete returned error! {}", e),
-            Ok(_) => {}
+        if let Err(e) = mt_db.write().await.delete(key.clone(), epoch).await {
+            assert!(false, "delete returned error! {}", e)
         }
 
         // // read older epoch
@@ -627,22 +621,22 @@ pub mod tests {
             .get(key.clone(), Some(epoch - 1))
             .await
             .unwrap();
-        assert!(
-            val.clone().unwrap() == value,
+        assert_eq!(
+            val.clone().unwrap(),
+            value,
             "get after insert returned wrong value! expected {:?} got {:?}",
             value,
             val
         );
-        assert!(
-            ep == 1,
+        assert_eq!(
+            ep, 1,
             "get after insert returned wrong epoch! expected {:?} got {:?}",
-            epoch,
-            ep
+            epoch, ep
         );
 
         // read latest
         let (val, ep) = mt_db.read().await.get(key.clone(), None).await.unwrap();
-        assert!(val.is_none() == true, "get after delete returned a value!");
+        assert_eq!(val.is_none(), true, "get after delete returned a value!");
     }
 
     fn gc_callback(epoch: u64) {
@@ -670,7 +664,7 @@ pub mod tests {
             .get(Bytes::from(format!("k{}", 0)), None)
             .await
             .unwrap();
-        assert!(val.is_none() == true, "key should not be found!");
+        assert!(val.is_none(), "key should not be found!");
     }
 
     #[tokio::test]
@@ -716,14 +710,13 @@ pub mod tests {
             match td.values.get(&key) {
                 None => {}
                 Some(v) => {
-                    match mt_db
+                    if let Err(e) = mt_db
                         .write()
                         .await
                         .upsert(key.clone(), v[epoch].clone(), epoch as u64)
                         .await
                     {
-                        Err(e) => assert!(false, "insert result not ok! {}", e),
-                        Ok(_) => {}
+                        panic!("insert result not ok! {}", e)
                     }
                     // println!("Key {:?}, value {:?}", key, v)
                 }
@@ -749,14 +742,13 @@ pub mod tests {
                     let v = wr_td.values.get(&key).unwrap();
                     // let mut mt_db_wg = mt_db_wr.write().unwrap();
                     // let mut mt_db_wg = mt_db_wr.write();
-                    match mt_db_wr
+                    if let Err(e) = mt_db_wr
                         .write()
                         .await
                         .upsert(key.clone(), v[ep].clone(), ep as u64)
                         .await
                     {
-                        Err(e) => assert!(false, "insert result not ok! {}", e),
-                        Ok(_) => {}
+                        panic!("insert result not ok! {}", e)
                     }
                     // drop(mt_db_wg);
                 }
@@ -794,8 +786,9 @@ pub mod tests {
                                 "Get result requested epoch {}, get_epoch {}",
                                 rand_epoch, ep
                             );
-                            assert!(
-                                val.clone().unwrap() == v[ep as usize],
+                            assert_eq!(
+                                val.clone().unwrap(),
+                                v[ep as usize],
                                 "get returned wrong value! expected {:?} got {:?}",
                                 v[ep as usize],
                                 val

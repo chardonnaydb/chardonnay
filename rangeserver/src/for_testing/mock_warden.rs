@@ -34,6 +34,12 @@ fn range_id_proto(range: &FullRangeId) -> proto::warden::RangeId {
     }
 }
 
+impl Default for MockWarden {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockWarden {
     pub fn new() -> MockWarden {
         let warden_state = Arc::new(WardenState {

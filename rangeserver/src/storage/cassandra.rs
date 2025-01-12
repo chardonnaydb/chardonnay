@@ -40,15 +40,15 @@ struct CqlVal {
 
 impl CqlRangeLease {
     fn key_range(&self) -> KeyRange {
-        let lower_bound_inclusive = match &self.key_lower_bound_inclusive {
-            None => None,
-            Some(bytes) => Some(Bytes::copy_from_slice(&bytes)),
-        };
+        let lower_bound_inclusive = self
+            .key_lower_bound_inclusive
+            .as_ref()
+            .map(|bytes| Bytes::copy_from_slice(bytes));
 
-        let upper_bound_exclusive = match &self.key_upper_bound_exclusive {
-            None => None,
-            Some(bytes) => Some(Bytes::copy_from_slice(&bytes)),
-        };
+        let upper_bound_exclusive = self
+            .key_upper_bound_exclusive
+            .as_ref()
+            .map(|bytes| Bytes::copy_from_slice(bytes));
         KeyRange {
             lower_bound_inclusive,
             upper_bound_exclusive,
@@ -117,7 +117,7 @@ impl Cassandra {
             .map_err(scylla_query_error_to_persistence_error)?
             .rows;
 
-        let res = match rows {
+        match rows {
             None => Err(Error::RangeDoesNotExist),
             Some(mut rows) => {
                 if rows.len() != 1 {
@@ -128,8 +128,7 @@ impl Cassandra {
                     Ok(row)
                 }
             }
-        };
-        res
+        }
     }
 }
 
@@ -265,7 +264,7 @@ impl Storage for Cassandra {
         match rows {
             None => Ok(None),
             Some(mut rows) => {
-                if rows.len() == 0 {
+                if rows.is_empty() {
                     Ok(None)
                 } else if rows.len() != 1 {
                     panic!("found multiple rows with the same id!");
