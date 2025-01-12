@@ -86,7 +86,7 @@ impl PrefetchingBuffer {
                 let key_state_watcher = self.state.lock().await.key_state_watcher.clone();
                 if let Some(receiver) = key_state_watcher.get(&key) {
                     let mut receiver = receiver.clone();
-                    while receiver.changed().await.is_ok() {
+                    if receiver.changed().await.is_ok() {
                         return if *receiver.borrow() == KeyState::Fetched {
                             KeyState::Fetched
                         } else {
