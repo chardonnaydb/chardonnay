@@ -68,9 +68,9 @@ impl Trait for UdpFastNetwork {
                     }
                     Some(s) => s.send(bytes).unwrap(),
                 };
-                return true;
+                true
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => return false,
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => false,
             Err(e) => panic!("UdpFastNetwork encountered IO error: {e}"),
         }
     }

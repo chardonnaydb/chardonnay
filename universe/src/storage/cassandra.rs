@@ -91,9 +91,9 @@ impl SerializedKeyspaceInfo {
         base_key_range_requests: Vec<KeyRange>,
     ) -> Self {
         SerializedKeyspaceInfo {
-            keyspace_id: keyspace_id,
-            name: name,
-            namespace: namespace,
+            keyspace_id,
+            name,
+            namespace,
             primary_zone: SerializedZone {
                 name: primary_zone.name,
                 region: primary_zone.region.map(|region| SerializedRegion {
@@ -122,7 +122,7 @@ impl SerializedKeyspaceInfo {
     }
 
     /// Convert into a KeyspaceInfo proto.
-    fn to_keyspace_info(self) -> KeyspaceInfo {
+    fn into_keyspace_info(self) -> KeyspaceInfo {
         let primary_zone = Zone {
             name: self.primary_zone.name,
             region: self
@@ -207,7 +207,7 @@ impl Storage for Cassandra {
         println!("Query result: {:?}", query_result);
         // If the first row of the result is true, our insert was successful.
         // Else, insert failed, thus the keyspace already exists.
-        if let Some(Some(insert_succeeded)) = query_result.0.first_row().unwrap().columns.get(0) {
+        if let Some(Some(insert_succeeded)) = query_result.0.first_row().unwrap().columns.first() {
             if !insert_succeeded.as_boolean().unwrap() {
                 return Err(Error::KeyspaceAlreadyExists);
             }
@@ -238,7 +238,7 @@ impl Storage for Cassandra {
             .map(|row| {
                 let serialized = row.into_typed::<SerializedKeyspaceInfo>();
                 serialized
-                    .map(SerializedKeyspaceInfo::to_keyspace_info)
+                    .map(SerializedKeyspaceInfo::into_keyspace_info)
                     .map_err(|e| Error::InternalError(Some(Arc::new(e))))
             })
             .collect::<Result<Vec<KeyspaceInfo>, Error>>()?;
@@ -252,8 +252,7 @@ impl Storage for Cassandra {
                     keyspace
                         .primary_zone
                         .as_ref()
-                        .and_then(|zone| zone.region.as_ref())
-                        .map_or(false, |keyspace_region| keyspace_region == &filter_region)
+                        .and_then(|zone| zone.region.as_ref()) == Some(&filter_region)
                 })
                 .collect()
         } else {
@@ -278,8 +277,8 @@ mod tests {
     ) -> KeyspaceInfo {
         KeyspaceInfo {
             keyspace_id: Uuid::new_v4().to_string(),
-            name: name,
-            namespace: namespace,
+            name,
+            namespace,
             primary_zone: Some(Zone {
                 region: Some(Region {
                     name: region_name,
@@ -324,8 +323,8 @@ mod tests {
                 })
                 .collect(),
         );
-        let roundtrip = serialized.to_keyspace_info();
-        assert_eq!(original == roundtrip, true);
+        let roundtrip = serialized.into_keyspace_info();
+        assert!(original == roundtrip);
     }
 
     #[tokio::test]
@@ -380,7 +379,7 @@ mod tests {
                 .find(|k| k.keyspace_id == keyspace_id)
                 .unwrap_or_else(|| panic!("Keyspace with id {} was not found", keyspace_id));
 
-            assert_eq!(original == roundtrip, true);
+            assert!(original == roundtrip);
         }
 
         let this_region_keyspace_id = keyspace_ids[0].clone();

@@ -2,7 +2,6 @@ use std::{net::ToSocketAddrs, sync::Arc};
 
 use common::config::Config;
 use std::net::UdpSocket;
-use tracing_subscriber;
 
 use common::{
     network::{fast_network::FastNetwork, for_testing::udp_fast_network::UdpFastNetwork},

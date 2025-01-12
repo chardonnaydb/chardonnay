@@ -59,7 +59,7 @@ where
         let publisher_sets: Vec<Arc<PublisherSetUpdater>> = config
             .regions
             .values()
-            .map(|rc| {
+            .flat_map(|rc| {
                 let updaters: Vec<Arc<PublisherSetUpdater>> = rc
                     .epoch_publishers
                     .iter()
@@ -67,7 +67,6 @@ where
                     .collect();
                 updaters
             })
-            .flatten()
             .collect();
         Server {
             storage,
@@ -107,7 +106,7 @@ where
             'outer: loop {
                 if cancellation_token.is_cancelled() {
                     info!("Update loop cancelled, exiting.");
-                    return ();
+                    return ;
                 }
                 info!("Starting an update epoch iteration.");
                 let read_result = server.storage.read_latest().await;
@@ -138,12 +137,9 @@ where
                         }
                         Ok(res) => res,
                     };
-                    match res {
-                        Err(e) => {
-                            error!("Updating a publisher set failed, abandoning epoch update. Error: {}", e);
-                            continue 'outer;
-                        }
-                        Ok(()) => (),
+                    if let Err(e) = res {
+                        error!("Updating a publisher set failed, abandoning epoch update. Error: {}", e);
+                        continue 'outer;
                     };
                 }
                 // If we got here then we updated all the broadcaster sets, we can advance the epoch.

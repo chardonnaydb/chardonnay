@@ -74,7 +74,8 @@ impl Storage for Cassandra {
             .map_err(scylla_query_error_to_storage_error)?
             .rows;
 
-        let res = match rows {
+        
+        match rows {
             None => Err(Error::EpochNotInitialized),
             Some(mut rows) => {
                 if rows.len() != 1 {
@@ -85,8 +86,7 @@ impl Storage for Cassandra {
                     Ok(epoch as u64)
                 }
             }
-        };
-        res
+        }
     }
 
     async fn conditional_update(&self, new_epoch: u64, current_epoch: u64) -> Result<(), Error> {

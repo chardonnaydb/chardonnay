@@ -1,4 +1,4 @@
-use proto::universe::{KeyRange, KeyRangeRequest, KeyspaceInfo, Zone};
+use proto::universe::{KeyRange, KeyspaceInfo, Zone};
 use std::sync::Arc;
 use thiserror::Error;
 

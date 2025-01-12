@@ -124,7 +124,7 @@ impl EpochPublisherClient {
     fn create_and_serialize_read_epoch_request(&self, req_id: &Uuid) -> Bytes {
         // TODO: too much copying :(
         let mut fbb = FlatBufferBuilder::new();
-        let request_id = Some(Uuidu128::create(&mut fbb, &serialize_uuid(req_id.clone())));
+        let request_id = Some(Uuidu128::create(&mut fbb, &serialize_uuid(*req_id)));
         let fbb_root = ReadEpochRequest::create(&mut fbb, &ReadEpochRequestArgs { request_id });
         fbb.finish(fbb_root, None);
         let get_request_bytes = Bytes::copy_from_slice(fbb.finished_data());
@@ -141,7 +141,7 @@ impl EpochPublisherClient {
         loop {
             let () = tokio::select! {
                 () = cancellation_token.cancelled() => {
-                    return ()
+                    return 
                 }
                 maybe_message = network_receiver.recv() => {
                     match maybe_message {

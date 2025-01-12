@@ -20,10 +20,6 @@ pub struct HostPort {
 }
 
 impl HostPort {
-    pub fn to_string(&self) -> String {
-        format!("{}:{}", self.host, self.port)
-    }
-
     pub fn from_socket_addr(addr: std::net::SocketAddr) -> Self {
         HostPort {
             host: addr.ip().to_string(),
