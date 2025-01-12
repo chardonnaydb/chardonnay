@@ -85,7 +85,7 @@ impl Server {
             ),
             Some(request_id) => {
                 let epoch = self.epoch.load(SeqCst);
-                let status = if epoch <= 0 {
+                let status = if epoch == 0 {
                     Status::EpochUnknown
                 } else {
                     Status::Ok
@@ -164,7 +164,7 @@ impl Server {
         loop {
             let () = tokio::select! {
                 () = cancellation_token.cancelled() => {
-                    return 
+                    return
                 }
                 maybe_message = network_receiver.recv() => {
                     match maybe_message {
