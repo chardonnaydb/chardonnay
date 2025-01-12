@@ -34,6 +34,20 @@ pub struct InMemIterator<'a> {
 }
 
 impl<'a> Iterator<'a> for InMemIterator<'a> {
+    async fn next(&mut self) -> Option<LogEntry<'_>> {
+        let wal = self.wal.state.lock().await;
+        let ind = (wal.first_offset.unwrap_or(0) + self.index) as usize;
+        if ind >= wal.entries.len() {
+            return None;
+        }
+        self.current_entry = Some(wal.entries.get(ind).unwrap().clone());
+
+        self.index += 1;
+        self.current_entry
+            .as_ref()
+            .map(|e| root_as_log_entry(e).unwrap())
+    }
+
     async fn next_offset(&self) -> Result<u64, Error> {
         let wal = self.wal.state.lock().await;
         match wal.first_offset {
@@ -44,20 +58,11 @@ impl<'a> Iterator<'a> for InMemIterator<'a> {
             }
         }
     }
+}
 
-    async fn next(&mut self) -> Option<LogEntry<'_>> {
-        let wal = self.wal.state.lock().await;
-        let ind = (wal.first_offset.unwrap_or(0) + self.index) as usize;
-        if ind >= wal.entries.len() {
-            return None;
-        }
-        self.current_entry = Some(wal.entries.get(ind).unwrap().clone());
-
-        self.index += 1;
-        match &self.current_entry {
-            None => None,
-            Some(e) => Some(root_as_log_entry(e).unwrap()),
-        }
+impl Default for InMemoryWal {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -88,15 +93,6 @@ impl Wal for InMemoryWal {
         let wal = self.state.lock().await;
         let len_u64 = wal.entries.len() as u64;
         Ok(wal.first_offset.unwrap_or(0) + len_u64)
-    }
-
-    async fn trim_before_offset(&self, offset: u64) -> Result<(), Error> {
-        let mut wal = self.state.lock().await;
-        while wal.entries.len() > 0 && wal.first_offset.unwrap_or(0) < offset {
-            wal.entries.pop_front();
-            wal.first_offset = Some(wal.first_offset.unwrap_or(0) + 1);
-        }
-        Ok(())
     }
 
     async fn append_prepare(&self, entry: PrepareRequest<'_>) -> Result<(), Error> {
@@ -141,7 +137,16 @@ impl Wal for InMemoryWal {
         state.append_data_currently_in_builder()
     }
 
-    fn iterator<'a>(&'a self) -> InMemIterator<'a> {
+    async fn trim_before_offset(&self, offset: u64) -> Result<(), Error> {
+        let mut wal = self.state.lock().await;
+        while !wal.entries.is_empty() && wal.first_offset.unwrap_or(0) < offset {
+            wal.entries.pop_front();
+            wal.first_offset = Some(wal.first_offset.unwrap_or(0) + 1);
+        }
+        Ok(())
+    }
+
+    fn iterator(&self) -> InMemIterator {
         InMemIterator {
             index: 0,
             wal: self,

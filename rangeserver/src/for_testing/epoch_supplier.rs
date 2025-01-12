@@ -39,6 +39,12 @@ pub struct EpochSupplier {
     state: RwLock<State>,
 }
 
+impl Default for EpochSupplier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EpochSupplier {
     pub fn new() -> EpochSupplier {
         EpochSupplier {

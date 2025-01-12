@@ -39,7 +39,7 @@ fn scylla_query_error_to_wal_error(qe: QueryError) -> Error {
         QueryError::TimeoutError | QueryError::DbError(DbError::WriteTimeout { .. }, _) => {
             Error::Timeout
         }
-        _ => Error::InternalError(Arc::new(qe)),
+        _ => Error::Internal(Arc::new(qe)),
     }
 }
 
@@ -110,7 +110,7 @@ impl CassandraWal {
                 log_state.flatbuf_builder.reset();
 
                 let write_id = Uuid::new_v4();
-                let offset = log_state.next_offset;
+                let offset: i64 = log_state.next_offset;
                 log_state.next_offset += 1;
                 log_state.first_offset = Some(log_state.first_offset.unwrap_or(offset));
 
@@ -124,9 +124,9 @@ impl CassandraWal {
                         log_state.first_offset,
                         self.wal_id,
                         METADATA_OFFSET,
-                        offset as i64,
+                        offset
                     ),
-                    (self.wal_id, offset as i64, content, write_id),
+                    (self.wal_id, offset, content, write_id),
                 );
                 self.session
                     .batch(&batch, batch_args)
@@ -252,7 +252,7 @@ impl Wal for CassandraWal {
         self.append_entry(Entry::Commit, entry._tab.buf()).await
     }
 
-    fn iterator<'a>(&'a self) -> InMemIterator<'a> {
+    fn iterator(&self) -> InMemIterator {
         todo!()
     }
 }

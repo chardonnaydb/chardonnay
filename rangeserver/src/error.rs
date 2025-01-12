@@ -38,7 +38,7 @@ impl Error {
         match e {
             WalError::Timeout => Self::Timeout,
             WalError::NotSynced => Self::RangeOwnershipLost,
-            WalError::InternalError(e) => Self::InternalError(e),
+            WalError::Internal(e) => Self::InternalError(e),
         }
     }
 

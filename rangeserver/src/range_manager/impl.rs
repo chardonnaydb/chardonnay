@@ -176,7 +176,7 @@ where
                         .prefetching_buffer
                         .get_from_buffer(key.clone())
                         .await
-                        .map_err(|_| return Error::PrefetchError)?;
+                        .map_err(|_| Error::PrefetchError)?;
                     if let Some(val) = value {
                         get_result.val = Some(val);
                     } else {
@@ -306,7 +306,7 @@ where
                     return Ok(());
                 }
                 state.highest_known_epoch =
-                    std::cmp::max(state.highest_known_epoch, commit.epoch() as u64);
+                    std::cmp::max(state.highest_known_epoch, commit.epoch());
                 // TODO: handle potential duplicates here.
                 self.wal
                     .append_commit(commit)
@@ -321,7 +321,7 @@ where
                 let prepare_record =
                     flatbuffers::root::<PrepareRequest>(&prepare_record_bytes).unwrap();
                 let version = KeyVersion {
-                    epoch: commit.epoch() as u64,
+                    epoch: commit.epoch(),
                     // TODO: version counter should be an internal counter per range.
                     // Remove from the commit message.
                     version_counter: commit.vid() as u64,
@@ -421,7 +421,7 @@ where
         let epoch_supplier = self.epoch_supplier.clone();
         let storage = self.storage.clone();
         let wal = self.wal.clone();
-        let range_id = self.range_id.clone();
+        let range_id = self.range_id;
         let bg_runtime = self.bg_runtime.clone();
         let state = self.state.clone();
         let lease_renewal_interval = self.config.range_server.range_maintenance_duration;

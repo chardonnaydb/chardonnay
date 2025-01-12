@@ -90,7 +90,7 @@ impl WardenHandler {
 
                 // Load any ranges that got newly assigned to us.
                 for assigned_range in &new_assignment {
-                    if !assigned_ranges.contains(&assigned_range) {
+                    if !assigned_ranges.contains(assigned_range) {
                         updates_sender
                             .send(WardenUpdate::LoadRange(*assigned_range))
                             .unwrap();
@@ -205,7 +205,7 @@ impl WardenHandler {
                 .regions
                 .get(&self.host_info.identity.zone.region)
             {
-                None => return Err("unknown region!".into()),
+                None => Err("unknown region!".into()),
                 Some(config) => {
                     let (done_tx, done_rx) = oneshot::channel::<Result<(), WardenErr>>();
                     let host_info = self.host_info.clone();
