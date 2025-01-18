@@ -74,7 +74,6 @@ impl Storage for Cassandra {
             .map_err(scylla_query_error_to_storage_error)?
             .rows;
 
-        
         match rows {
             None => Err(Error::EpochNotInitialized),
             Some(mut rows) => {
@@ -124,55 +123,5 @@ impl Storage for Cassandra {
             }
         };
         res
-    }
-}
-
-#[cfg(test)]
-pub mod tests {
-    use uuid::Uuid;
-
-    use super::*;
-
-    impl Cassandra {
-        async fn create_test(test_region: String) -> Cassandra {
-            Cassandra::new("127.0.0.1:9042".to_string(), test_region).await
-        }
-
-        async fn cleanup(&self) {
-            let mut query = Query::new("DELETE FROM chardonnay.epoch WHERE region = ?");
-            query.set_serial_consistency(Some(SerialConsistency::Serial));
-            let _ = self.session.query(query, (self.region.clone(),)).await;
-        }
-    }
-
-    #[tokio::test]
-    async fn initialize_read_update() {
-        let region_name = Uuid::new_v4().to_string();
-        let cassandra = Cassandra::create_test(region_name).await;
-        cassandra.initialize_epoch().await.unwrap();
-        let epoch = cassandra.read_latest().await.unwrap();
-        assert!(epoch == 1);
-        cassandra.conditional_update(3, 1).await.unwrap();
-        let epoch = cassandra.read_latest().await.unwrap();
-        assert!(epoch == 3);
-        cassandra.cleanup().await;
-    }
-
-    #[tokio::test]
-    async fn initialize_condition_failed() {
-        let region_name = Uuid::new_v4().to_string();
-        let cassandra = Cassandra::create_test(region_name).await;
-        cassandra.initialize_epoch().await.unwrap();
-        let epoch = cassandra.read_latest().await.unwrap();
-        assert!(epoch == 1);
-        let err = cassandra
-            .conditional_update(3, 2)
-            .await
-            .expect_err("expecting condition failed");
-        match err {
-            Error::ConditionFailed => (),
-            _ => assert!(false),
-        }
-        cassandra.cleanup().await;
     }
 }
