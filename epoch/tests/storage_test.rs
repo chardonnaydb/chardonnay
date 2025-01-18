@@ -1,4 +1,5 @@
 use epoch::storage::cassandra::Cassandra;
+use epoch::storage::in_memory::InMemoryEpochStorage;
 use epoch::storage::Error;
 use epoch::storage::Storage;
 use scylla::query::Query;
@@ -12,6 +13,7 @@ const CASSANDRA_KNOWN_NODE: &str = "127.0.0.1:9042";
 // We need to wrap the implementation in an enum like this since the Storage trait is not "object
 // safe" and therefore does not support dynamic dispatch.
 enum StorageTestCase {
+    InMemory(Option<InMemoryEpochStorage>),
     Cassandra {
         cass: Option<Cassandra>,
         region: String,
@@ -19,6 +21,10 @@ enum StorageTestCase {
 }
 
 impl StorageTestCase {
+    fn new_in_memory() -> StorageTestCase {
+        StorageTestCase::InMemory(None)
+    }
+
     fn new_cassandra() -> StorageTestCase {
         StorageTestCase::Cassandra {
             cass: None,
@@ -28,6 +34,9 @@ impl StorageTestCase {
 
     async fn setup(&mut self) {
         match self {
+            StorageTestCase::InMemory(storage) => {
+                *storage = Some(InMemoryEpochStorage::new());
+            }
             StorageTestCase::Cassandra { cass, region } => {
                 *region = Uuid::new_v4().to_string();
                 *cass =
@@ -38,6 +47,7 @@ impl StorageTestCase {
 
     async fn teardown(self) {
         match self {
+            StorageTestCase::InMemory(_) => {}
             StorageTestCase::Cassandra { cass: _, region } => {
                 let session = SessionBuilder::new()
                     .known_node(CASSANDRA_KNOWN_NODE)
@@ -55,6 +65,9 @@ impl StorageTestCase {
 impl Storage for StorageTestCase {
     async fn initialize_epoch(&self) -> Result<(), Error> {
         match self {
+            StorageTestCase::InMemory(storage) => {
+                storage.as_ref().unwrap().initialize_epoch().await
+            }
             StorageTestCase::Cassandra { cass, .. } => {
                 cass.as_ref().unwrap().initialize_epoch().await
             }
@@ -63,12 +76,20 @@ impl Storage for StorageTestCase {
 
     async fn read_latest(&self) -> Result<u64, Error> {
         match self {
+            StorageTestCase::InMemory(storage) => storage.as_ref().unwrap().read_latest().await,
             StorageTestCase::Cassandra { cass, .. } => cass.as_ref().unwrap().read_latest().await,
         }
     }
 
     async fn conditional_update(&self, new_epoch: u64, current_epoch: u64) -> Result<(), Error> {
         match self {
+            StorageTestCase::InMemory(storage) => {
+                storage
+                    .as_ref()
+                    .unwrap()
+                    .conditional_update(new_epoch, current_epoch)
+                    .await
+            }
             StorageTestCase::Cassandra { cass, .. } => {
                 cass.as_ref()
                     .unwrap()
@@ -81,6 +102,7 @@ impl Storage for StorageTestCase {
 
 #[tokio::test]
 #[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
+#[test_case(StorageTestCase::new_in_memory(); "InMemoryEpochStorage")]
 async fn initialization_is_idempotent(mut storage: StorageTestCase) {
     storage.setup().await;
 
@@ -99,6 +121,7 @@ async fn initialization_is_idempotent(mut storage: StorageTestCase) {
 
 #[tokio::test]
 #[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
+#[test_case(StorageTestCase::new_in_memory(); "InMemoryEpochStorage")]
 async fn initialize_read_update(mut storage: StorageTestCase) {
     storage.setup().await;
 
@@ -117,6 +140,7 @@ async fn initialize_read_update(mut storage: StorageTestCase) {
 
 #[tokio::test]
 #[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
+#[test_case(StorageTestCase::new_in_memory(); "InMemoryEpochStorage")]
 async fn initialize_condition_failed(mut storage: StorageTestCase) {
     storage.setup().await;
 
@@ -137,6 +161,7 @@ async fn initialize_condition_failed(mut storage: StorageTestCase) {
 
 #[tokio::test]
 #[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
+#[test_case(StorageTestCase::new_in_memory(); "InMemoryEpochStorage")]
 async fn epoch_increases_monotonically(mut storage: StorageTestCase) {
     storage.setup().await;
 
@@ -159,6 +184,7 @@ async fn epoch_increases_monotonically(mut storage: StorageTestCase) {
 // Tests conditional updates where the current epoch used is lower than the actual current epoch.
 #[tokio::test]
 #[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
+#[test_case(StorageTestCase::new_in_memory(); "InMemoryEpochStorage")]
 async fn low_epoch_conditional_update(mut storage: StorageTestCase) {
     storage.setup().await;
 
@@ -188,6 +214,7 @@ async fn low_epoch_conditional_update(mut storage: StorageTestCase) {
 // Tests conditional updates where the current epoch used is higher than the actual current epoch.
 #[tokio::test]
 #[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
+#[test_case(StorageTestCase::new_in_memory(); "InMemoryEpochStorage")]
 async fn high_epoch_conditional_update(mut storage: StorageTestCase) {
     storage.setup().await;
 
