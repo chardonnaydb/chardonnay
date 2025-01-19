@@ -81,6 +81,24 @@ impl Storage for StorageTestCase {
 
 #[tokio::test]
 #[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
+async fn initialization_is_idempotent(mut storage: StorageTestCase) {
+    storage.setup().await;
+
+    storage.initialize_epoch().await.unwrap();
+    assert_eq!(storage.read_latest().await.unwrap(), 1);
+
+    storage.conditional_update(2, 1).await.unwrap();
+    assert_eq!(storage.read_latest().await.unwrap(), 2);
+
+    // Initialize again. This shouldn't return an error or affect the current epoch.
+    storage.initialize_epoch().await.unwrap();
+    assert_eq!(storage.read_latest().await.unwrap(), 2);
+
+    storage.teardown().await;
+}
+
+#[tokio::test]
+#[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
 async fn initialize_read_update(mut storage: StorageTestCase) {
     storage.setup().await;
 
