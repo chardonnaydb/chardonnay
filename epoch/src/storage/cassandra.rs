@@ -89,6 +89,9 @@ impl Storage for Cassandra {
     }
 
     async fn conditional_update(&self, new_epoch: u64, current_epoch: u64) -> Result<(), Error> {
+        if new_epoch < current_epoch {
+            return Err(Error::ConditionFailed);
+        }
         let utcnow = chrono::Utc::now();
         let mut query = Query::new(UPDATE_EPOCH_QUERY);
         query.set_serial_consistency(Some(SerialConsistency::Serial));

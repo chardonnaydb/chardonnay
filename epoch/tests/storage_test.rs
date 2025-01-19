@@ -87,7 +87,10 @@ async fn initialize_read_update(mut storage: StorageTestCase) {
     storage.initialize_epoch().await.unwrap();
     let epoch = storage.read_latest().await.unwrap();
     assert_eq!(epoch, 1);
-    storage.conditional_update(3, 1).await.unwrap();
+    storage
+        .conditional_update(/*new_epoch=*/ 3, /*current_epoch=*/ 1)
+        .await
+        .unwrap();
     let epoch = storage.read_latest().await.unwrap();
     assert_eq!(epoch, 3);
 
@@ -103,7 +106,7 @@ async fn initialize_condition_failed(mut storage: StorageTestCase) {
     let epoch = storage.read_latest().await.unwrap();
     assert_eq!(epoch, 1);
     let err = storage
-        .conditional_update(3, 2)
+        .conditional_update(/*new_epoch=*/ 3, /*current_epoch=*/ 2)
         .await
         .expect_err("conditional update should fail if current epoch does not match");
     match err {
@@ -114,3 +117,22 @@ async fn initialize_condition_failed(mut storage: StorageTestCase) {
     storage.teardown().await;
 }
 
+#[tokio::test]
+#[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
+async fn epoch_increases_monotonically(mut storage: StorageTestCase) {
+    storage.setup().await;
+
+    storage.initialize_epoch().await.unwrap();
+    let epoch = storage.read_latest().await.unwrap();
+    assert_eq!(epoch, 1);
+    let err = storage
+        .conditional_update(/*new_epoch=*/ 0, /*current_epoch=*/ 1)
+        .await
+        .expect_err("conditional update should not decrease the epoch");
+    match err {
+        Error::ConditionFailed => (),
+        _ => panic!("unexpected error: {:?}", err),
+    }
+
+    storage.teardown().await;
+}
