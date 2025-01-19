@@ -141,8 +141,7 @@ async fn epoch_increases_monotonically(mut storage: StorageTestCase) {
     storage.setup().await;
 
     storage.initialize_epoch().await.unwrap();
-    let epoch = storage.read_latest().await.unwrap();
-    assert_eq!(epoch, 1);
+    assert_eq!(storage.read_latest().await.unwrap(), 1);
     let err = storage
         .conditional_update(/*new_epoch=*/ 0, /*current_epoch=*/ 1)
         .await
@@ -151,7 +150,9 @@ async fn epoch_increases_monotonically(mut storage: StorageTestCase) {
         Error::ConditionFailed => (),
         _ => panic!("unexpected error: {:?}", err),
     }
-
+    // The epoch shouldn't have changed.
+    assert_eq!(storage.read_latest().await.unwrap(), 1);
+    
     storage.teardown().await;
 }
 
@@ -167,8 +168,7 @@ async fn low_epoch_conditional_update(mut storage: StorageTestCase) {
         .conditional_update(/*new_epoch=*/ 2, /*current_epoch=*/ 1)
         .await
         .expect("conditional update should succeed");
-    let epoch = storage.read_latest().await.unwrap();
-    assert_eq!(epoch, 2);
+    assert_eq!(storage.read_latest().await.unwrap(), 2);
 
     // Attempt an update where the epoch is behind by one.
     match storage
@@ -179,6 +179,8 @@ async fn low_epoch_conditional_update(mut storage: StorageTestCase) {
         Ok(_) => panic!("stale current epoch should not succeed"),
         _ => panic!("unexpected error"),
     }
+    // The epoch shouldn't have changed.
+    assert_eq!(storage.read_latest().await.unwrap(), 2);
 
     storage.teardown().await;
 }
@@ -190,8 +192,7 @@ async fn high_epoch_conditional_update(mut storage: StorageTestCase) {
     storage.setup().await;
 
     storage.initialize_epoch().await.unwrap();
-    let epoch = storage.read_latest().await.unwrap();
-    assert_eq!(epoch, 1);
+    assert_eq!(storage.read_latest().await.unwrap(), 1);
 
     // Attempt an update where the epoch is ahead by one.
     match storage
@@ -202,6 +203,8 @@ async fn high_epoch_conditional_update(mut storage: StorageTestCase) {
         Ok(_) => panic!("high current epoch should not succeed"),
         _ => panic!("unexpected error"),
     }
+    // The epoch shouldn't have changed.
+    assert_eq!(storage.read_latest().await.unwrap(), 1);
 
     storage.teardown().await;
 }
