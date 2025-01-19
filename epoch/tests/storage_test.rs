@@ -136,3 +136,54 @@ async fn epoch_increases_monotonically(mut storage: StorageTestCase) {
 
     storage.teardown().await;
 }
+
+// Tests conditional updates where the current epoch used is lower than the actual current epoch.
+#[tokio::test]
+#[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
+async fn low_epoch_conditional_update(mut storage: StorageTestCase) {
+    storage.setup().await;
+
+    // Initialize and advance the epoch to 2.
+    storage.initialize_epoch().await.unwrap();
+    storage
+        .conditional_update(/*new_epoch=*/ 2, /*current_epoch=*/ 1)
+        .await
+        .expect("conditional update should succeed");
+    let epoch = storage.read_latest().await.unwrap();
+    assert_eq!(epoch, 2);
+
+    // Attempt an update where the epoch is behind by one.
+    match storage
+        .conditional_update(/*new_epoch=*/ 2, /*current_epoch=*/ 1)
+        .await
+    {
+        Err(Error::ConditionFailed) => (),
+        Ok(_) => panic!("stale current epoch should not succeed"),
+        _ => panic!("unexpected error"),
+    }
+
+    storage.teardown().await;
+}
+
+// Tests conditional updates where the current epoch used is higher than the actual current epoch.
+#[tokio::test]
+#[test_case(StorageTestCase::new_cassandra() ; "Cassandra")]
+async fn high_epoch_conditional_update(mut storage: StorageTestCase) {
+    storage.setup().await;
+
+    storage.initialize_epoch().await.unwrap();
+    let epoch = storage.read_latest().await.unwrap();
+    assert_eq!(epoch, 1);
+
+    // Attempt an update where the epoch is ahead by one.
+    match storage
+        .conditional_update(/*new_epoch=*/ 3, /*current_epoch=*/ 2)
+        .await
+    {
+        Err(Error::ConditionFailed) => (),
+        Ok(_) => panic!("high current epoch should not succeed"),
+        _ => panic!("unexpected error"),
+    }
+
+    storage.teardown().await;
+}
