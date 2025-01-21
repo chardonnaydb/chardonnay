@@ -1,4 +1,5 @@
 pub mod cassandra;
+pub mod in_memory;
 
 use std::sync::Arc;
 use thiserror::Error;
@@ -20,7 +21,7 @@ pub trait Storage: Send + Sync + 'static {
     fn initialize_epoch(&self) -> impl std::future::Future<Output = Result<(), Error>> + Send;
     fn read_latest(&self) -> impl std::future::Future<Output = Result<u64, Error>> + Send;
     /// Sets the value of the epoch to [new_epoch], but only if the current value is
-    /// [current_epoch].
+    /// [current_epoch]. Since 0 indicates an uninitialized epoch, [new_epoch] cannot be 0.
     fn conditional_update(
         &self,
         new_epoch: u64,
